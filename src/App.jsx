@@ -63,13 +63,16 @@ import {
   criteria,
   seedEmployees,
   seedEvaluations,
-  navItems,
+  navItems as baseNavItems,
 } from "./data";
-import { employeesService } from "./services/employees";
+import { employeesService, normalizeEmployeeForDb } from "./services/employees";
 import { evaluationsService } from "./services/evaluations";
 import { settingsService } from "./services/settings";
 import { loginWithSupabase as cloudLoginWithSupabase } from "./services/auth";
 import { supabase } from "./services/supabase";
+import { guaranteesService } from "./services/guarantees";
+import { overtimeService } from "./services/overtime";
+import { reportRowsForExport, rowsToReportHtml } from "./services/reports";
 const icons = {
   dashboard: LayoutDashboard,
   employees: Users,
@@ -82,7 +85,15 @@ const icons = {
   plans: TrendingUp,
   reports: FileBarChart,
   settings: Settings,
+  guarantees: ShieldCheck,
+  overtime: Clock3,
 };
+const navItems = [
+  ...baseNavItems.slice(0, -2),
+  ["guarantees", "ضمانات الموظفين"],
+  ["overtime", "العمل الإضافي"],
+  ...baseNavItems.slice(-2),
+];
 const nf = new Intl.NumberFormat("ar-SA"),
   money = (n) => `${nf.format(Math.round(n || 0))} ر.س`,
   classify = (n) =>
@@ -585,15 +596,17 @@ export default function App() {
       .slice(0, 2)
       .map((x) => x[0])
       .join(""),
-    p = {
-      employees,
-      setEmployees,
-      evaluations,
-      setEvaluations,
-      setPage,
-      settings,
-      setSettings,
-    };
+	    p = {
+	      employees,
+	      setEmployees,
+	      evaluations,
+	      setEvaluations,
+	      setPage,
+	      settings,
+	      setSettings,
+	      role,
+	      currentUser: JSON.parse(localStorage.getItem("ep_current_user") || "{}"),
+	    };
   return (
     <div className="min-h-screen" dir="rtl">
       {sidebar && (
@@ -710,10 +723,12 @@ export default function App() {
           {page === "productivity" && <EnhancedProductivity {...p} />}{" "}
           {page === "discipline" && <EnhancedDiscipline {...p} />}{" "}
           {page === "incentives" && <EnhancedIncentives {...p} />}{" "}
-          {page === "top" && <EnhancedTopEmployees {...p} />}{" "}
-          {page === "plans" && <EnhancedPlans {...p} />}{" "}
-          {page === "reports" && <EnhancedReports {...p} />}{" "}
-          {page === "settings" && <SettingsPage {...p} />}
+	          {page === "top" && <EnhancedTopEmployees {...p} />}{" "}
+	          {page === "plans" && <EnhancedPlans {...p} />}{" "}
+	          {page === "guarantees" && <EmployeeGuaranteesPage {...p} />}{" "}
+	          {page === "overtime" && <OvertimePage {...p} />}{" "}
+	          {page === "reports" && <EnhancedReports {...p} />}{" "}
+	          {page === "settings" && <SettingsPage {...p} />}
         </main>
       </div>
     </div>
@@ -1363,9 +1378,9 @@ function EmployeeModal({ employee, editing, close, save, setEmployees }) {
           };
           setSaving(true);
           try {
-            const { data, error } = await supabase.from("employees").upsert(payload).select().single();
+            const { data, error } = await supabase.from("employees").upsert(payload, { onConflict: "id" }).select().single();
             if (error) {
-              console.error(error);
+              console.error("Supabase employees load/save error:", error);
               alert(error.message);
               return;
             }
@@ -1393,9 +1408,9 @@ function EmployeeModal({ employee, editing, close, save, setEmployees }) {
                   : [savedEmployee, ...list];
               });
               close();
-            }
-          } catch (error) {
-            console.error(error);
+          }
+        } catch (error) {
+            console.error("Supabase employees load/save error:", error);
             alert(error.message || "تعذر حفظ بيانات الموظف");
           } finally {
             setSaving(false);
@@ -3803,6 +3818,389 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations }) {
       </div>
       {modal && <EmployeeModal editing={editing} close={() => setModal(false)} setEmployees={setEmployees} />}
     </div>
+	  );
+	}
+	
+const guaranteeStatuses = ["سارية", "منتهية", "ناقصة", "موقوفة"];
+const overtimeStatuses = ["مكلف", "تم الإرسال", "معتذر", "منفذ", "ملغي"];
+const arabicDayName = (date) =>
+  date
+    ? new Intl.DateTimeFormat("ar-SA", { weekday: "long" }).format(new Date(date))
+    : "";
+const normalizeWhatsAppPhone = (phone) => String(phone || "").replace(/[^\d]/g, "").replace(/^0/, "966");
+const makeOvertimeMessage = (assignment, employee) =>
+  `الأخ/ الموظف: ${employee.employee_name}
+
+تحية طيبة،
+
+نحيطكم علماً بأنه تم تكليفكم بالعمل الإضافي يوم ${arabicDayName(assignment.assignment_date)} الموافق ${assignment.assignment_date}م، وذلك في ${assignment.location} من الساعة ${assignment.start_time} حتى الساعة ${assignment.end_time}.
+
+- يرجى الالتزام بإثبات الحضور والانصراف عبر بصمة الجوال 📌.
+- يرجى كذلك رفع العمل الإضافي في النظام حسب الإجراء المعتمد 📌.
+
+شاكرين لكم تعاونكم والتزامكم.
+إدارة الموارد البشرية`;
+const tableColumnsGuarantees = [
+  { key: "employee_name", label: "الموظف" },
+  { key: "employee_id", label: "رقم الموظف" },
+  { key: "branch", label: "الفرع" },
+  { key: "guarantor_name", label: "اسم الضامن" },
+  { key: "commercial_register_number", label: "السجل التجاري" },
+  { key: "guarantee_date", label: "تاريخ الضمانة" },
+  { key: "guarantee_status", label: "الحالة" },
+];
+const tableColumnsOvertime = [
+  { key: "assignment_date", label: "التاريخ" },
+  { key: "employee_name", label: "الموظف" },
+  { key: "branch", label: "الفرع" },
+  { key: "job", label: "الوظيفة" },
+  { key: "start_time", label: "من" },
+  { key: "end_time", label: "إلى" },
+  { key: "status", label: "الحالة" },
+];
+
+function EmployeeGuaranteesPage({ employees }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [dialog, setDialog] = useState(null);
+  const [viewing, setViewing] = useState(null);
+  const [filters, setFilters] = useState({ q: "", branch: "all", status: "all", month: "" });
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      setItems(await guaranteesService.list());
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    load();
+    return guaranteesService.subscribe(load);
+  }, []);
+  const filtered = items.filter((g) => {
+    const q = filters.q.trim();
+    const textOk =
+      !q ||
+      g.employee_name.includes(q) ||
+      g.employee_id.includes(q) ||
+      g.guarantor_name.includes(q);
+    const branchOk = filters.branch === "all" || g.branch === filters.branch;
+    const statusOk = filters.status === "all" || g.guarantee_status === filters.status;
+    const monthOk = !filters.month || String(g.guarantee_date || "").startsWith(filters.month);
+    return textOk && branchOk && statusOk && monthOk;
+  });
+  const activeEmployeeIds = new Set(items.filter((g) => g.guarantee_status === "سارية").map((g) => g.employee_id));
+  const cards = [
+    ["إجمالي الضمانات", items.length, ShieldCheck],
+    ["الضمانات السارية", items.filter((g) => g.guarantee_status === "سارية").length, BadgeCheck],
+    ["الضمانات المنتهية", items.filter((g) => g.guarantee_status === "منتهية").length, AlertTriangle],
+    ["الضمانات الناقصة", items.filter((g) => g.guarantee_status === "ناقصة").length, FileBarChart],
+    ["الموظفون بدون ضمانة", employees.filter((e) => !activeEmployeeIds.has(e.id)).length, Users],
+  ];
+  const openAdd = () =>
+    setDialog({
+      guarantee_id: `G-${Date.now()}`,
+      employee_id: "",
+      employee_name: "",
+      branch: "",
+      job: "",
+      guarantor_name: "",
+      guarantor_id_number: "",
+      guarantor_phone: "",
+      commercial_shop_name: "",
+      commercial_shop_location: "",
+      commercial_register_number: "",
+      guarantee_date: new Date().toISOString().slice(0, 10),
+      guarantee_expiry_date: "",
+      guarantee_status: "سارية",
+      notes: "",
+    });
+  const selectEmployee = (id) => {
+    const employee = employees.find((e) => e.id === id);
+    setDialog((d) => ({
+      ...d,
+      employee_id: id,
+      employee_name: employee?.name || "",
+      branch: employee?.branch || "",
+      job: employee?.job || "",
+    }));
+  };
+  const save = async (event) => {
+    event.preventDefault();
+    const required = [
+      ["employee_id", "الموظف"],
+      ["guarantor_name", "اسم الضامن"],
+      ["guarantor_id_number", "رقم هوية الضامن"],
+      ["commercial_register_number", "رقم السجل التجاري"],
+      ["guarantee_date", "تاريخ الضمانة"],
+    ].filter(([key]) => !dialog[key]);
+    if (required.length) return alert(`يرجى إدخال الحقول المطلوبة: ${required.map((x) => x[1]).join("، ")}`);
+    const duplicateGuarantor = items.find(
+      (g) =>
+        g.guarantee_id !== dialog.guarantee_id &&
+        g.guarantee_status === "سارية" &&
+        g.guarantor_id_number === dialog.guarantor_id_number &&
+        g.employee_id !== dialog.employee_id,
+    );
+    if (duplicateGuarantor) return alert("لا يمكن استخدام نفس رقم هوية الضامن لأكثر من موظف نشط.");
+    const duplicateRegister = items.find(
+      (g) =>
+        g.guarantee_id !== dialog.guarantee_id &&
+        g.guarantee_status === "سارية" &&
+        g.commercial_register_number === dialog.commercial_register_number &&
+        g.employee_id !== dialog.employee_id,
+    );
+    if (duplicateRegister && !confirm("رقم السجل التجاري مستخدم لموظف نشط آخر. هل تريد المتابعة؟")) return;
+    try {
+      const saved = await guaranteesService.upsert(dialog);
+      setItems((list) => {
+        const exists = list.some((g) => g.guarantee_id === saved.guarantee_id);
+        return exists ? list.map((g) => (g.guarantee_id === saved.guarantee_id ? saved : g)) : [saved, ...list];
+      });
+      setDialog(null);
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+  const remove = async (id) => {
+    if (!confirm("هل تريد حذف الضمانة؟")) return;
+    try {
+      await guaranteesService.remove(id);
+      setItems((list) => list.filter((g) => g.guarantee_id !== id));
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+  const exportRows = reportRowsForExport(filtered, tableColumnsGuarantees);
+  return (
+    <div className="space-y-5">
+      <PageHead title="ضمانات الموظفين" desc="إدارة الضمانات التجارية للموظفين ومتابعة حالتها" action={<button onClick={openAdd} className="btn-primary"><Plus size={18} /> إضافة ضمانة</button>} />
+      {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">{cards.map(([label, value, I]) => <Mini key={label} label={label} value={value} I={I} />)}</div>
+      <div className="panel flex flex-wrap gap-3 p-4">
+        <input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="بحث بالموظف أو الرقم أو الضامن..." />
+        <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select>
+        <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[170px]"><option value="all">كل الحالات</option>{guaranteeStatuses.map((s) => <option key={s}>{s}</option>)}</select>
+        <input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field max-w-[170px]" />
+        <button onClick={() => exportExcel(exportRows, "تقرير ضمانات الموظفين")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button>
+        <button onClick={() => printDocument("تقرير ضمانات الموظفين", rowsToReportHtml("تقرير ضمانات الموظفين", filtered, tableColumnsGuarantees))} className="btn-secondary"><Printer size={17} /> PDF</button>
+        <button onClick={() => exportDocx("تقرير ضمانات الموظفين", exportRows)} className="btn-secondary"><Download size={17} /> Word</button>
+      </div>
+      <div className="panel p-4">
+        {loading ? <LoadingScreen message="جاري تحميل الضمانات..." /> : (
+          <div className="table-wrap"><table><thead><tr>{tableColumnsGuarantees.map((c) => <th key={c.key}>{c.label}</th>)}<th></th></tr></thead><tbody>{filtered.map((g) => <tr key={g.guarantee_id}><td>{g.employee_name}</td><td>{g.employee_id}</td><td>{g.branch}</td><td>{g.guarantor_name}</td><td>{g.commercial_register_number}</td><td>{g.guarantee_date}</td><td><Status>{g.guarantee_status}</Status></td><td><button onClick={() => setViewing(g)} className="p-2 text-slate-600"><Eye size={16} /></button><button onClick={() => setDialog(g)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => remove(g.guarantee_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>
+        )}
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ReportBox title="تقرير حسب الفرع" rows={Object.entries(groupCount(filtered, "branch"))} />
+        <ReportBox title="تقرير حسب الحالة" rows={Object.entries(groupCount(filtered, "guarantee_status"))} />
+        <ReportBox title="الموظفون بدون ضمانة سارية" rows={employees.filter((e) => !activeEmployeeIds.has(e.id)).map((e) => [e.name, e.branch])} />
+        <ReportBox title="الضامنون المستخدمون أكثر من مرة" rows={Object.entries(groupCount(items, "guarantor_id_number")).filter(([, n]) => n > 1)} />
+      </div>
+      {dialog && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+          <form onSubmit={save} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6">
+            <div className="mb-5 flex"><h3 className="text-xl font-extrabold">{items.some((g) => g.guarantee_id === dialog.guarantee_id) ? "تعديل ضمانة" : "إضافة ضمانة"}</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div>
+            <div className="grid gap-4 md:grid-cols-3">
+              <Label t="الموظف"><select required value={dialog.employee_id} onChange={(e) => selectEmployee(e.target.value)} className="field mt-2"><option value="">اختر الموظف</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.name} - {e.id}</option>)}</select></Label>
+              {["employee_name", "branch", "job"].map((k) => <Label key={k} t={{ employee_name: "اسم الموظف", branch: "الفرع", job: "الوظيفة" }[k]}><input readOnly value={dialog[k]} className="field mt-2 bg-slate-50" /></Label>)}
+              <Label t="اسم الضامن"><input required value={dialog.guarantor_name} onChange={(e) => setDialog({ ...dialog, guarantor_name: e.target.value })} className="field mt-2" /></Label>
+              <Label t="رقم هوية الضامن"><input required value={dialog.guarantor_id_number} onChange={(e) => setDialog({ ...dialog, guarantor_id_number: e.target.value })} className="field mt-2" /></Label>
+              <Label t="هاتف الضامن"><input value={dialog.guarantor_phone} onChange={(e) => setDialog({ ...dialog, guarantor_phone: e.target.value })} className="field mt-2" /></Label>
+              <Label t="اسم المحل التجاري"><input value={dialog.commercial_shop_name} onChange={(e) => setDialog({ ...dialog, commercial_shop_name: e.target.value })} className="field mt-2" /></Label>
+              <Label t="موقع المحل التجاري"><input value={dialog.commercial_shop_location} onChange={(e) => setDialog({ ...dialog, commercial_shop_location: e.target.value })} className="field mt-2" /></Label>
+              <Label t="رقم السجل التجاري"><input required value={dialog.commercial_register_number} onChange={(e) => setDialog({ ...dialog, commercial_register_number: e.target.value })} className="field mt-2" /></Label>
+              <Label t="تاريخ الضمانة"><input required type="date" value={dialog.guarantee_date} onChange={(e) => setDialog({ ...dialog, guarantee_date: e.target.value })} className="field mt-2" /></Label>
+              <Label t="تاريخ الانتهاء"><input type="date" value={dialog.guarantee_expiry_date} onChange={(e) => setDialog({ ...dialog, guarantee_expiry_date: e.target.value })} className="field mt-2" /></Label>
+              <Label t="الحالة"><select value={dialog.guarantee_status} onChange={(e) => setDialog({ ...dialog, guarantee_status: e.target.value })} className="field mt-2">{guaranteeStatuses.map((s) => <option key={s}>{s}</option>)}</select></Label>
+              <Label t="ملاحظات"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" rows="3" /></Label>
+            </div>
+            <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ البيانات</button></div>
+          </form>
+        </div>
+      )}
+      {viewing && <DetailsDialog title="تفاصيل الضمانة" row={viewing} close={() => setViewing(null)} />}
+    </div>
+  );
+}
+
+function OvertimePage({ employees, role, currentUser }) {
+  const [assignments, setAssignments] = useState([]);
+  const [assignmentEmployees, setAssignmentEmployees] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [dialog, setDialog] = useState(null);
+  const [filters, setFilters] = useState({ date: "", branch: "all", employee: "", status: "all", month: "" });
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [a, ae] = await Promise.all([overtimeService.listAssignments(), overtimeService.listAssignmentEmployees()]);
+      setAssignments(a);
+      setAssignmentEmployees(ae);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    load();
+    const u1 = overtimeService.subscribeAssignments(load);
+    const u2 = overtimeService.subscribeAssignmentEmployees(load);
+    return () => { u1?.(); u2?.(); };
+  }, []);
+  const joinedRows = assignmentEmployees.map((row) => ({ ...assignments.find((a) => a.assignment_id === row.assignment_id), ...row }));
+  const visibleRows = joinedRows.filter((r) => {
+    if (role === "الموظف" && currentUser?.employeeId && r.employee_id !== currentUser.employeeId) return false;
+    if (role === "مدير الفرع" && currentUser?.branch && r.branch !== currentUser.branch) return false;
+    return true;
+  });
+  const filtered = visibleRows.filter((r) =>
+    (!filters.date || r.assignment_date === filters.date) &&
+    (filters.branch === "all" || r.branch === filters.branch) &&
+    (!filters.employee || r.employee_name.includes(filters.employee) || r.employee_id.includes(filters.employee)) &&
+    (filters.status === "all" || r.status === filters.status) &&
+    (!filters.month || String(r.assignment_date || "").startsWith(filters.month))
+  );
+  const hours = (row) => {
+    if (!row.start_time || !row.end_time) return 0;
+    const [sh, sm] = row.start_time.split(":").map(Number);
+    const [eh, em] = row.end_time.split(":").map(Number);
+    return Math.max(0, (eh * 60 + em - (sh * 60 + sm)) / 60);
+  };
+  const cards = [
+    ["إجمالي تكليفات العمل الإضافي", assignments.length, Clock3],
+    ["عدد الموظفين المكلفين", assignmentEmployees.length, Users],
+    ["عدد ساعات العمل الإضافي", filtered.reduce((s, r) => s + hours(r), 0).toFixed(1), Gauge],
+    ["تكليفات حسب الفرع", Object.keys(groupCount(filtered, "branch")).length, Building2],
+    ["تكليفات حسب الشهر", Object.keys(groupCount(filtered, "assignment_date")).length, CalendarCheck],
+  ];
+  const startCreate = () => setDialog({ assignment_id: `OT-${Date.now()}`, assignment_date: new Date().toISOString().slice(0, 10), branch: branches[0], location: "", start_time: "16:00", end_time: "20:00", reason: "", notes: "", mode: "branch", selected: [] });
+  const selectedEmployees = () => {
+    if (!dialog) return [];
+    if (dialog.mode === "branch") return employees.filter((e) => e.branch === dialog.branch);
+    if (dialog.mode === "job") return employees.filter((e) => e.job === dialog.job);
+    return employees.filter((e) => dialog.selected.includes(e.id));
+  };
+  const create = async (event) => {
+    event.preventDefault();
+    const selected = selectedEmployees();
+    if (!selected.length) return alert("يرجى اختيار موظف واحد على الأقل.");
+    const employeeRows = selected.map((e) => ({
+      id: `${dialog.assignment_id}-${e.id}`,
+      assignment_id: dialog.assignment_id,
+      employee_id: e.id,
+      employee_name: e.name,
+      employee_phone: e.phone,
+      branch: e.branch,
+      job: e.job,
+      status: "مكلف",
+      whatsapp_message: makeOvertimeMessage(dialog, { employee_name: e.name }),
+    }));
+    try {
+      const saved = await overtimeService.createAssignment({ ...dialog, created_by: currentUser?.username || role || "" }, employeeRows);
+      setAssignments((list) => [saved.assignment, ...list.filter((a) => a.assignment_id !== saved.assignment.assignment_id)]);
+      setAssignmentEmployees((list) => [...saved.employees, ...list.filter((r) => r.assignment_id !== saved.assignment.assignment_id)]);
+      setDialog(null);
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+  const updateStatus = async (row, status) => {
+    try {
+      const saved = await overtimeService.updateAssignmentEmployee({ ...row, status, sent_at: status === "تم الإرسال" ? new Date().toISOString() : row.sent_at });
+      setAssignmentEmployees((list) => list.map((x) => (x.id === saved.id ? saved : x)));
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+  const copy = async (text) => {
+    await navigator.clipboard?.writeText(text);
+    alert("تم نسخ الرسالة");
+  };
+  const openWhatsApp = (row) => {
+    const message = row.whatsapp_message || makeOvertimeMessage(row, row);
+    window.open(`https://wa.me/${normalizeWhatsAppPhone(row.employee_phone)}?text=${encodeURIComponent(message)}`, "_blank");
+  };
+  const exportRows = reportRowsForExport(filtered, tableColumnsOvertime);
+  return (
+    <div className="space-y-5">
+      <PageHead title="العمل الإضافي" desc="إنشاء تكليفات العمل الإضافي وتوليد رسائل واتساب للموظفين" action={<button onClick={startCreate} className="btn-primary"><Plus size={18} /> تكليف جديد</button>} />
+      {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">{cards.map(([label, value, I]) => <Mini key={label} label={label} value={value} I={I} />)}</div>
+      <div className="panel flex flex-wrap gap-3 p-4">
+        <input type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} className="field max-w-[170px]" />
+        <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select>
+        <input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field min-w-[200px]" placeholder="بحث بالموظف..." />
+        <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[170px]"><option value="all">كل الحالات</option>{overtimeStatuses.map((s) => <option key={s}>{s}</option>)}</select>
+        <input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field max-w-[170px]" />
+        <button onClick={() => exportExcel(exportRows, "تقرير العمل الإضافي")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button>
+        <button onClick={() => printDocument("تقرير العمل الإضافي", rowsToReportHtml("تقرير العمل الإضافي", filtered, tableColumnsOvertime))} className="btn-secondary"><Printer size={17} /> PDF</button>
+        <button onClick={() => exportDocx("تقرير العمل الإضافي", exportRows)} className="btn-secondary"><Download size={17} /> Word</button>
+      </div>
+      <div className="panel p-4">
+        {loading ? <LoadingScreen message="جاري تحميل تكليفات العمل الإضافي..." /> : (
+          <div className="table-wrap"><table><thead><tr>{tableColumnsOvertime.map((c) => <th key={c.key}>{c.label}</th>)}<th>واتساب</th><th>تحديث</th></tr></thead><tbody>{filtered.map((r) => <tr key={r.id}><td>{r.assignment_date}</td><td>{r.employee_name}</td><td>{r.branch}</td><td>{r.job}</td><td>{r.start_time}</td><td>{r.end_time}</td><td><Status>{r.status}</Status></td><td><button onClick={() => copy(r.whatsapp_message || makeOvertimeMessage(r, r))} className="btn-secondary !h-9 !px-3">نسخ الرسالة</button><button onClick={() => openWhatsApp(r)} className="btn-secondary !h-9 !px-3">فتح واتساب</button></td><td><select value={r.status} onChange={(e) => updateStatus(r, e.target.value)} className="field h-9">{overtimeStatuses.map((s) => <option key={s}>{s}</option>)}</select></td></tr>)}</tbody></table></div>
+        )}
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ReportBox title="تقرير حسب الفرع" rows={Object.entries(groupCount(filtered, "branch"))} />
+        <ReportBox title="تقرير حسب الموظف" rows={Object.entries(groupCount(filtered, "employee_name"))} />
+        <ReportBox title="تقرير حسب الشهر" rows={Object.entries(groupCount(filtered.map((r) => ({ ...r, month: String(r.assignment_date || "").slice(0, 7) })), "month"))} />
+        <ReportBox title="مقارنة الموظفين" rows={Object.entries(groupCount(filtered, "employee_name")).sort((a, b) => b[1] - a[1]).slice(0, 10)} />
+      </div>
+      {dialog && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+          <form onSubmit={create} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6">
+            <div className="mb-5 flex"><h3 className="text-xl font-extrabold">تكليف عمل إضافي</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div>
+            <div className="grid gap-4 md:grid-cols-3">
+              <Label t="التاريخ"><input required type="date" value={dialog.assignment_date} onChange={(e) => setDialog({ ...dialog, assignment_date: e.target.value })} className="field mt-2" /></Label>
+              <Label t="الفرع"><select value={dialog.branch} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className="field mt-2">{branches.map((b) => <option key={b}>{b}</option>)}</select></Label>
+              <Label t="الموقع"><input required value={dialog.location} onChange={(e) => setDialog({ ...dialog, location: e.target.value })} className="field mt-2" /></Label>
+              <Label t="من الساعة"><input required type="time" value={dialog.start_time} onChange={(e) => setDialog({ ...dialog, start_time: e.target.value })} className="field mt-2" /></Label>
+              <Label t="إلى الساعة"><input required type="time" value={dialog.end_time} onChange={(e) => setDialog({ ...dialog, end_time: e.target.value })} className="field mt-2" /></Label>
+              <Label t="سبب التكليف"><input value={dialog.reason} onChange={(e) => setDialog({ ...dialog, reason: e.target.value })} className="field mt-2" /></Label>
+              <Label t="طريقة الاختيار"><select value={dialog.mode} onChange={(e) => setDialog({ ...dialog, mode: e.target.value, selected: [] })} className="field mt-2"><option value="branch">كل موظفي الفرع</option><option value="job">حسب الوظيفة</option><option value="manual">اختيار متعدد</option></select></Label>
+              {dialog.mode === "job" && <Label t="الوظيفة"><select value={dialog.job || jobs[0]} onChange={(e) => setDialog({ ...dialog, job: e.target.value })} className="field mt-2">{jobs.map((j) => <option key={j}>{j}</option>)}</select></Label>}
+              <Label t="ملاحظات"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" rows="3" /></Label>
+            </div>
+            {dialog.mode === "manual" && <div className="mt-5 grid max-h-56 gap-2 overflow-y-auto rounded-2xl border p-3 md:grid-cols-2">{employees.map((e) => <label key={e.id} className="flex items-center gap-2 rounded-xl bg-slate-50 p-2 text-sm"><input type="checkbox" checked={dialog.selected.includes(e.id)} onChange={(ev) => setDialog({ ...dialog, selected: ev.target.checked ? [...dialog.selected, e.id] : dialog.selected.filter((id) => id !== e.id) })} />{e.name} - {e.branch}</label>)}</div>}
+            <p className="mt-4 rounded-xl bg-blue-50 p-3 text-sm font-bold text-blue-700">عدد الموظفين المختارين: {selectedEmployees().length}</p>
+            <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ التكليف</button></div>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const groupCount = (rows, key) =>
+  rows.reduce((acc, row) => {
+    const value = row[key] || "غير محدد";
+    acc[value] = (acc[value] || 0) + 1;
+    return acc;
+  }, {});
+function ReportBox({ title, rows }) {
+  return (
+    <div className="panel p-4">
+      <h3 className="mb-3 font-extrabold">{title}</h3>
+      <div className="space-y-2">{rows.length ? rows.map(([name, value]) => <div key={name} className="flex rounded-xl bg-slate-50 p-3 text-sm"><span>{name}</span><b className="mr-auto">{value}</b></div>) : <p className="text-sm text-slate-400">لا توجد بيانات</p>}</div>
+    </div>
+  );
+}
+function DetailsDialog({ title, row, close }) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+      <div className="panel max-h-[90vh] w-full max-w-2xl overflow-y-auto p-6">
+        <div className="mb-5 flex"><h3 className="text-xl font-extrabold">{title}</h3><button onClick={close} className="mr-auto"><X /></button></div>
+        <div className="grid gap-3 md:grid-cols-2">{Object.entries(row).map(([k, v]) => <Info key={k} t={k} v={String(v || "-")} />)}</div>
+      </div>
+    </div>
   );
 }
 
@@ -4215,14 +4613,120 @@ function exportExcel(data, name) {
   XLSX.utils.book_append_sheet(wb, ws, "البيانات");
   XLSX.writeFile(wb, `${name}.xlsx`);
 }
+const employeeImportHeaderMap = {
+  "رقم الموظف": "id",
+  employee_id: "id",
+  id: "id",
+  "اسم الموظف": "name",
+  employee_name: "name",
+  name: "name",
+  "الفرع": "branch",
+  branch: "branch",
+  "الوظيفة": "job",
+  job: "job",
+  "تاريخ التعيين": "hire_date",
+  hire_date: "hire_date",
+  hiredate: "hire_date",
+  hireDate: "hire_date",
+  "الراتب": "salary",
+  salary: "salary",
+  "رقم الهاتف": "phone",
+  phone: "phone",
+  "الحالة": "status",
+  status: "status",
+  "المدير المباشر": "manager",
+  manager: "manager",
+};
+const normalizeEmployeeImportKey = (key) => String(key || "").trim().replace(/\s+/g, " ");
+const normalizeEmployeeImportValue = (value) => {
+  if (value === undefined || value === null) return "";
+  return typeof value === "string" ? value.trim() : value;
+};
+const normalizeEmployeeHireDate = (value) => {
+  const cleaned = normalizeEmployeeImportValue(value);
+  if (!cleaned) return "";
+  if (cleaned instanceof Date && !Number.isNaN(cleaned.getTime())) return cleaned.toISOString().slice(0, 10);
+  if (typeof cleaned === "number") return XLSX.SSF.format("yyyy-mm-dd", cleaned);
+  return String(cleaned);
+};
+function normalizeEmployeeImportRow(row) {
+  const normalized = {
+    id: "",
+    name: "",
+    branch: "",
+    job: "",
+    hire_date: "",
+    salary: 0,
+    phone: "",
+    status: "نشط",
+    manager: "",
+  };
+  Object.entries(row || {}).forEach(([key, value]) => {
+    const cleanKey = normalizeEmployeeImportKey(key);
+    const mappedKey = employeeImportHeaderMap[cleanKey] || employeeImportHeaderMap[cleanKey.toLowerCase()];
+    if (!mappedKey) return;
+    const cleanedValue = normalizeEmployeeImportValue(value);
+    if (cleanedValue === "") return;
+    if (mappedKey === "hire_date") normalized.hire_date = normalizeEmployeeHireDate(cleanedValue);
+    else if (mappedKey === "salary") normalized.salary = Number(cleanedValue || 0);
+    else normalized[mappedKey] = String(cleanedValue);
+  });
+  normalized.salary = Number.isFinite(normalized.salary) ? normalized.salary : 0;
+  return normalized;
+}
 function importEmployees(event, setEmployees) {
   const f = event.target.files?.[0];
   if (!f) return;
   const r = new FileReader();
-  r.onload = (e) => {
-    const wb = XLSX.read(e.target.result, { type: "array" }),
-      rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-    if (rows.length) setEmployees((p) => [...rows, ...p]);
+  r.onload = async (e) => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: "array" });
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+      const invalidRows = [];
+      const normalizedRows = rows
+        .map((row, index) => ({ row: normalizeEmployeeImportRow(row), index: index + 2 }))
+        .filter(({ row, index }) => {
+          if (!row.id || !row.name) {
+            invalidRows.push(index);
+            return false;
+          }
+          return true;
+        })
+        .map(({ row }) => row);
+      if (invalidRows.length) {
+        alert(`لم يتم استيراد بعض الصفوف لأن رقم الموظف واسم الموظف مطلوبان.\nالصفوف غير الصالحة: ${invalidRows.join(", ")}`);
+      }
+      if (!normalizedRows.length) return;
+      const dbRows = normalizedRows.map(normalizeEmployeeForDb).filter((row) => row.id && row.name);
+      const { data, error } = await supabase.from("employees").upsert(dbRows, { onConflict: "id" }).select();
+      if (error) {
+        console.error("Supabase employees load/save error:", error);
+        alert(error.message);
+        return;
+      }
+      const importedEmployees = (data || []).map((row) => ({
+        id: row.id,
+        name: row.name || "",
+        branch: row.branch || "",
+        job: row.job || "",
+        hireDate: row.hire_date || "",
+        salary: Number(row.salary || 0),
+        phone: row.phone || "",
+        status: row.status || "نشط",
+        manager: row.manager || "",
+      }));
+      setEmployees((list) => {
+        const byId = new Map(list.map((employee) => [employee.id, employee]));
+        importedEmployees.forEach((employee) => byId.set(employee.id, employee));
+        return Array.from(byId.values());
+      });
+      alert(`تم استيراد ${importedEmployees.length} موظف/موظفة بنجاح`);
+    } catch (error) {
+      console.error("Supabase employees load/save error:", error);
+      alert(error.message || "تعذر استيراد ملف الموظفين");
+    } finally {
+      event.target.value = "";
+    }
   };
   r.readAsArrayBuffer(f);
 }

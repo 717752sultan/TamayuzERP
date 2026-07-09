@@ -39,8 +39,9 @@ export const supabase = {
   select(table, query = "select=*") {
     return this.request(`/rest/v1/${table}?${query}`);
   },
-  upsert(table, rows) {
-    return this.request(`/rest/v1/${table}`, {
+  upsert(table, rows, options = {}) {
+    const query = options.onConflict ? `?on_conflict=${encodeURIComponent(options.onConflict)}` : "";
+    return this.request(`/rest/v1/${table}${query}`, {
       method: "POST",
       prefer: "resolution=merge-duplicates,return=representation",
       body: JSON.stringify(Array.isArray(rows) ? rows : [rows]),
@@ -49,11 +50,12 @@ export const supabase = {
   from(table) {
     const client = this;
     return {
-      upsert(payload) {
+      upsert(payload, options = {}) {
         const rows = Array.isArray(payload) ? payload : [payload];
+        const query = options.onConflict ? `?on_conflict=${encodeURIComponent(options.onConflict)}` : "";
         const execute = async () => {
           try {
-            const data = await client.request(`/rest/v1/${table}`, {
+            const data = await client.request(`/rest/v1/${table}${query}`, {
               method: "POST",
               prefer: "resolution=merge-duplicates,return=representation",
               body: JSON.stringify(rows),
@@ -65,15 +67,15 @@ export const supabase = {
         };
         return {
           select() {
-            return {
-              async single() {
-                const { data, error } = await execute();
-                return {
-                  data: Array.isArray(data) ? data[0] : data,
-                  error,
-                };
-              },
+            const promise = execute();
+            promise.single = async () => {
+              const { data, error } = await promise;
+              return {
+                data: Array.isArray(data) ? data[0] : data,
+                error,
+              };
             };
+            return promise;
           },
         };
       },
