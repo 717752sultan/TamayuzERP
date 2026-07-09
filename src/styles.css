@@ -1,0 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+html {
+  direction: rtl;
+}
+body {
+  margin: 0;
+  background: #f6f7f9;
+  color: #172033;
+  font-family: "Tajawal", sans-serif;
+}
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd0d8;
+  border-radius: 10px;
+}
+.panel {
+  @apply rounded-2xl border border-slate-200/80 bg-white shadow-soft;
+}
+.field {
+  @apply h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-brand-600 focus:ring-4 focus:ring-brand-100;
+}
+.btn-primary {
+  @apply inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-brand-700 px-4 text-sm font-bold text-white transition hover:bg-brand-800;
+}
+.btn-secondary {
+  @apply inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50;
+}
+.table-wrap {
+  @apply overflow-x-auto rounded-xl border border-slate-200;
+}
+table {
+  @apply w-full text-right text-sm;
+}
+thead {
+  @apply bg-slate-50 text-xs font-bold text-slate-500;
+}
+th,
+td {
+  @apply whitespace-nowrap px-4 py-3;
+}
+tbody tr {
+  @apply border-t border-slate-100 transition hover:bg-slate-50/70;
+}
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+  }
+  .panel {
+    box-shadow: none;
+  }
+}

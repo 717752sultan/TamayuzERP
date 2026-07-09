@@ -1,0 +1,4194 @@
+import { useEffect, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
+import {
+  LayoutDashboard,
+  Users,
+  ClipboardList,
+  BadgeCheck,
+  Gauge,
+  CalendarCheck,
+  Gift,
+  Trophy,
+  TrendingUp,
+  FileBarChart,
+  Settings,
+  LogOut,
+  Bell,
+  Search,
+  Menu,
+  X,
+  Plus,
+  Download,
+  Pencil,
+  Trash2,
+  ChevronLeft,
+  Building2,
+  UserCheck,
+  Star,
+  Wallet,
+  AlertTriangle,
+  Clock3,
+  MoreHorizontal,
+  Eye,
+  Printer,
+  FileSpreadsheet,
+  Filter,
+  Upload,
+  ShieldCheck,
+  BriefcaseBusiness,
+  Save,
+  MessageSquareWarning,
+  ArrowUpLeft,
+  Banknote,
+  CircleDollarSign,
+  UserRoundCog,
+} from "lucide-react";
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  PieChart,
+  Pie,
+  Cell,
+  AreaChart,
+  Area,
+} from "recharts";
+import {
+  branches,
+  jobs,
+  criteria,
+  seedEmployees,
+  seedEvaluations,
+  navItems,
+} from "./data";
+const icons = {
+  dashboard: LayoutDashboard,
+  employees: Users,
+  templates: ClipboardList,
+  evaluations: BadgeCheck,
+  productivity: Gauge,
+  discipline: CalendarCheck,
+  incentives: Gift,
+  top: Trophy,
+  plans: TrendingUp,
+  reports: FileBarChart,
+  settings: Settings,
+};
+const nf = new Intl.NumberFormat("ar-SA"),
+  money = (n) => `${nf.format(Math.round(n || 0))} ر.س`,
+  classify = (n) =>
+    n >= 90
+      ? "ممتاز"
+      : n >= 80
+        ? "جيد جدًا"
+        : n >= 70
+          ? "جيد"
+          : n >= 60
+            ? "مقبول"
+            : "ضعيف";
+const weights = [15, 15, 10, 10, 10, 10, 10, 10, 5, 5];
+const defaultSettings = {
+  branches: [...branches],
+  jobs: [...jobs],
+  criteria: [...criteria],
+  currencies: [
+    "الريال السعودي (SAR)",
+    "الدولار الأمريكي (USD)",
+    "اليورو (EUR)",
+    "الدرهم الإماراتي (AED)",
+  ],
+  permissions: [
+    { name: "مدير النظام", description: "تحكم كامل في جميع أجزاء النظام" },
+    {
+      name: "الموارد البشرية",
+      description: "إدارة الموظفين والتقييمات والتقارير",
+    },
+    { name: "مدير الفرع", description: "تقييم موظفي الفرع ومتابعة الانضباط" },
+    { name: "الموظف", description: "عرض التقييم وتقديم الاعتراض" },
+    { name: "الإدارة العليا", description: "عرض التقارير واعتماد الحوافز" },
+  ],
+  users: [
+    {
+      name: "محمد العتيبي",
+      username: "admin",
+      password: "",
+      role: "مدير النظام",
+      employeeId: "",
+    },
+    {
+      name: "أحمد محمد السالم",
+      username: "employee",
+      password: "",
+      role: "الموظف",
+      employeeId: "EMP-001",
+    },
+  ],
+  manager: { name: "محمد العتيبي", username: "admin", role: "مدير النظام" },
+};
+const colors = {
+  ممتاز: "bg-emerald-50 text-emerald-700",
+  "جيد جدًا": "bg-blue-50 text-blue-700",
+  جيد: "bg-sky-50 text-sky-700",
+  مقبول: "bg-amber-50 text-amber-700",
+  ضعيف: "bg-red-50 text-red-700",
+  نشط: "bg-emerald-50 text-emerald-700",
+  إجازة: "bg-amber-50 text-amber-700",
+  موقوف: "bg-red-50 text-red-700",
+  معتمد: "bg-emerald-50 text-emerald-700",
+  "قيد المراجعة": "bg-amber-50 text-amber-700",
+  مرفوض: "bg-red-50 text-red-700",
+};
+const Status = ({ children }) => (
+  <span
+    className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${colors[children] || "bg-slate-100 text-slate-600"}`}
+  >
+    {children}
+  </span>
+);
+const supabaseConfig = () => ({
+  url: import.meta.env.VITE_SUPABASE_URL,
+  anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+});
+const normalizeCloudUser = (raw = {}, fallbackUsername = "") => {
+  const source = Array.isArray(raw) ? raw[0] || {} : raw;
+  const user = source.user || source;
+  const metadata = user.user_metadata || user.raw_user_meta_data || {};
+  return {
+    name:
+      source.name ||
+      user.name ||
+      metadata.name ||
+      metadata.full_name ||
+      fallbackUsername,
+    username: source.username || user.username || user.email || fallbackUsername,
+    role:
+      source.role ||
+      source.permission ||
+      metadata.role ||
+      metadata.permission ||
+      "الموظف",
+    employeeId:
+      source.employee_id ||
+      source.employeeId ||
+      metadata.employee_id ||
+      metadata.employeeId ||
+      "",
+    cloudId: source.id || user.id || "",
+    email: user.email || source.email || "",
+  };
+};
+async function loginWithSupabase(username, password, employeeNumber) {
+  const { url, anonKey } = supabaseConfig();
+  if (!url || !anonKey)
+    throw new Error("لم يتم ضبط متغيرات Supabase في البيئة.");
+  const headers = {
+    apikey: anonKey,
+    Authorization: `Bearer ${anonKey}`,
+    "Content-Type": "application/json",
+  };
+  const rpc = await fetch(`${url}/rest/v1/rpc/verify_app_login`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      p_username: username,
+      p_password: password,
+      p_employee_id: employeeNumber,
+    }),
+  });
+  const rpcData = await rpc.json().catch(() => ({}));
+  if (rpc.ok && rpcData && (!Array.isArray(rpcData) || rpcData.length))
+    return normalizeCloudUser(rpcData, username);
+  const usersRes = await fetch(
+    `${url}/rest/v1/app_users?username=eq.${encodeURIComponent(username)}&employee_id=eq.${encodeURIComponent(employeeNumber)}&is_active=eq.true&select=id,name,username,role,employee_id,email`,
+    { headers },
+  );
+  const users = await usersRes.json().catch(() => []);
+  if (usersRes.ok && users.length === 1) {
+    throw new Error(
+      "تم العثور على المستخدم، لكن التحقق من كلمة المرور يجب أن يتم عبر دالة Supabase RPC باسم verify_app_login.",
+    );
+  }
+  throw new Error("اسم المستخدم أو كلمة المرور غير صحيحة.");
+}
+async function syncToSupabaseCloud({ settings, employees, evaluations }) {
+  const { url, anonKey } = supabaseConfig();
+  if (!url || !anonKey)
+    throw new Error("لم يتم ضبط متغيرات Supabase في البيئة.");
+  const payload = {
+    id: "default",
+    settings,
+    employees,
+    evaluations,
+    objections: JSON.parse(localStorage.getItem("ep_objections") || "[]"),
+    updated_at: new Date().toISOString(),
+  };
+  const token = localStorage.getItem("ep_supabase_access_token") || anonKey;
+  const res = await fetch(`${url}/rest/v1/hrms_snapshots`, {
+    method: "POST",
+    headers: {
+      apikey: anonKey,
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "تعذرت مزامنة البيانات مع Supabase.");
+  }
+  return payload.updated_at;
+}
+const defaultWeightsFor = (count) => {
+  if (count === 10) return [15, 15, 10, 10, 10, 10, 10, 10, 5, 5];
+  const base = Math.floor(100 / Math.max(count, 1));
+  const rest = 100 - base * Math.max(count, 1);
+  return Array.from({ length: count }, (_, i) => base + (i < rest ? 1 : 0));
+};
+const makeCriteriaTemplate = (names = criteria) => {
+  const ws = defaultWeightsFor(names.length);
+  return names.map((name, i) => ({ name, weight: ws[i] || 0 }));
+};
+const includesAny = (value = "", words = []) =>
+  words.some((word) => String(value).includes(word));
+const defaultCriteriaForJob = (job = "") => {
+  const isCounter = includesAny(job, ["عداد", "ط¹ط¯ط§ط¯"]);
+  const isTech = includesAny(job, ["دعم فني", "ط¯ط¹ظ… ظپظ†ظٹ"]);
+  const isCustomer = includesAny(job, ["خدمة عملاء", "ط®ط¯ظ…ط© ط¹ظ…ظ„ط§ط،"]);
+  const isOutbound = includesAny(job, ["صادر"]);
+  const isInbound = includesAny(job, ["وارد"]);
+  const names = isCounter
+    ? [
+        "إجمالي المبالغ المعدودة",
+        "إنتاجية فئة 200",
+        "إنتاجية فئة 500",
+        "إنتاجية فئة 1000",
+        "دقة فرز النقد",
+        "كشف العملات التالفة أو المشبوهة",
+        "سرعة التسليم والاستلام",
+        "الالتزام بإجراءات الخزينة",
+        "تصفير العهدة دون فروقات",
+        "الانضباط الوظيفي",
+      ]
+    : isTech
+      ? [
+          "سرعة إغلاق البلاغات",
+          "جودة الحلول الفنية",
+          "استقرار الأنظمة والأجهزة",
+          "توثيق البلاغات",
+          "دعم الفروع عن بعد",
+          "الالتزام بأولوية البلاغات",
+          "حماية البيانات",
+          "حل المشكلات المتكررة",
+          "التعاون مع الفريق",
+          "الانضباط الوظيفي",
+        ]
+      : isCustomer && isOutbound
+        ? [
+            "سرعة تنفيذ الحوالات الصادرة",
+            "دقة بيانات المستفيد",
+            "الالتزام بحدود وإجراءات التحويل",
+            "جودة التواصل مع العميل",
+            "نسبة إنجاز طلبات الصادر",
+            "خفض أخطاء الإرسال",
+            "الالتزام بإجراءات الامتثال",
+            "التعاون مع الفريق",
+            "تحمل ضغط العمل",
+            "الانضباط الوظيفي",
+          ]
+        : isCustomer && isInbound
+          ? [
+              "سرعة معالجة الحوالات الواردة",
+              "دقة مطابقة بيانات المستلم",
+              "جودة خدمة العميل عند الصرف",
+              "نسبة إنجاز طلبات الوارد",
+              "خفض شكاوى العملاء",
+              "الالتزام بإجراءات التحقق",
+              "الالتزام بإجراءات الامتثال",
+              "التعاون مع الفريق",
+              "تحمل ضغط العمل",
+              "الانضباط الوظيفي",
+            ]
+          : isCustomer
+            ? [
+                "جودة الرد على العملاء",
+                "سرعة تنفيذ الحوالات",
+                "دقة بيانات العميل",
+                "معالجة طلبات الواتس",
+                "نسبة رضا العملاء",
+                "الالتزام بإجراءات الامتثال",
+                "خفض الشكاوى",
+                "التعاون مع الفريق",
+                "تحمل ضغط العمل",
+                "الانضباط الوظيفي",
+              ]
+            : criteria;
+  return makeCriteriaTemplate(names).map((item) =>
+    isCounter
+      ? {
+          ...item,
+          subWeights: {
+            cash200: item.name.includes("200") ? item.weight : 0,
+            cash500: item.name.includes("500") ? item.weight : 0,
+            cash1000: item.name.includes("1000") ? item.weight : 0,
+          },
+        }
+      : item,
+  );
+};
+const buildDefaultJobCriteria = () =>
+  Object.fromEntries(
+    jobs.map((job) => {
+      const custom = job.includes("عداد")
+        ? [
+            "إجمالي المبالغ المعدودة",
+            "دقة فرز فئة 200",
+            "دقة فرز فئة 500",
+            "دقة فرز فئة 1000",
+            "كشف العملات التالفة أو المشبوهة",
+            "سرعة التسليم والاستلام",
+            "الالتزام بإجراءات الخزينة",
+            "الانضباط الوظيفي",
+            "التعاون مع الفريق",
+            "تصفير العهدة دون فروقات",
+          ]
+        : job.includes("دعم فني")
+          ? [
+              "سرعة إغلاق البلاغات",
+              "جودة الحلول الفنية",
+              "استقرار الأنظمة والأجهزة",
+              "توثيق البلاغات",
+              "دعم الفروع عن بعد",
+              "الالتزام بأولوية البلاغات",
+              "حماية البيانات",
+              "التعاون مع الفريق",
+              "حل المشكلات المتكررة",
+              "الانضباط الوظيفي",
+            ]
+          : job.includes("خدمة عملاء")
+            ? [
+                "جودة الرد على العملاء",
+                "سرعة تنفيذ الحوالات",
+                "دقة بيانات العميل",
+                "معالجة طلبات الواتس",
+                "نسبة رضا العملاء",
+                "الالتزام بإجراءات الامتثال",
+                "خفض الشكاوى",
+                "التعاون مع الفريق",
+                "تحمل ضغط العمل",
+                "الانضباط الوظيفي",
+              ]
+            : criteria;
+      return [job, makeCriteriaTemplate(custom)];
+    }),
+  );
+const getJobCriteria = (settings, job) => {
+  const saved = settings?.jobCriteria?.[job];
+  if (Array.isArray(saved) && saved.length) return saved;
+  return defaultCriteriaForJob(job);
+};
+const normalizeScores = (scores, count, fill = 4) =>
+  Array.from({ length: count }, (_, i) => Number(scores?.[i] || fill));
+const scoreTotal = (scores, model) =>
+  Math.round(
+    model.reduce((sum, item, i) => sum + (Number(scores[i] || 0) * Number(item.weight || 0)) / 5, 0),
+  );
+const effectiveEvaluationTotal = (ev) =>
+  Array.isArray(ev?.criteriaSnapshot) && Array.isArray(ev?.scores)
+    ? scoreTotal(normalizeScores(ev.scores, ev.criteriaSnapshot.length, 0), ev.criteriaSnapshot)
+    : Number(ev?.total || 0);
+const defaultProductivityIndicators = [
+  { key: "receive", label: "عدد عمليات قبض الحوالات", type: "positive", weight: 0.2 },
+  { key: "pay", label: "عدد عمليات صرف الحوالات", type: "positive", weight: 0.2 },
+  { key: "sell", label: "عدد عمليات بيع العملات", type: "positive", weight: 0.25 },
+  { key: "buy", label: "عدد عمليات شراء العملات", type: "positive", weight: 0.25 },
+  { key: "errors", label: "عدد الأخطاء", type: "negative", weight: 4 },
+  { key: "complaints", label: "عدد شكاوى العملاء", type: "negative", weight: 5 },
+  { key: "time", label: "متوسط وقت الخدمة", type: "negative", weight: 1 },
+];
+const defaultDisciplineIndicators = [
+  { key: "present", label: "أيام الحضور", type: "positive", weight: 1 },
+  { key: "absent", label: "أيام الغياب", type: "negative", weight: 7 },
+  { key: "late", label: "التأخير بالدقائق", type: "negative", weight: 0.15 },
+  { key: "early", label: "الانصراف المبكر", type: "negative", weight: 3 },
+  { key: "violations", label: "المخالفات", type: "negative", weight: 8 },
+  { key: "penalties", label: "الجزاءات", type: "negative", weight: 10 },
+];
+const scoreIndicators = (values, indicators, base = 0) =>
+  Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(
+        indicators.reduce(
+          (sum, item) =>
+            item.type === "negative"
+              ? sum - Number(values[item.key] || 0) * Number(item.weight || 0)
+              : sum + Number(values[item.key] || 0) * Number(item.weight || 0),
+          base,
+        ),
+      ),
+    ),
+  );
+const initialIndicatorValues = (indicators) =>
+  Object.fromEntries(indicators.map((item) => [item.key, 0]));
+const updateJobCriteria = (settings, setSettings, job, model) =>
+  setSettings({
+    ...settings,
+    jobCriteria: { ...(settings.jobCriteria || {}), [job]: model },
+  });
+defaultSettings.jobCriteria = buildDefaultJobCriteria();
+const hydrateSettings = (value) => {
+  const merged = {
+    ...defaultSettings,
+    ...(value || {}),
+    manager: { ...defaultSettings.manager, ...((value || {}).manager || {}) },
+    jobCriteria: {
+      ...defaultSettings.jobCriteria,
+      ...((value || {}).jobCriteria || {}),
+    },
+  };
+  if (!Array.isArray(merged.branches) || !merged.branches.length)
+    merged.branches = [...defaultSettings.branches];
+  if (!Array.isArray(merged.jobs) || !merged.jobs.length)
+    merged.jobs = [...defaultSettings.jobs];
+  if (!Array.isArray(merged.criteria) || !merged.criteria.length)
+    merged.criteria = [...defaultSettings.criteria];
+  if (!Array.isArray(merged.permissions) || !merged.permissions.length)
+    merged.permissions = [...defaultSettings.permissions];
+  if (!Array.isArray(merged.users) || !merged.users.length)
+    merged.users = [...defaultSettings.users];
+  if (!Array.isArray(merged.currencies) || !merged.currencies.length)
+    merged.currencies = [...defaultSettings.currencies];
+  return merged;
+};
+const printDocument = (title, body) => {
+  const activeEvaluationReport =
+    typeof window !== "undefined" ? window.__activeEvaluationReport : null;
+  if (activeEvaluationReport && String(title).includes("ظ…ظˆط¸ظپ")) {
+    title = activeEvaluationReport.title;
+    body = activeEvaluationReport.body;
+  }
+  const w = window.open("", "_blank", "width=950,height=700");
+  if (!w) return window.print();
+  w.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8" />
+    <title>${title}</title>
+    <style>
+      body{font-family:Tahoma,Arial,sans-serif;margin:32px;color:#172033;direction:rtl}
+      h1,h2,h3{margin:0 0 12px}
+      table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px}
+      th,td{border:1px solid #d7dce3;padding:9px;text-align:right}
+      th{background:#f3f4f6}
+      .cert{min-height:520px;border:10px double #8a1538;border-radius:28px;padding:42px;text-align:center}
+      .brand{color:#8a1538}.muted{color:#64748b}.big{font-size:34px;font-weight:900}
+      @media print{button{display:none}}
+    </style></head><body>${body}<script>window.onload=()=>{window.print();}</script></body></html>`);
+  w.document.close();
+};
+function syncSettings(s) {
+  if (!s) return;
+  branches.splice(
+    0,
+    branches.length,
+    ...(s.branches || defaultSettings.branches),
+  );
+  jobs.splice(0, jobs.length, ...(s.jobs || defaultSettings.jobs));
+  criteria.splice(
+    0,
+    criteria.length,
+    ...(s.criteria || defaultSettings.criteria),
+  );
+  const base = [15, 15, 10, 10, 10, 10, 10, 10, 5, 5];
+  weights.splice(
+    0,
+    weights.length,
+    ...(criteria.length === 10
+      ? base
+      : Array.from({ length: criteria.length }, (_, i) => {
+          const q = Math.floor(100 / criteria.length),
+            r = 100 - q * criteria.length;
+          return q + (i < r ? 1 : 0);
+        })),
+  );
+}
+function useStore(k, initial) {
+  const [v, setV] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(k));
+      return k === "ep_system_settings"
+        ? hydrateSettings(saved || initial)
+        : saved || initial;
+    } catch {
+      return k === "ep_system_settings" ? hydrateSettings(initial) : initial;
+    }
+  });
+  useEffect(() => localStorage.setItem(k, JSON.stringify(v)), [k, v]);
+  if (k === "ep_system_settings") syncSettings(v);
+  return [v, setV];
+}
+export default function App() {
+  const [logged, setLogged] = useState(
+      () => localStorage.getItem("ep_logged") === "1",
+    ),
+	    [page, setPage] = useState("dashboard"),
+	    [sidebar, setSidebar] = useState(false),
+	    [syncing, setSyncing] = useState(false),
+	    [role, setRole] = useState(
+      () => localStorage.getItem("ep_role") || "مدير النظام",
+    ),
+    [employees, setEmployees] = useStore("ep_employees", seedEmployees),
+    [evaluations, setEvaluations] = useStore("ep_evaluations", seedEvaluations),
+    [settings, setSettings] = useStore("ep_system_settings", defaultSettings);
+  if (!logged)
+    return (
+      <Login
+        settings={settings}
+        onLogin={(user) => {
+          setRole(user.role);
+          localStorage.setItem("ep_role", user.role);
+          localStorage.setItem("ep_employee_id", user.employeeId || "");
+          localStorage.setItem("ep_current_user", JSON.stringify(user));
+          localStorage.setItem("ep_logged", "1");
+          setLogged(true);
+        }}
+      />
+    );
+  if (role === "الموظف")
+    return (
+      <EmployeePortal
+        employees={employees}
+        evaluations={evaluations}
+        onLogout={() => {
+          localStorage.removeItem("ep_logged");
+          localStorage.removeItem("ep_role");
+          localStorage.removeItem("ep_employee_id");
+          localStorage.removeItem("ep_current_user");
+          setLogged(false);
+        }}
+      />
+    );
+  const roleMatrix = settings.rolePermissions?.[role] || {},
+    hasRoleMatrix = Object.keys(roleMatrix).length > 0,
+    visibleNavItems = hasRoleMatrix
+      ? navItems.filter(([id]) => roleMatrix[id]?.view)
+      : navItems,
+    title = navItems.find((x) => x[0] === page)?.[1],
+    manager = settings.manager || defaultSettings.manager,
+    initials = manager.name
+      .split(" ")
+      .slice(0, 2)
+      .map((x) => x[0])
+      .join(""),
+    p = {
+      employees,
+      setEmployees,
+      evaluations,
+      setEvaluations,
+      setPage,
+      settings,
+      setSettings,
+    };
+  return (
+    <div className="min-h-screen" dir="rtl">
+      {sidebar && (
+        <button
+          onClick={() => setSidebar(false)}
+          className="fixed inset-0 z-30 bg-black/40 lg:hidden"
+        />
+      )}
+      <aside
+        className={`no-print fixed inset-y-0 right-0 z-40 flex w-[270px] flex-col bg-[#171a21] text-white transition-transform lg:translate-x-0 ${sidebar ? "translate-x-0" : "translate-x-full"}`}
+      >
+        <div className="flex h-[86px] items-center gap-3 border-b border-white/10 px-6">
+          <div className="grid h-11 w-11 place-items-center rounded-xl bg-brand-700">
+            <Banknote />
+          </div>
+          <div>
+            <b>نظام تقييم الموظفين</b>
+            <p className="mt-1 text-[11px] text-slate-400">
+              شركة الصرافة والتحويلات
+            </p>
+          </div>
+          <button
+            onClick={() => setSidebar(false)}
+            className="mr-auto lg:hidden"
+          >
+            <X />
+          </button>
+        </div>
+        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+	          {visibleNavItems.map(([id, label]) => {
+            const I = icons[id];
+            return (
+              <button
+                key={id}
+                onClick={() => {
+                  setPage(id);
+                  setSidebar(false);
+                }}
+                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold ${page === id ? "bg-brand-700 text-white" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}
+              >
+                <I size={19} />
+                {label}
+                {page === id && <ChevronLeft className="mr-auto" size={16} />}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="border-t border-white/10 p-4">
+          <div className="mb-3 flex items-center gap-3 rounded-xl bg-white/5 p-3">
+            <div className="grid h-9 w-9 place-items-center rounded-full bg-brand-700 font-bold">
+              {initials}
+            </div>
+            <div>
+              <b className="text-sm">{manager.name}</b>
+              <p className="text-[11px] text-slate-400">{role}</p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              localStorage.removeItem("ep_logged");
+              localStorage.removeItem("ep_role");
+              localStorage.removeItem("ep_employee_id");
+              localStorage.removeItem("ep_current_user");
+              setLogged(false);
+            }}
+            className="flex items-center gap-2 text-sm text-slate-400"
+          >
+            <LogOut size={17} /> تسجيل الخروج
+          </button>
+        </div>
+      </aside>
+      <div className="lg:pr-[270px]">
+        <header className="no-print sticky top-0 z-20 flex h-[86px] items-center border-b bg-white/95 px-4 md:px-7">
+          <button
+            onClick={() => setSidebar(true)}
+            className="ml-3 rounded-xl border p-2 lg:hidden"
+          >
+            <Menu />
+          </button>
+          <div>
+            <h1 className="text-xl font-extrabold">{title}</h1>
+            <p className="mt-1 hidden text-xs text-slate-500 sm:block">
+              نظرة شاملة تساعدك على اتخاذ قرارات أفضل
+            </p>
+          </div>
+          <div className="mr-auto flex items-center gap-3">
+            <label className="hidden h-10 items-center gap-2 rounded-xl bg-slate-100 px-3 md:flex">
+              <Search size={17} />
+              <input
+                className="w-40 bg-transparent text-sm outline-none"
+                placeholder="بحث سريع..."
+              />
+            </label>
+	            <button
+	              type="button"
+	              disabled={syncing}
+	              onClick={async () => {
+	                setSyncing(true);
+	                try {
+	                  await syncToSupabaseCloud({ settings, employees, evaluations });
+	                  alert("تمت مزامنة البيانات وحفظ التعديلات في Supabase بنجاح.");
+	                } catch (error) {
+	                  alert(error.message || "تعذرت مزامنة البيانات.");
+	                } finally {
+	                  setSyncing(false);
+	                }
+	              }}
+	              className="btn-secondary hidden md:inline-flex disabled:cursor-not-allowed disabled:opacity-60"
+	            >
+	              <Save size={17} /> {syncing ? "جاري الحفظ..." : "مزامنة وحفظ"}
+	            </button>
+	            <button className="relative rounded-xl border p-2.5">
+              <Bell size={19} />
+              <i className="absolute -left-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-brand-700" />
+            </button>
+            <div className="hidden items-center gap-2 border-r pr-4 sm:flex">
+              <div className="grid h-10 w-10 place-items-center rounded-xl bg-slate-900 text-white">
+                {initials}
+              </div>
+              <div>
+                <b className="text-sm">{manager.name}</b>
+                <p className="text-[11px] text-slate-500">{role}</p>
+              </div>
+            </div>
+          </div>
+        </header>
+        <main className="p-4 md:p-7">
+          {page === "dashboard" && <Dashboard {...p} />}{" "}
+          {page === "employees" && <EnhancedEmployees {...p} />}{" "}
+          {page === "templates" && <EnhancedTemplates {...p} />}{" "}
+          {page === "evaluations" && <EnhancedEvaluations {...p} />}{" "}
+          {page === "productivity" && <EnhancedProductivity {...p} />}{" "}
+          {page === "discipline" && <EnhancedDiscipline {...p} />}{" "}
+          {page === "incentives" && <EnhancedIncentives {...p} />}{" "}
+          {page === "top" && <EnhancedTopEmployees {...p} />}{" "}
+          {page === "plans" && <EnhancedPlans {...p} />}{" "}
+          {page === "reports" && <EnhancedReports {...p} />}{" "}
+          {page === "settings" && <SettingsPage {...p} />}
+        </main>
+      </div>
+    </div>
+  );
+}
+function Login({ onLogin }) {
+  const [u, setU] = useState(""),
+    [pw, setPw] = useState(""),
+    [employeeNo, setEmployeeNo] = useState(""),
+    [err, setErr] = useState(""),
+    [loading, setLoading] = useState(false);
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setErr("");
+    if (!u.trim() || !pw || !employeeNo.trim()) {
+      setErr("يرجى إدخال اسم المستخدم وكلمة المرور والرقم الوظيفي.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const user = await loginWithSupabase(u.trim(), pw, employeeNo.trim());
+      onLogin(user);
+    } catch (error) {
+      setErr(error.message || "تعذر تسجيل الدخول. تحقق من البيانات وحاول مرة أخرى.");
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <div className="relative grid min-h-screen place-items-center overflow-hidden bg-[#111319] p-5">
+      <div className="absolute -right-40 -top-40 h-[520px] w-[520px] rounded-full bg-brand-700/20 blur-3xl" />
+      <div className="relative grid w-full max-w-5xl overflow-hidden rounded-[28px] bg-white shadow-2xl md:grid-cols-2">
+        <div className="hidden flex-col justify-between bg-gradient-to-br from-brand-800 to-[#3b1115] p-12 text-white md:flex">
+          <div className="flex items-center gap-3">
+            <div className="grid h-12 w-12 place-items-center rounded-xl bg-white/10">
+              <Banknote />
+            </div>
+            <b>شركة الصرافة والتحويلات</b>
+          </div>
+          <div>
+            <div className="mb-5 h-1 w-12 bg-white/30" />
+            <h2 className="text-4xl font-extrabold leading-[1.35]">
+              نحو ثقافة أداء
+              <br />
+              تكافئ التميّز
+            </h2>
+            <p className="mt-5 leading-7 text-red-100/75">
+              منصة موحّدة لقياس الأداء وربط الإنجاز بالحوافز بشفافية.
+            </p>
+          </div>
+          <div className="flex gap-2 text-xs text-red-100/60">
+            <ShieldCheck size={17} /> بياناتك محفوظة وآمنة داخل المتصفح
+          </div>
+        </div>
+        <form onSubmit={handleSubmit} className="p-8 sm:p-14">
+          <span className="text-sm font-bold text-brand-700">
+            مرحبًا بعودتك
+          </span>
+          <h1 className="mt-2 text-3xl font-extrabold">تسجيل الدخول</h1>
+          <p className="mt-2 text-sm text-slate-500">
+            أدخل بياناتك للوصول إلى لوحة التحكم
+          </p>
+          <div className="mt-8 space-y-5">
+            <Label t="اسم المستخدم">
+              <input
+                value={u}
+                onChange={(e) => setU(e.target.value)}
+                autoComplete="username"
+                placeholder="أدخل اسم المستخدم"
+                className="field mt-2"
+              />
+            </Label>
+            <Label t="كلمة المرور">
+              <input
+                type="password"
+                value={pw}
+                onChange={(e) => setPw(e.target.value)}
+                autoComplete="current-password"
+                placeholder="أدخل كلمة المرور"
+                className="field mt-2"
+              />
+            </Label>
+            <Label t="الرقم الوظيفي">
+              <input
+                value={employeeNo}
+                onChange={(e) => setEmployeeNo(e.target.value)}
+                autoComplete="off"
+                placeholder="أدخل الرقم الوظيفي"
+                className="field mt-2"
+              />
+            </Label>
+          </div>
+          {err && (
+            <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">
+              {err}
+            </p>
+          )}
+          <button disabled={loading} className="btn-primary mt-7 h-12 w-full disabled:cursor-not-allowed disabled:opacity-60">
+            {loading ? "جاري التحقق..." : "دخول إلى النظام"} <ArrowUpLeft size={18} />
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+function EmployeePortal({ employees, evaluations, onLogout }) {
+  const employeeId = localStorage.getItem("ep_employee_id");
+  const employee = employees.find((item) => item.id === employeeId);
+  const ownEvaluations = evaluations
+    .filter((item) => item.employeeId === employeeId)
+    .sort((a, b) => b.month.localeCompare(a.month));
+  const latest = ownEvaluations[0];
+  const [objection, setObjection] = useState("");
+  const [sent, setSent] = useState(false);
+  if (!employee)
+    return (
+      <div dir="rtl" className="grid min-h-screen place-items-center p-6">
+        <div className="panel max-w-md p-8 text-center">
+          <AlertTriangle className="mx-auto text-amber-500" size={40} />
+          <h1 className="mt-4 text-xl font-extrabold">الحساب غير مرتبط بموظف</h1>
+          <p className="mt-2 text-sm text-slate-500">
+            اطلب من مدير النظام ربط الحساب برقم الموظف.
+          </p>
+          <button onClick={onLogout} className="btn-primary mt-5">
+            تسجيل الخروج
+          </button>
+        </div>
+      </div>
+    );
+  const submitObjection = () => {
+    if (!objection.trim()) return;
+    const old = JSON.parse(localStorage.getItem("ep_objections") || "[]");
+    localStorage.setItem(
+      "ep_objections",
+      JSON.stringify([
+        ...old,
+        {
+          id: Date.now(),
+          employeeId,
+          evaluationId: latest?.id,
+          text: objection.trim(),
+          status: "قيد المراجعة",
+          createdAt: new Date().toISOString(),
+        },
+      ]),
+    );
+    setObjection("");
+    setSent(true);
+  };
+  return (
+    <div dir="rtl" className="min-h-screen bg-[#f6f7f9]">
+      <header className="flex h-20 items-center border-b bg-white px-5 md:px-10">
+        <div className="grid h-11 w-11 place-items-center rounded-xl bg-brand-700 text-white">
+          <Banknote />
+        </div>
+        <div className="mr-3">
+          <h1 className="font-extrabold">بوابة الموظف</h1>
+          <p className="text-xs text-slate-500">عرض فقط — لا يمكن تعديل البيانات</p>
+        </div>
+        <button onClick={onLogout} className="btn-secondary mr-auto">
+          <LogOut size={17} /> تسجيل الخروج
+        </button>
+      </header>
+      <main className="mx-auto max-w-5xl space-y-5 p-5 md:p-8">
+        <div className="panel flex flex-wrap items-center gap-4 p-6">
+          <div className="grid h-16 w-16 place-items-center rounded-2xl bg-brand-50 text-xl font-extrabold text-brand-700">
+            {employee.name
+              .split(" ")
+              .slice(0, 2)
+              .map((x) => x[0])
+              .join("")}
+          </div>
+          <div>
+            <h2 className="text-xl font-extrabold">{employee.name}</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {employee.id} • {employee.job} • {employee.branch}
+            </p>
+          </div>
+          <Status>{employee.status}</Status>
+        </div>
+        <div className="grid gap-5 md:grid-cols-3">
+          <Mini
+            label="آخر تقييم"
+            value={latest ? `${latest.total}%` : "—"}
+            I={Star}
+          />
+          <Mini
+            label="تصنيف الأداء"
+            value={latest ? classify(latest.total) : "—"}
+            I={BadgeCheck}
+          />
+          <Mini
+            label="شهر التقييم"
+            value={latest?.month || "—"}
+            I={CalendarCheck}
+          />
+        </div>
+        <div className="panel p-6">
+          <h3 className="font-extrabold">ملاحظات التقييم</h3>
+          <p className="mt-3 rounded-xl bg-slate-50 p-4 text-sm leading-7 text-slate-600">
+            {latest?.notes || "لا توجد ملاحظات مسجلة."}
+          </p>
+        </div>
+        <div className="panel p-6">
+          <h3 className="font-extrabold">تقديم اعتراض أو طلب مراجعة</h3>
+          <textarea
+            value={objection}
+            onChange={(e) => {
+              setObjection(e.target.value);
+              setSent(false);
+            }}
+            rows="4"
+            className="field mt-4 !h-auto py-3"
+            placeholder="اكتب سبب طلب المراجعة..."
+          />
+          <div className="mt-3 flex items-center gap-3">
+            <button onClick={submitObjection} className="btn-primary">
+              إرسال الطلب
+            </button>
+            {sent && (
+              <span className="text-sm font-bold text-emerald-600">
+                تم إرسال طلب المراجعة.
+              </span>
+            )}
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+function Dashboard({ employees, evaluations, setPage, settings }) {
+  const avg = Math.round(
+      evaluations.reduce((s, e) => s + e.total, 0) / evaluations.length,
+    ),
+    top = [...evaluations].sort((a, b) => b.total - a.total)[0],
+    topEmp = employees.find((e) => e.id === top?.employeeId),
+    branchData = settings.branches.map((b) => {
+      const ids = employees.filter((e) => e.branch === b).map((e) => e.id),
+        ev = evaluations.filter((x) => ids.includes(x.employeeId));
+      return {
+        name: b.replace("فرع ", ""),
+        value: Math.round(
+          ev.reduce((s, x) => s + x.total, 0) / (ev.length || 1),
+        ),
+      };
+    }),
+    dist = ["ممتاز", "جيد جدًا", "جيد", "مقبول", "ضعيف"].map((name) => ({
+      name,
+      value: evaluations.filter((e) => classify(e.total) === name).length,
+    })),
+    cards = [
+      ["إجمالي الموظفين", employees.length, Users, "bg-blue-50 text-blue-600"],
+      [
+        "الموظفون النشطون",
+        employees.filter((e) => e.status === "نشط").length,
+        UserCheck,
+        "bg-emerald-50 text-emerald-600",
+      ],
+      ["متوسط تقييم الشركة", `${avg}%`, Star, "bg-amber-50 text-amber-600"],
+      [
+        "مستحقو الحافز",
+        evaluations.filter((e) => e.total >= 70).length,
+        Gift,
+        "bg-violet-50 text-violet-600",
+      ],
+      [
+        "الموظفون الضعفاء",
+        evaluations.filter((e) => e.total < 60).length,
+        AlertTriangle,
+        "bg-red-50 text-red-600",
+      ],
+      [
+        "إجمالي الحوافز",
+        money(
+          calcIncentives(employees, evaluations).reduce(
+            (s, x) => s + x.amount,
+            0,
+          ),
+        ),
+        Wallet,
+        "bg-brand-50 text-brand-700",
+      ],
+      [
+        "عدد المخالفات",
+        "8",
+        MessageSquareWarning,
+        "bg-orange-50 text-orange-600",
+      ],
+      ["نسبة الانضباط", "94%", CalendarCheck, "bg-teal-50 text-teal-600"],
+    ];
+  return (
+    <div className="space-y-6">
+      <PageHead
+        title={`صباح الخير، ${settings.manager.name.split(" ")[0]} 👋`}
+        desc="هذا ملخص أداء الشركة لشهر يونيو 2026"
+        action={
+          <button onClick={() => setPage("reports")} className="btn-primary">
+            <FileBarChart size={17} /> التقرير الشهري
+          </button>
+        }
+      />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {cards.map(([l, v, I, c]) => (
+          <div key={l} className="panel flex items-center gap-4 p-5">
+            <div
+              className={`grid h-12 w-12 place-items-center rounded-2xl ${c}`}
+            >
+              <I size={23} />
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">{l}</p>
+              <b className="text-2xl">{v}</b>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="grid gap-5 xl:grid-cols-[1.45fr_.8fr]">
+        <Chart
+          title="متوسط تقييم الموظفين حسب الفروع"
+          sub="مقارنة النتائج المعتمدة"
+        >
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={branchData}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="name" tick={{ fontSize: 11 }} axisLine={false} />
+              <YAxis domain={[0, 100]} axisLine={false} />
+              <Tooltip />
+              <Bar
+                dataKey="value"
+                fill="#7f1d1d"
+                radius={[8, 8, 0, 0]}
+                barSize={35}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </Chart>
+        <Chart title="توزيع تصنيفات الأداء" sub="إجمالي الموظفين المقيمين">
+          <ResponsiveContainer width="100%" height={220}>
+            <PieChart>
+              <Pie
+                data={dist}
+                innerRadius={58}
+                outerRadius={88}
+                paddingAngle={4}
+                dataKey="value"
+              >
+                {["#059669", "#2563eb", "#38bdf8", "#f59e0b", "#dc2626"].map(
+                  (c) => (
+                    <Cell key={c} fill={c} />
+                  ),
+                )}
+              </Pie>
+              <Tooltip />
+            </PieChart>
+          </ResponsiveContainer>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            {dist.map((x, i) => (
+              <div key={x.name} className="flex gap-2">
+                <i
+                  className="h-2.5 w-2.5 rounded-full"
+                  style={{
+                    background: [
+                      "#059669",
+                      "#2563eb",
+                      "#38bdf8",
+                      "#f59e0b",
+                      "#dc2626",
+                    ][i],
+                  }}
+                />
+                {x.name}
+                <b className="mr-auto">{x.value}</b>
+              </div>
+            ))}
+          </div>
+        </Chart>
+      </div>
+      <div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
+        <Chart title="تطور الأداء الشهري" sub="آخر ستة أشهر">
+          <ResponsiveContainer width="100%" height={250}>
+            <AreaChart
+              data={[
+                ["يناير", 76],
+                ["فبراير", 79],
+                ["مارس", 78],
+                ["أبريل", 82],
+                ["مايو", 84],
+                ["يونيو", avg],
+              ].map(([month, value]) => ({ month, value }))}
+            >
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="month" axisLine={false} />
+              <YAxis domain={[50, 100]} axisLine={false} />
+              <Tooltip />
+              <Area
+                type="monotone"
+                dataKey="value"
+                stroke="#7f1d1d"
+                strokeWidth={3}
+                fill="#fbe5e5"
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </Chart>
+        <div className="panel overflow-hidden">
+          <div className="bg-gradient-to-l from-brand-800 to-brand-700 p-6 text-white">
+            <div className="flex justify-between">
+              <span>موظف الشهر</span>
+              <Trophy className="text-amber-300" />
+            </div>
+            <div className="mt-5 flex items-center gap-4">
+              <div className="grid h-16 w-16 place-items-center rounded-2xl bg-white/15 text-xl font-bold">
+                {topEmp?.name
+                  .split(" ")
+                  .slice(0, 2)
+                  .map((x) => x[0])
+                  .join("")}
+              </div>
+              <div>
+                <h3 className="text-lg font-extrabold">{topEmp?.name}</h3>
+                <p className="text-sm text-red-100">{topEmp?.job}</p>
+              </div>
+            </div>
+          </div>
+          <div className="p-5">
+            <div className="flex justify-between">
+              <span>التقييم النهائي</span>
+              <b className="text-2xl text-brand-700">{top?.total}%</b>
+            </div>
+            <div className="mt-3 h-2 rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-brand-700"
+                style={{ width: `${top?.total}%` }}
+              />
+            </div>
+            <button
+              onClick={() => setPage("top")}
+              className="mt-5 w-full text-sm font-bold text-brand-700"
+            >
+              عرض تفاصيل التكريم
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+function Chart({ title, sub, children }) {
+  return (
+    <section className="panel p-5">
+      <div className="mb-5 flex justify-between">
+        <div>
+          <h3 className="font-extrabold">{title}</h3>
+          <p className="mt-1 text-xs text-slate-400">{sub}</p>
+        </div>
+        <MoreHorizontal className="text-slate-400" />
+      </div>
+      {children}
+    </section>
+  );
+}
+function Employees({ employees, setEmployees }) {
+  const [q, setQ] = useState(""),
+    [branch, setBranch] = useState("الكل"),
+    [modal, setModal] = useState(false),
+    [editing, setEditing] = useState(null),
+    filtered = employees.filter(
+      (e) =>
+        (e.name.includes(q) || e.id.toLowerCase().includes(q.toLowerCase())) &&
+        (branch === "الكل" || e.branch === branch),
+    );
+  return (
+    <div className="space-y-5">
+      <PageHead
+        title="سجل الموظفين"
+        desc={`إدارة بيانات ${employees.length} موظف في جميع الفروع`}
+        action={
+          <button
+            onClick={() => {
+              setEditing(null);
+              setModal(true);
+            }}
+            className="btn-primary"
+          >
+            <Plus size={18} /> إضافة موظف
+          </button>
+        }
+      />
+      <div className="panel p-4">
+        <div className="flex flex-wrap gap-3">
+          <label className="flex h-11 min-w-[220px] flex-1 items-center gap-2 rounded-xl border px-3">
+            <Search size={17} />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="w-full outline-none"
+              placeholder="ابحث بالاسم أو الرقم..."
+            />
+          </label>
+          <select
+            value={branch}
+            onChange={(e) => setBranch(e.target.value)}
+            className="field max-w-[190px]"
+          >
+            <option>الكل</option>
+            {branches.map((x) => (
+              <option key={x}>{x}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => exportExcel(filtered, "الموظفون")}
+            className="btn-secondary"
+          >
+            <FileSpreadsheet size={17} /> تصدير Excel
+          </button>
+          <label className="btn-secondary cursor-pointer">
+            <Upload size={17} /> استيراد
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={(e) => importEmployees(e, setEmployees)}
+            />
+          </label>
+        </div>
+      </div>
+      <div className="panel p-4">
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>الموظف</th>
+                <th>الفرع</th>
+                <th>الوظيفة</th>
+                <th>تاريخ التعيين</th>
+                <th>الراتب</th>
+                <th>الحالة</th>
+                <th>المدير المباشر</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((e) => (
+                <tr key={e.id}>
+                  <td>
+                    <div className="flex items-center gap-3">
+                      <div className="grid h-9 w-9 place-items-center rounded-xl bg-slate-100 text-xs font-bold text-brand-700">
+                        {e.name
+                          .split(" ")
+                          .slice(0, 2)
+                          .map((x) => x[0])
+                          .join("")}
+                      </div>
+                      <div>
+                        <b>{e.name}</b>
+                        <p className="text-xs text-slate-400">
+                          {e.id} • {e.phone}
+                        </p>
+                      </div>
+                    </div>
+                  </td>
+                  <td>{e.branch}</td>
+                  <td>{e.job}</td>
+                  <td>{e.hireDate}</td>
+                  <td className="font-bold">{money(e.salary)}</td>
+                  <td>
+                    <Status>{e.status}</Status>
+                  </td>
+                  <td>{e.manager}</td>
+                  <td>
+                    <button
+                      onClick={() => {
+                        setEditing(e);
+                        setModal(true);
+                      }}
+                      className="p-2 text-blue-600"
+                    >
+                      <Pencil size={16} />
+                    </button>
+                    <button
+                      onClick={() =>
+                        confirm("هل تريد حذف الموظف؟") &&
+                        setEmployees((x) => x.filter((v) => v.id !== e.id))
+                      }
+                      className="p-2 text-red-600"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-4 text-xs text-slate-500">
+          عرض {filtered.length} من {employees.length} موظف
+        </p>
+      </div>
+      {modal && (
+        <EmployeeModal
+          employee={editing}
+          close={() => setModal(false)}
+          save={(d) => {
+            setEmployees((list) =>
+              editing
+                ? list.map((e) => (e.id === editing.id ? d : e))
+                : [d, ...list],
+            );
+            setModal(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+function EmployeeModal({ employee, close, save }) {
+  const [f, setF] = useState(
+    employee || {
+      id: `EMP-${Date.now().toString().slice(-4)}`,
+      name: "",
+      branch: branches[0],
+      job: jobs[0],
+      hireDate: new Date().toISOString().slice(0, 10),
+      salary: 5000,
+      phone: "05",
+      status: "نشط",
+      manager: "",
+    },
+  );
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          save({ ...f, salary: Number(f.salary) });
+        }}
+        className="panel max-h-[90vh] w-full max-w-2xl overflow-y-auto p-6"
+      >
+        <div className="mb-6 flex">
+          <h3 className="text-xl font-extrabold">
+            {employee ? "تعديل بيانات الموظف" : "إضافة موظف جديد"}
+          </h3>
+          <button type="button" onClick={close} className="mr-auto">
+            <X />
+          </button>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {[
+            ["id", "رقم الموظف"],
+            ["name", "اسم الموظف"],
+            ["hireDate", "تاريخ التعيين", "date"],
+            ["salary", "الراتب", "number"],
+            ["phone", "رقم الهاتف"],
+            ["manager", "المدير المباشر"],
+          ].map(([k, l, t]) => (
+            <Label key={k} t={l}>
+              <input
+                required
+                type={t || "text"}
+                value={f[k]}
+                onChange={(e) => setF({ ...f, [k]: e.target.value })}
+                className="field mt-2"
+              />
+            </Label>
+          ))}
+          <Label t="الفرع">
+            <select
+              value={f.branch}
+              onChange={(e) => setF({ ...f, branch: e.target.value })}
+              className="field mt-2"
+            >
+              {branches.map((x) => (
+                <option key={x}>{x}</option>
+              ))}
+            </select>
+          </Label>
+          <Label t="الوظيفة">
+            <select
+              value={f.job}
+              onChange={(e) => setF({ ...f, job: e.target.value })}
+              className="field mt-2"
+            >
+              {jobs.map((x) => (
+                <option key={x}>{x}</option>
+              ))}
+            </select>
+          </Label>
+          <Label t="الحالة">
+            <select
+              value={f.status}
+              onChange={(e) => setF({ ...f, status: e.target.value })}
+              className="field mt-2"
+            >
+              <option>نشط</option>
+              <option>إجازة</option>
+              <option>موقوف</option>
+            </select>
+          </Label>
+        </div>
+        <div className="mt-7 flex justify-end gap-2">
+          <button type="button" onClick={close} className="btn-secondary">
+            إلغاء
+          </button>
+          <button className="btn-primary">
+            <Save size={17} /> حفظ البيانات
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+function Templates() {
+  const [job, setJob] = useState(jobs[0]);
+  return (
+    <div className="space-y-5">
+      <PageHead
+        title="نماذج التقييم"
+        desc="نماذج مرنة ومخصصة لكل وظيفة"
+        action={
+          <button className="btn-primary">
+            <Plus size={17} /> نموذج جديد
+          </button>
+        }
+      />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        {jobs.map((x) => (
+          <button
+            onClick={() => setJob(x)}
+            key={x}
+            className={`panel p-4 text-right ${job === x ? "border-brand-700 ring-2 ring-brand-100" : ""}`}
+          >
+            <div
+              className={`mb-3 grid h-10 w-10 place-items-center rounded-xl ${job === x ? "bg-brand-700 text-white" : "bg-slate-100"}`}
+            >
+              <BriefcaseBusiness size={19} />
+            </div>
+            <b className="text-sm">{x}</b>
+            <p className="mt-1 text-[11px] text-slate-400">
+              10 معايير • 100 نقطة
+            </p>
+          </button>
+        ))}
+      </div>
+      <div className="panel p-5">
+        <div className="mb-5 flex justify-between">
+          <div>
+            <h3 className="text-lg font-extrabold">نموذج تقييم: {job}</h3>
+            <p className="text-xs text-slate-500">
+              الأوزان موزعة على معايير الأداء الأساسية
+            </p>
+          </div>
+          <button className="btn-secondary">
+            <Pencil size={16} /> تعديل الأوزان
+          </button>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>معيار التقييم</th>
+                <th>الوزن النسبي</th>
+                <th>الدرجة القصوى</th>
+                <th>الحالة</th>
+              </tr>
+            </thead>
+            <tbody>
+              {criteria.map((c, i) => (
+                <tr key={c}>
+                  <td>{i + 1}</td>
+                  <td className="font-bold">{c}</td>
+                  <td>{weights[i]}%</td>
+                  <td>5 درجات</td>
+                  <td>
+                    <Status>نشط</Status>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+function Evaluations({ employees, evaluations, setEvaluations }) {
+  const [empId, setEmpId] = useState(employees[0]?.id),
+    [month, setMonth] = useState("2026-07"),
+    [scores, setScores] = useState(criteria.map(() => 4)),
+    [notes, setNotes] = useState(""),
+    emp = employees.find((e) => e.id === empId),
+    total = Math.round(
+      scores.reduce((s, x, i) => s + (Number(x) * weights[i]) / 5, 0),
+    );
+  useEffect(() => {
+    const old = evaluations.find(
+      (e) => e.employeeId === empId && e.month === month,
+    );
+    setScores(old?.scores || criteria.map(() => 4));
+    setNotes(old?.notes || "");
+  }, [empId, month, evaluations]);
+  const save = () => {
+    const old = evaluations.find(
+        (e) => e.employeeId === empId && e.month === month,
+      ),
+      record = {
+        id: old?.id || `EV-${Date.now()}`,
+        employeeId: empId,
+        month,
+        scores,
+        total,
+        status: old?.status || "قيد المراجعة",
+        notes,
+      };
+    setEvaluations((list) =>
+      old ? list.map((e) => (e.id === old.id ? record : e)) : [record, ...list],
+    );
+    alert(old ? "تم تعديل التقييم السابق" : "تم حفظ التقييم");
+  };
+  return (
+    <div className="space-y-5">
+      <PageHead
+        title="تقييم أداء الموظفين"
+        desc="إدخال الدرجات واحتساب النتيجة تلقائيًا"
+        action={
+          <button onClick={() => window.print()} className="btn-secondary">
+            <Printer size={17} /> طباعة / PDF
+          </button>
+        }
+      />
+      <div className="panel grid gap-4 p-5 md:grid-cols-3">
+        <Label t="الموظف">
+          <select
+            value={empId}
+            onChange={(e) => setEmpId(e.target.value)}
+            className="field mt-2"
+          >
+            {employees.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.name}
+              </option>
+            ))}
+          </select>
+        </Label>
+        <Label t="شهر التقييم">
+          <input
+            type="month"
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+            className="field mt-2"
+          />
+        </Label>
+        <Label t="الوظيفة">
+          <input
+            value={emp?.job || ""}
+            disabled
+            className="field mt-2 bg-slate-50"
+          />
+        </Label>
+      </div>
+      <div className="grid gap-5 xl:grid-cols-[1fr_290px]">
+        <div className="panel p-5">
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>المعيار</th>
+                  <th>الوزن</th>
+                  <th>الدرجة من 5</th>
+                  <th>النتيجة</th>
+                </tr>
+              </thead>
+              <tbody>
+                {criteria.map((c, i) => (
+                  <tr key={c}>
+                    <td className="font-bold">{c}</td>
+                    <td>{weights[i]}%</td>
+                    <td>
+                      <select
+                        value={scores[i]}
+                        onChange={(e) =>
+                          setScores(
+                            scores.map((x, j) =>
+                              j === i ? Number(e.target.value) : x,
+                            ),
+                          )
+                        }
+                        className="field !h-9 !w-24"
+                      >
+                        {[1, 2, 3, 4, 5].map((n) => (
+                          <option key={n}>{n}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="font-bold text-brand-700">
+                      {(scores[i] * weights[i]) / 5} / {weights[i]}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Label t="ملاحظات المدير">
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows="3"
+              className="field mt-2 !h-auto py-3"
+            />
+          </Label>
+        </div>
+        <div className="space-y-4">
+          <div className="panel p-6 text-center">
+            <div className="mx-auto mb-4 grid h-32 w-32 place-items-center rounded-full border-[10px] border-brand-100">
+              <b className="text-4xl text-brand-700">{total}%</b>
+            </div>
+            <Status>{classify(total)}</Status>
+            <p className="mt-4 text-xs leading-5 text-slate-500">
+              محسوب حسب نموذج وظيفة {emp?.job}
+            </p>
+          </div>
+          <button onClick={save} className="btn-primary h-12 w-full">
+            <Save size={18} /> حفظ التقييم
+          </button>
+          <p className="rounded-xl bg-blue-50 p-3 text-xs text-blue-700">
+            وجود تقييم لنفس الشهر يؤدي إلى تعديل السجل السابق، لا إنشاء نسخة
+            مكررة.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+function Productivity({ employees }) {
+  const list = employees.filter((e) =>
+      ["كاشير", "خدمة عملاء وتحويلات واتس", "عمليات مصرفية"].includes(e.job),
+    ),
+    [v, setV] = useState({
+      receive: 142,
+      pay: 168,
+      sell: 46,
+      buy: 39,
+      errors: 2,
+      complaints: 1,
+      time: 7,
+    }),
+    score = Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(
+          (v.receive + v.pay + v.sell + v.buy) / 5 -
+            v.errors * 4 -
+            v.complaints * 5 -
+            v.time,
+        ),
+      ),
+    );
+  return (
+    <Entry
+      title="مؤشرات الإنتاجية"
+      desc="قياس حجم العمليات وجودتها وسرعة الإنجاز"
+    >
+      <Label t="الموظف">
+        <select className="field mt-2 max-w-md">
+          {list.map((e) => (
+            <option key={e.id}>
+              {e.name} — {e.job}
+            </option>
+          ))}
+        </select>
+      </Label>
+      <Fields
+        values={v}
+        set={setV}
+        items={[
+          ["receive", "عمليات قبض الحوالات"],
+          ["pay", "عمليات صرف الحوالات"],
+          ["sell", "عمليات بيع العملات"],
+          ["buy", "عمليات شراء العملات"],
+          ["errors", "عدد الأخطاء"],
+          ["complaints", "شكاوى العملاء"],
+          ["time", "متوسط وقت الخدمة (دقيقة)"],
+        ]}
+      />
+      <Score n={score} label="نقاط الإنتاجية" />
+      <button className="btn-primary">
+        <Save size={17} /> حفظ مؤشرات الشهر
+      </button>
+    </Entry>
+  );
+}
+function Discipline({ employees }) {
+  const [v, setV] = useState({
+      present: 25,
+      absent: 1,
+      late: 18,
+      early: 0,
+      violations: 0,
+      penalties: 0,
+    }),
+    score = Math.max(
+      0,
+      100 -
+        v.absent * 7 -
+        Math.ceil(v.late / 15) * 2 -
+        v.early * 3 -
+        v.violations * 8 -
+        v.penalties * 10,
+    );
+  return (
+    <Entry title="الانضباط الوظيفي" desc="متابعة الحضور والتأخير والمخالفات">
+      <Label t="الموظف">
+        <select className="field mt-2 max-w-md">
+          {employees.map((e) => (
+            <option key={e.id}>{e.name}</option>
+          ))}
+        </select>
+      </Label>
+      <Fields
+        values={v}
+        set={setV}
+        items={[
+          ["present", "أيام الحضور"],
+          ["absent", "أيام الغياب"],
+          ["late", "التأخير بالدقائق"],
+          ["early", "الانصراف المبكر"],
+          ["violations", "المخالفات"],
+          ["penalties", "الجزاءات"],
+        ]}
+      />
+      <Label t="ملاحظات الموارد البشرية">
+        <textarea className="field mt-2 !h-auto py-3" rows="3" />
+      </Label>
+      <Score n={score} label="درجة الانضباط" />
+      <button className="btn-primary">
+        <Save size={17} /> حفظ سجل الانضباط
+      </button>
+    </Entry>
+  );
+}
+function Fields({ values, set, items }) {
+  return (
+    <div className="grid gap-4 md:grid-cols-3">
+      {items.map(([k, l]) => (
+        <Label key={k} t={l}>
+          <input
+            type="number"
+            value={values[k]}
+            onChange={(e) => set({ ...values, [k]: Number(e.target.value) })}
+            className="field mt-2"
+          />
+        </Label>
+      ))}
+    </div>
+  );
+}
+function Entry({ title, desc, children }) {
+  return (
+    <div className="space-y-5">
+      <PageHead title={title} desc={desc} />
+      <div className="panel space-y-6 p-6">{children}</div>
+    </div>
+  );
+}
+function Score({ n, label }) {
+  return (
+    <div className="flex items-center gap-4 rounded-2xl bg-slate-50 p-4">
+      <div className="grid h-16 w-16 place-items-center rounded-2xl bg-brand-700 text-xl font-bold text-white">
+        {n}
+      </div>
+      <div>
+        <b>{label}</b>
+        <p className="text-xs text-slate-500">
+          يتم تحديثها تلقائيًا حسب البيانات المدخلة
+        </p>
+      </div>
+      <Status>{classify(n)}</Status>
+    </div>
+  );
+}
+function calcIncentives(employees, evaluations) {
+  return evaluations.map((ev) => {
+    const e = employees.find((x) => x.id === ev.employeeId),
+      cat = classify(ev.total),
+      rate =
+        cat === "ممتاز"
+          ? 0.1
+          : cat === "جيد جدًا"
+            ? 0.07
+            : cat === "جيد"
+              ? 0.04
+              : 0;
+    return {
+      ...e,
+      total: ev.total,
+      rate,
+      amount: (e?.salary || 0) * rate * (ev.total / 100),
+      approval: ev.status,
+    };
+  });
+}
+function calcIncentivesSafe(employees, evaluations) {
+  return evaluations.map((ev) => {
+    const employee = employees.find((x) => x.id === ev.employeeId) || {};
+    const total = effectiveEvaluationTotal(ev);
+    const cat = classify(total);
+    const rate = cat === "ممتاز" ? 0.1 : cat === "جيد جدًا" ? 0.07 : cat === "جيد" ? 0.04 : 0;
+    return {
+      ...employee,
+      evaluation: ev,
+      total,
+      rate,
+      amount: (employee.salary || 0) * rate * (total / 100),
+      approval: ev.status,
+    };
+  });
+}
+function Incentives({ employees, evaluations, setEvaluations }) {
+  const data = calcIncentives(employees, evaluations);
+  return (
+    <div className="space-y-5">
+      <PageHead
+        title="الحوافز والمكافآت"
+        desc="احتساب آلي وفق الراتب والتقييم ونسبة الحافز"
+        action={
+          <button
+            onClick={() => exportExcel(data, "الحوافز")}
+            className="btn-primary"
+          >
+            <Download size={17} /> تصدير الكشف
+          </button>
+        }
+      />
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Mini
+          label="إجمالي الحوافز"
+          value={money(data.reduce((s, x) => s + x.amount, 0))}
+          I={CircleDollarSign}
+        />
+        <Mini
+          label="المستحقون"
+          value={data.filter((x) => x.rate > 0).length}
+          I={UserCheck}
+        />
+        <Mini
+          label="بانتظار الاعتماد"
+          value={evaluations.filter((x) => x.status === "قيد المراجعة").length}
+          I={Clock3}
+        />
+      </div>
+      <div className="panel p-4">
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>الموظف</th>
+                <th>الفرع</th>
+                <th>الوظيفة</th>
+                <th>الراتب</th>
+                <th>التقييم</th>
+                <th>النسبة</th>
+                <th>الحافز المقترح</th>
+                <th>الاعتماد</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((x) => (
+                <tr key={x.id + x.total}>
+                  <td className="font-bold">{x.name}</td>
+                  <td>{x.branch}</td>
+                  <td>{x.job}</td>
+                  <td>{money(x.salary)}</td>
+                  <td>
+                    <Status>{classify(x.total)}</Status> {x.total}%
+                  </td>
+                  <td>{x.rate * 100}%</td>
+                  <td className="font-extrabold text-brand-700">
+                    {money(x.amount)}
+                  </td>
+                  <td>
+                    <select
+                      value={x.approval}
+                      onChange={(e) =>
+                        setEvaluations((list) =>
+                          list.map((ev) =>
+                            ev.employeeId === x.id
+                              ? { ...ev, status: e.target.value }
+                              : ev,
+                          ),
+                        )
+                      }
+                      className="field !h-9 !w-32"
+                    >
+                      <option>قيد المراجعة</option>
+                      <option>معتمد</option>
+                      <option>مرفوض</option>
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+function TopEmployees({ employees, evaluations }) {
+  const winners = branches.map((b) => {
+      const ids = employees.filter((e) => e.branch === b).map((e) => e.id),
+        ev = [...evaluations]
+          .filter((e) => ids.includes(e.employeeId))
+          .sort((a, z) => z.total - a.total)[0];
+      return {
+        ...employees.find((e) => e.id === ev?.employeeId),
+        total: ev?.total || 0,
+      };
+    }),
+    best = [...winners].sort((a, b) => b.total - a.total)[0];
+  return (
+    <div className="space-y-5">
+      <PageHead
+        title="موظف الشهر"
+        desc="تكريم أصحاب الأداء الأعلى"
+        action={
+          <button onClick={() => window.print()} className="btn-secondary">
+            <Printer size={17} /> طباعة شهادة
+          </button>
+        }
+      />
+      <div className="rounded-3xl bg-gradient-to-l from-brand-900 to-[#26151a] p-8 text-white">
+        <div className="flex flex-col items-center gap-6 sm:flex-row">
+          <div className="grid h-28 w-28 place-items-center rounded-full border-4 border-amber-300 bg-white/10 text-3xl font-bold">
+            {best.name
+              ?.split(" ")
+              .slice(0, 2)
+              .map((x) => x[0])
+              .join("")}
+          </div>
+          <div>
+            <span className="rounded-full bg-amber-300 px-3 py-1 text-xs font-bold text-amber-950">
+              الأفضل على مستوى الشركة
+            </span>
+            <h2 className="mt-4 text-3xl font-extrabold">{best.name}</h2>
+            <p className="mt-2 text-red-100/70">
+              {best.job} • {best.branch}
+            </p>
+            <p className="mt-4 text-sm text-red-100/80">
+              لتميزه في دقة العمل والالتزام وتقديم تجربة استثنائية للعملاء.
+            </p>
+          </div>
+          <b className="sm:mr-auto text-5xl text-amber-300">{best.total}%</b>
+        </div>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {winners.map((x, i) => (
+          <div key={x.branch} className="panel p-5">
+            <div className="flex items-center gap-3">
+              <div className="grid h-12 w-12 place-items-center rounded-xl bg-brand-50 font-bold text-brand-700">
+                {i + 1}
+              </div>
+              <div>
+                <b>{x.name}</b>
+                <p className="text-xs text-slate-500">
+                  {x.branch} • {x.job}
+                </p>
+              </div>
+              <b className="mr-auto text-xl text-brand-700">{x.total}%</b>
+            </div>
+            <div className="mt-4 flex gap-2">
+              {["دقة عالية", "خدمة مميزة", "انضباط"].map((t) => (
+                <span
+                  key={t}
+                  className="rounded-full bg-slate-100 px-2 py-1 text-xs"
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+function Plans({ employees, evaluations }) {
+  const weak = evaluations
+    .filter((e) => e.total < 70)
+    .map((ev) => ({
+      ...employees.find((x) => x.id === ev.employeeId),
+      total: ev.total,
+    }));
+  return (
+    <div className="space-y-5">
+      <PageHead
+        title="خطط تحسين الأداء"
+        desc="متابعة الموظفين الأقل من 70%"
+        action={
+          <button className="btn-primary">
+            <Plus size={17} /> خطة تحسين
+          </button>
+        }
+      />
+      <div className="grid gap-4 lg:grid-cols-2">
+        {weak.map((e) => (
+          <div key={e.id} className="panel p-5">
+            <div className="flex items-center gap-3">
+              <div className="grid h-11 w-11 place-items-center rounded-xl bg-red-50 text-red-700">
+                <TrendingUp />
+              </div>
+              <div>
+                <b>{e.name}</b>
+                <p className="text-xs text-slate-500">
+                  {e.job} • {e.branch}
+                </p>
+              </div>
+              <b className="mr-auto text-xl text-red-600">{e.total}%</b>
+            </div>
+            <div className="my-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-4 text-xs">
+              <Info t="سبب الانخفاض" v="الحاجة لرفع الدقة وسرعة الإنجاز" />
+              <Info t="المسؤول" v="مدير الفرع" />
+              <Info t="بداية الخطة" v="01 يوليو 2026" />
+              <Info t="نهاية الخطة" v="31 يوليو 2026" />
+            </div>
+            <Status>قيد المراجعة</Status>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+function Reports({ employees, evaluations }) {
+  const reps = [
+    ["التقرير المالي للأداء الشهري", Wallet],
+    ["التقييم الشهري", CalendarCheck],
+    ["التقييم حسب الفرع", Building2],
+    ["التقييم حسب الوظيفة", BriefcaseBusiness],
+    ["تقرير الحوافز", Gift],
+    ["الموظفون الضعفاء", AlertTriangle],
+    ["أفضل الموظفين", Trophy],
+    ["تقرير الانضباط", Clock3],
+    ["تقرير المخالفات", MessageSquareWarning],
+    ["مقارنة الفروع", FileBarChart],
+  ];
+  return (
+    <div className="space-y-5">
+      <PageHead title="مركز التقارير" desc="تقارير جاهزة لاتخاذ القرار" />
+      <div className="panel flex flex-wrap gap-3 p-4">
+        <select className="field max-w-[180px]">
+          <option>يونيو 2026</option>
+        </select>
+        <select className="field max-w-[190px]">
+          <option>جميع الفروع</option>
+          {branches.map((x) => (
+            <option key={x}>{x}</option>
+          ))}
+        </select>
+        <button className="btn-secondary">
+          <Filter size={17} /> تطبيق الفلاتر
+        </button>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {reps.map(([t, I], i) => (
+          <div key={t} className="panel p-5">
+            <div className="grid h-11 w-11 place-items-center rounded-xl bg-slate-100 text-brand-700">
+              <I />
+            </div>
+            <h3 className="mt-4 font-extrabold">{t}</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              تقرير تفصيلي جاهز للتصدير والطباعة
+            </p>
+            <div className="mt-5 flex gap-2">
+              <button
+                onClick={() =>
+                  exportExcel(
+                    i === 3
+                      ? calcIncentives(employees, evaluations)
+                      : evaluations,
+                    t,
+                  )
+                }
+                className="btn-secondary flex-1"
+              >
+                <FileSpreadsheet size={15} /> Excel
+              </button>
+              <button
+                onClick={() => window.print()}
+                className="btn-secondary flex-1"
+              >
+                <Printer size={15} /> PDF
+              </button>
+              <button className="btn-secondary !px-3">
+                <Eye size={15} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+function LegacySettingsPage({ settings, setSettings, setEmployees }) {
+  const tabs = [
+    ["مدير النظام", UserRoundCog],
+    ["الفروع", Building2],
+    ["الوظائف", BriefcaseBusiness],
+    ["معايير التقييم", ClipboardList],
+    ["الصلاحيات", ShieldCheck],
+  ];
+  const [tab, setTab] = useState("مدير النظام"),
+    [edit, setEdit] = useState(null);
+  const key =
+    tab === "الفروع"
+      ? "branches"
+      : tab === "الوظائف"
+        ? "jobs"
+        : tab === "معايير التقييم"
+          ? "criteria"
+          : "permissions";
+  const items = settings[key] || [];
+  const updateItem = () => {
+    if (!edit) return;
+    const old = items[edit.index],
+      next = [...items];
+    next[edit.index] =
+      tab === "الصلاحيات"
+        ? { name: edit.name.trim(), description: edit.description.trim() }
+        : edit.value.trim();
+    if (!next[edit.index] || (tab === "الصلاحيات" && !next[edit.index].name))
+      return;
+    setSettings({ ...settings, [key]: next });
+    if (tab === "الفروع")
+      setEmployees((list) =>
+        list.map((e) =>
+          e.branch === old ? { ...e, branch: next[edit.index] } : e,
+        ),
+      );
+    if (tab === "الوظائف")
+      setEmployees((list) =>
+        list.map((e) => (e.job === old ? { ...e, job: next[edit.index] } : e)),
+      );
+    setEdit(null);
+  };
+  return (
+    <div className="space-y-5">
+      <PageHead
+        title="إعدادات النظام"
+        desc="تعديل بيانات النظام والصلاحيات مع الحفظ التلقائي"
+      />
+      <div className="grid gap-5 lg:grid-cols-[250px_1fr]">
+        <div className="panel h-fit p-3">
+          {tabs.map(([x, I]) => (
+            <button
+              key={x}
+              onClick={() => setTab(x)}
+              className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-bold ${tab === x ? "bg-brand-50 text-brand-700" : "text-slate-500 hover:bg-slate-50"}`}
+            >
+              <I size={18} />
+              {x}
+            </button>
+          ))}
+        </div>
+        <div className="panel p-5">
+          {tab === "مدير النظام" ? (
+            <div>
+              <div className="mb-6 flex items-center gap-4 border-b pb-5">
+                <div className="grid h-14 w-14 place-items-center rounded-2xl bg-brand-700 text-lg font-extrabold text-white">
+                  {settings.manager.name
+                    .split(" ")
+                    .slice(0, 2)
+                    .map((x) => x[0])
+                    .join("")}
+                </div>
+                <div>
+                  <h3 className="text-lg font-extrabold">بيانات مدير النظام</h3>
+                  <p className="text-xs text-slate-500">
+                    تظهر هذه البيانات في الشريط العلوي والقائمة الجانبية
+                  </p>
+                </div>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Label t="اسم مدير النظام">
+                  <input
+                    value={settings.manager.name}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        manager: { ...settings.manager, name: e.target.value },
+                      })
+                    }
+                    className="field mt-2"
+                  />
+                </Label>
+                <Label t="اسم المستخدم">
+                  <input
+                    value={settings.manager.username}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        manager: {
+                          ...settings.manager,
+                          username: e.target.value,
+                        },
+                      })
+                    }
+                    className="field mt-2"
+                  />
+                </Label>
+                <Label t="المسمى / الصلاحية">
+                  <input
+                    value={settings.manager.role}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        manager: { ...settings.manager, role: e.target.value },
+                      })
+                    }
+                    className="field mt-2"
+                  />
+                </Label>
+              </div>
+              <div className="mt-6 flex items-center justify-between rounded-xl bg-emerald-50 p-4 text-sm text-emerald-700">
+                <span>
+                  يتم حفظ التعديلات تلقائيًا في قاعدة البيانات المحلية.
+                </span>
+                <Save size={18} />
+              </div>
+            </div>
+          ) : isPermission ? (
+            <PermissionsMatrix settings={settings} setSettings={setSettings} />
+          ) : (
+            <div>
+              <div className="mb-5">
+                <h3 className="text-lg font-extrabold">إدارة {tab}</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  اضغط على زر التعديل لتغيير البيانات، وسيُطبّق التغيير في بقية
+                  النظام.
+                </p>
+              </div>
+              <div className="space-y-2">
+                {items.map((item, i) => {
+                  const name = tab === "الصلاحيات" ? item.name : item,
+                    description = tab === "الصلاحيات" ? item.description : null;
+                  return (
+                    <div
+                      key={`${name}-${i}`}
+                      className="flex items-center rounded-xl border border-slate-200 p-4"
+                    >
+                      <span className="grid h-9 w-9 place-items-center rounded-lg bg-slate-100 text-xs font-bold">
+                        {i + 1}
+                      </span>
+                      <div className="mr-3">
+                        <b className="text-sm">{name}</b>
+                        {description && (
+                          <p className="mt-1 text-xs text-slate-500">
+                            {description}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        aria-label={`تعديل ${name}`}
+                        onClick={() =>
+                          setEdit(
+                            tab === "الصلاحيات"
+                              ? {
+                                  index: i,
+                                  name: item.name,
+                                  description: item.description,
+                                }
+                              : { index: i, value: item },
+                          )
+                        }
+                        className="mr-auto rounded-lg p-2 text-blue-600 hover:bg-blue-50"
+                      >
+                        <Pencil size={17} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+      {edit && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+          <div className="panel w-full max-w-md p-6">
+            <div className="mb-5 flex items-center">
+              <h3 className="text-lg font-extrabold">تعديل {tab}</h3>
+              <button onClick={() => setEdit(null)} className="mr-auto">
+                <X />
+              </button>
+            </div>
+            {tab === "الصلاحيات" ? (
+              <div className="space-y-4">
+                <Label t="اسم الصلاحية">
+                  <input
+                    value={edit.name}
+                    onChange={(e) => setEdit({ ...edit, name: e.target.value })}
+                    className="field mt-2"
+                  />
+                </Label>
+                <Label t="وصف الصلاحية">
+                  <textarea
+                    value={edit.description}
+                    onChange={(e) =>
+                      setEdit({ ...edit, description: e.target.value })
+                    }
+                    rows="3"
+                    className="field mt-2 !h-auto py-3"
+                  />
+                </Label>
+              </div>
+            ) : (
+              <Label
+                t={
+                  tab === "الفروع"
+                    ? "اسم الفرع"
+                    : tab === "الوظائف"
+                      ? "اسم الوظيفة"
+                      : "اسم معيار التقييم"
+                }
+              >
+                <input
+                  autoFocus
+                  value={edit.value}
+                  onChange={(e) => setEdit({ ...edit, value: e.target.value })}
+                  className="field mt-2"
+                />
+              </Label>
+            )}
+            <div className="mt-6 flex justify-end gap-2">
+              <button onClick={() => setEdit(null)} className="btn-secondary">
+                إلغاء
+              </button>
+              <button onClick={updateItem} className="btn-primary">
+                <Save size={17} /> حفظ التعديل
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+function SettingsPage({
+  settings,
+  setSettings,
+  employees,
+  setEmployees,
+  setEvaluations,
+}) {
+  const tabs = [
+    ["مدير النظام", UserRoundCog],
+    ["الفروع", Building2],
+    ["العملات", CircleDollarSign],
+    ["الوظائف", BriefcaseBusiness],
+    ["معايير التقييم", ClipboardList],
+    ["المستخدمون", Users],
+    ["الصلاحيات", ShieldCheck],
+  ];
+  const [tab, setTab] = useState("مدير النظام"),
+    [selected, setSelected] = useState(null),
+    [dialog, setDialog] = useState(null);
+  const key =
+    tab === "الفروع"
+      ? "branches"
+      : tab === "العملات"
+        ? "currencies"
+        : tab === "الوظائف"
+          ? "jobs"
+          : tab === "معايير التقييم"
+            ? "criteria"
+            : tab === "المستخدمون"
+              ? "users"
+            : "permissions";
+  const items = settings[key] || defaultSettings[key] || [];
+  const isPermission = tab === "الصلاحيات";
+  const isUser = tab === "المستخدمون";
+  const openAdd = () =>
+    setDialog(
+      isUser
+        ? {
+            mode: "add",
+            name: "",
+            username: "",
+            password: "",
+            role: "الموظف",
+            employeeId: "",
+          }
+        : isPermission
+        ? { mode: "add", name: "", description: "" }
+        : { mode: "add", value: "" },
+    );
+  const openEdit = () => {
+    if (selected === null) return;
+    const item = items[selected];
+    setDialog(
+      isUser
+        ? { mode: "edit", index: selected, ...item }
+        : isPermission
+        ? {
+            mode: "edit",
+            index: selected,
+            name: item.name,
+            description: item.description,
+          }
+        : { mode: "edit", index: selected, value: item },
+    );
+  };
+  const saveItem = () => {
+    if (!dialog) return;
+    const value = isUser
+      ? {
+          name: dialog.name.trim(),
+          username: dialog.username.trim(),
+          password: dialog.password,
+          role: dialog.role,
+          employeeId: dialog.employeeId,
+        }
+      : isPermission
+        ? { name: dialog.name.trim(), description: dialog.description.trim() }
+        : dialog.value.trim();
+    if (
+      !value ||
+      (isPermission && !value.name) ||
+      (isUser && (!value.name || !value.username || !value.password))
+    )
+      return;
+    const next = [...items],
+      old = dialog.mode === "edit" ? items[dialog.index] : null;
+    if (dialog.mode === "add") next.push(value);
+    else next[dialog.index] = value;
+    setSettings({ ...settings, [key]: next });
+    if (dialog.mode === "edit" && tab === "الفروع")
+      setEmployees((list) =>
+        list.map((e) => (e.branch === old ? { ...e, branch: value } : e)),
+      );
+    if (dialog.mode === "edit" && tab === "الوظائف")
+      setEmployees((list) =>
+        list.map((e) => (e.job === old ? { ...e, job: value } : e)),
+      );
+    if (tab === "معايير التقييم" && dialog.mode === "add")
+      setEvaluations((list) =>
+        list.map((e) => ({ ...e, scores: [...(e.scores || []), 3] })),
+      );
+    setDialog(null);
+    setSelected(null);
+  };
+  const deleteItem = () => {
+    if (selected === null) return;
+    if ((tab === "الفروع" || tab === "الوظائف") && items.length === 1) {
+      alert("يجب الإبقاء على عنصر واحد على الأقل.");
+      return;
+    }
+    const item = items[selected],
+      name = isPermission || isUser ? item.name : item;
+    if (!confirm(`هل تريد حذف «${name}»؟`)) return;
+    const next = items.filter((_, i) => i !== selected);
+    setSettings({ ...settings, [key]: next });
+    if (tab === "الفروع")
+      setEmployees((list) =>
+        list.map((e) => (e.branch === item ? { ...e, branch: next[0] } : e)),
+      );
+    if (tab === "الوظائف")
+      setEmployees((list) =>
+        list.map((e) => (e.job === item ? { ...e, job: next[0] } : e)),
+      );
+    if (tab === "معايير التقييم")
+      setEvaluations((list) =>
+        list.map((e) => ({
+          ...e,
+          scores: (e.scores || []).filter((_, i) => i !== selected),
+        })),
+      );
+    setSelected(null);
+  };
+  const itemLabel =
+    tab === "الفروع"
+      ? "اسم الفرع"
+      : tab === "العملات"
+        ? "اسم العملة ورمزها"
+        : tab === "الوظائف"
+          ? "اسم الوظيفة"
+          : "اسم معيار التقييم";
+  const exportBackup = () => {
+    const backup = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      settings,
+      employees,
+      evaluations: JSON.parse(
+        localStorage.getItem("ep_evaluations") || "[]",
+      ),
+      objections: JSON.parse(localStorage.getItem("ep_objections") || "[]"),
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `نسخة-احتياطية-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  const importBackup = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const backup = JSON.parse(reader.result);
+        if (!backup.settings || !Array.isArray(backup.employees))
+          throw new Error("invalid");
+        setSettings(backup.settings);
+        setEmployees(backup.employees);
+        setEvaluations(backup.evaluations || []);
+        localStorage.setItem(
+          "ep_objections",
+          JSON.stringify(backup.objections || []),
+        );
+        alert("تم استيراد النسخة الاحتياطية بنجاح.");
+      } catch {
+        alert("ملف النسخة الاحتياطية غير صالح.");
+      }
+    };
+    reader.readAsText(file, "utf-8");
+    event.target.value = "";
+  };
+  return (
+    <div className="space-y-5">
+      <PageHead
+        title="إعدادات النظام"
+        desc="إضافة وتعديل وحذف البيانات المرجعية والصلاحيات"
+        action={
+          <div className="flex flex-wrap gap-2">
+            <button onClick={exportBackup} className="btn-secondary">
+              <Download size={17} /> تصدير نسخة احتياطية
+            </button>
+            <label className="btn-primary cursor-pointer">
+              <Upload size={17} /> استيراد نسخة
+              <input
+                type="file"
+                accept="application/json,.json"
+                onChange={importBackup}
+                className="hidden"
+              />
+            </label>
+          </div>
+        }
+      />
+      <div className="grid gap-5 lg:grid-cols-[250px_1fr]">
+        <div className="panel h-fit p-3">
+          {tabs.map(([x, I]) => (
+            <button
+              key={x}
+              onClick={() => {
+                setTab(x);
+                setSelected(null);
+                setDialog(null);
+              }}
+              className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-bold ${tab === x ? "bg-brand-50 text-brand-700" : "text-slate-500 hover:bg-slate-50"}`}
+            >
+              <I size={18} />
+              {x}
+            </button>
+          ))}
+        </div>
+        <div className="panel p-5">
+          {tab === "مدير النظام" ? (
+            <div>
+              <div className="mb-6 flex items-center gap-4 border-b pb-5">
+                <div className="grid h-14 w-14 place-items-center rounded-2xl bg-brand-700 text-lg font-extrabold text-white">
+                  {settings.manager.name
+                    .split(" ")
+                    .slice(0, 2)
+                    .map((x) => x[0])
+                    .join("")}
+                </div>
+                <div>
+                  <h3 className="text-lg font-extrabold">بيانات مدير النظام</h3>
+                  <p className="text-xs text-slate-500">
+                    يتم حفظ التغييرات تلقائيًا وتظهر في جميع أجزاء النظام
+                  </p>
+                </div>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Label t="اسم مدير النظام">
+                  <input
+                    value={settings.manager.name}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        manager: { ...settings.manager, name: e.target.value },
+                      })
+                    }
+                    className="field mt-2"
+                  />
+                </Label>
+                <Label t="اسم المستخدم">
+                  <input
+                    value={settings.manager.username}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        manager: {
+                          ...settings.manager,
+                          username: e.target.value,
+                        },
+                      })
+                    }
+                    className="field mt-2"
+                  />
+                </Label>
+                <Label t="المسمى / الصلاحية">
+                  <input
+                    value={settings.manager.role}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        manager: { ...settings.manager, role: e.target.value },
+                      })
+                    }
+                    className="field mt-2"
+                  />
+                </Label>
+              </div>
+              <div className="mt-6 flex items-center justify-between rounded-xl bg-emerald-50 p-4 text-sm text-emerald-700">
+                <span>تم تفعيل الحفظ التلقائي لبيانات مدير النظام.</span>
+                <Save size={18} />
+              </div>
+            </div>
+          ) : isPermission ? (
+            <PermissionsMatrix settings={settings} setSettings={setSettings} />
+          ) : (
+            <div>
+              <div className="mb-5 flex flex-wrap items-center gap-3">
+                <div>
+                  <h3 className="text-lg font-extrabold">إدارة {tab}</h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    اختر عنصرًا من القائمة، ثم استخدم أزرار الإضافة أو التعديل
+                    أو الحذف.
+                  </p>
+                </div>
+                <div className="mr-auto flex flex-wrap gap-2">
+                  <button onClick={openAdd} className="btn-primary">
+                    <Plus size={16} /> إضافة
+                  </button>
+                  <button
+                    disabled={selected === null}
+                    onClick={openEdit}
+                    className="btn-secondary disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Pencil size={16} /> تعديل
+                  </button>
+                  <button
+                    disabled={selected === null}
+                    onClick={deleteItem}
+                    className="inline-flex h-10 items-center gap-2 rounded-xl border border-red-200 bg-white px-4 text-sm font-bold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Trash2 size={16} /> حذف
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {items.map((item, i) => {
+                  const name = isPermission || isUser ? item.name : item,
+                    description = isPermission
+                      ? item.description
+                      : isUser
+                        ? `${item.username} • ${item.role}${item.employeeId ? ` • ${item.employeeId}` : ""}`
+                        : null;
+                  return (
+                    <button
+                      key={`${name}-${i}`}
+                      onClick={() => setSelected(i)}
+                      className={`flex w-full items-center rounded-xl border p-4 text-right transition ${selected === i ? "border-brand-700 bg-brand-50 ring-2 ring-brand-100" : "border-slate-200 hover:bg-slate-50"}`}
+                    >
+                      <span
+                        className={`grid h-9 w-9 place-items-center rounded-lg text-xs font-bold ${selected === i ? "bg-brand-700 text-white" : "bg-slate-100"}`}
+                      >
+                        {i + 1}
+                      </span>
+                      <div className="mr-3">
+                        <b className="text-sm">{name}</b>
+                        {description && (
+                          <p className="mt-1 text-xs font-normal text-slate-500">
+                            {description}
+                          </p>
+                        )}
+                      </div>
+                      {selected === i && (
+                        <span className="mr-auto text-xs font-bold text-brand-700">
+                          محدد
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+                {items.length === 0 && (
+                  <div className="rounded-xl border border-dashed p-10 text-center text-sm text-slate-400">
+                    لا توجد بيانات. اضغط «إضافة» لإنشاء أول عنصر.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+      {dialog && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+          <div className="panel w-full max-w-md p-6">
+            <div className="mb-5 flex items-center">
+              <h3 className="text-lg font-extrabold">
+                {dialog.mode === "add" ? "إضافة" : "تعديل"} {tab}
+              </h3>
+              <button
+                aria-label="إغلاق"
+                onClick={() => setDialog(null)}
+                className="mr-auto"
+              >
+                <X />
+              </button>
+            </div>
+            {isUser ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Label t="اسم المستخدم الكامل">
+                  <input
+                    autoFocus
+                    value={dialog.name}
+                    onChange={(e) =>
+                      setDialog({ ...dialog, name: e.target.value })
+                    }
+                    className="field mt-2"
+                  />
+                </Label>
+                <Label t="اسم الدخول">
+                  <input
+                    value={dialog.username}
+                    onChange={(e) =>
+                      setDialog({ ...dialog, username: e.target.value })
+                    }
+                    className="field mt-2"
+                  />
+                </Label>
+                <Label t="كلمة المرور">
+                  <input
+                    type="password"
+                    value={dialog.password}
+                    onChange={(e) =>
+                      setDialog({ ...dialog, password: e.target.value })
+                    }
+                    className="field mt-2"
+                  />
+                </Label>
+                <Label t="الصلاحية">
+                  <select
+                    value={dialog.role}
+                    onChange={(e) =>
+                      setDialog({ ...dialog, role: e.target.value })
+                    }
+                    className="field mt-2"
+                  >
+                    {(settings.permissions || defaultSettings.permissions).map(
+                      (permission) => (
+                        <option key={permission.name}>{permission.name}</option>
+                      ),
+                    )}
+                  </select>
+                </Label>
+                <Label t="ربط بالموظف">
+                  <select
+                    value={dialog.employeeId}
+                    onChange={(e) =>
+                      setDialog({ ...dialog, employeeId: e.target.value })
+                    }
+                    className="field mt-2"
+                  >
+                    <option value="">غير مرتبط</option>
+                    {employees.map((employee) => (
+                      <option key={employee.id} value={employee.id}>
+                        {employee.name} — {employee.id}
+                      </option>
+                    ))}
+                  </select>
+                </Label>
+              </div>
+            ) : isPermission ? (
+              <div className="space-y-4">
+                <Label t="اسم الصلاحية">
+                  <input
+                    autoFocus
+                    value={dialog.name}
+                    onChange={(e) =>
+                      setDialog({ ...dialog, name: e.target.value })
+                    }
+                    className="field mt-2"
+                  />
+                </Label>
+                <Label t="وصف الصلاحية">
+                  <textarea
+                    value={dialog.description}
+                    onChange={(e) =>
+                      setDialog({ ...dialog, description: e.target.value })
+                    }
+                    rows="3"
+                    className="field mt-2 !h-auto py-3"
+                  />
+                </Label>
+              </div>
+            ) : (
+              <Label t={itemLabel}>
+                <input
+                  autoFocus
+                  value={dialog.value}
+                  onChange={(e) =>
+                    setDialog({ ...dialog, value: e.target.value })
+                  }
+                  className="field mt-2"
+                  placeholder={`أدخل ${itemLabel}`}
+                />
+              </Label>
+            )}
+            <div className="mt-6 flex justify-end gap-2">
+              <button onClick={() => setDialog(null)} className="btn-secondary">
+                إلغاء
+              </button>
+              <button onClick={saveItem} className="btn-primary">
+                <Save size={17} /> حفظ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+function EnhancedTemplates({ settings, setSettings }) {
+  const [job, setJob] = useState(jobs[0]);
+  const [selected, setSelected] = useState(null);
+  const [dialog, setDialog] = useState(null);
+  const model = getJobCriteria(settings, job);
+  const totalWeight = model.reduce((s, x) => s + Number(x.weight || 0), 0);
+  const saveCriterion = () => {
+    if (!dialog?.name?.trim()) return;
+    const next = [...model];
+    const item = {
+      name: dialog.name.trim(),
+      weight: Number(dialog.weight || 0),
+      subWeights: {
+        cash200: Number(dialog.subWeights?.cash200 || 0),
+        cash500: Number(dialog.subWeights?.cash500 || 0),
+        cash1000: Number(dialog.subWeights?.cash1000 || 0),
+      },
+    };
+    if (dialog.mode === "add") next.push(item);
+    else next[dialog.index] = item;
+    updateJobCriteria(settings, setSettings, job, next);
+    setDialog(null);
+    setSelected(null);
+  };
+  const deleteCriterion = () => {
+    if (selected === null || model.length <= 1) return;
+    if (!confirm("هل تريد حذف معيار التقييم المحدد؟")) return;
+    updateJobCriteria(
+      settings,
+      setSettings,
+      job,
+      model.filter((_, i) => i !== selected),
+    );
+    setSelected(null);
+  };
+  const balanceWeights = () => {
+    const ws = defaultWeightsFor(model.length);
+    updateJobCriteria(
+      settings,
+      setSettings,
+      job,
+      model.map((x, i) => ({ ...x, weight: ws[i] })),
+    );
+  };
+  return (
+    <div className="space-y-5">
+      <PageHead
+        title="نماذج التقييم"
+        desc="معايير وأوزان مستقلة لكل وظيفة"
+        action={
+          <button onClick={balanceWeights} className="btn-secondary">
+            <Gauge size={17} /> توزيع الأوزان تلقائيًا
+          </button>
+        }
+      />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        {jobs.map((x) => (
+          <button
+            onClick={() => {
+              setJob(x);
+              setSelected(null);
+            }}
+            key={x}
+            className={`panel p-4 text-right ${job === x ? "border-brand-700 ring-2 ring-brand-100" : ""}`}
+          >
+            <div
+              className={`mb-3 grid h-10 w-10 place-items-center rounded-xl ${job === x ? "bg-brand-700 text-white" : "bg-slate-100"}`}
+            >
+              <BriefcaseBusiness size={19} />
+            </div>
+            <b className="text-sm">{x}</b>
+            <p className="mt-1 text-[11px] text-slate-400">
+              {getJobCriteria(settings, x).length} معايير • 100 نقطة
+            </p>
+          </button>
+        ))}
+      </div>
+      <div className="panel p-5">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-extrabold">نموذج تقييم: {job}</h3>
+            <p className="text-xs text-slate-500">
+              مجموع الأوزان الحالي:{" "}
+              <b className={totalWeight === 100 ? "text-emerald-600" : "text-red-600"}>{totalWeight}%</b>
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => setDialog({ mode: "add", name: "", weight: 10 })} className="btn-primary">
+              <Plus size={16} /> إضافة
+            </button>
+            <button
+              disabled={selected === null}
+              onClick={() => setDialog({ mode: "edit", index: selected, ...model[selected] })}
+              className="btn-secondary disabled:opacity-40"
+            >
+              <Pencil size={16} /> تعديل
+            </button>
+            <button
+              disabled={selected === null}
+              onClick={deleteCriterion}
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-red-200 bg-white px-4 text-sm font-bold text-red-600 hover:bg-red-50 disabled:opacity-40"
+            >
+              <Trash2 size={16} /> حذف
+            </button>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>معيار التقييم</th>
+                <th>الوزن النسبي</th>
+                <th>الدرجة القصوى</th>
+                <th>الحالة</th>
+              </tr>
+            </thead>
+            <tbody>
+              {model.map((c, i) => (
+                <tr
+                  key={`${c.name}-${i}`}
+                  onClick={() => setSelected(i)}
+                  className={selected === i ? "bg-brand-50" : ""}
+                >
+                  <td>{i + 1}</td>
+	                    <td className="font-bold">
+                        {c.name}
+                        {c.subWeights && (
+                          <p className="mt-1 text-[11px] font-normal text-slate-500">
+                            فئات النقد: 200 = {c.subWeights.cash200 || 0}% • 500 = {c.subWeights.cash500 || 0}% • 1000 = {c.subWeights.cash1000 || 0}%
+                          </p>
+                        )}
+                      </td>
+                  <td>{c.weight}%</td>
+                  <td>5 درجات</td>
+                  <td>
+                    <Status>نشط</Status>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {dialog && (
+        <CriteriaDialog dialog={dialog} setDialog={setDialog} onSave={saveCriterion} />
+      )}
+    </div>
+  );
+}
+
+function CriteriaDialog({ dialog, setDialog, onSave }) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+      <div className="panel w-full max-w-md p-6">
+        <div className="mb-5 flex items-center">
+          <h3 className="text-lg font-extrabold">{dialog.mode === "add" ? "إضافة معيار" : "تعديل معيار"}</h3>
+          <button onClick={() => setDialog(null)} className="mr-auto">
+            <X />
+          </button>
+        </div>
+        <div className="grid gap-4">
+          <Label t="اسم المعيار">
+            <input
+              autoFocus
+              value={dialog.name}
+              onChange={(e) => setDialog({ ...dialog, name: e.target.value })}
+              className="field mt-2"
+            />
+          </Label>
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
+            <b className="text-sm">أوزان الفئات النقدية للعداد</b>
+            <div className="mt-3 grid grid-cols-3 gap-3">
+              {[
+                ["cash200", "فئة 200"],
+                ["cash500", "فئة 500"],
+                ["cash1000", "فئة 1000"],
+              ].map(([key, label]) => (
+                <Label key={key} t={label}>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={dialog.subWeights?.[key] || 0}
+                    onChange={(e) =>
+                      setDialog({
+                        ...dialog,
+                        subWeights: {
+                          ...(dialog.subWeights || {}),
+                          [key]: e.target.value,
+                        },
+                      })
+                    }
+                    className="field mt-2"
+                  />
+                </Label>
+              ))}
+            </div>
+          </div>
+          <Label t="الوزن النسبي %">
+            <input
+              type="number"
+              min="0"
+              max="100"
+              value={dialog.weight}
+              onChange={(e) => setDialog({ ...dialog, weight: e.target.value })}
+              className="field mt-2"
+            />
+          </Label>
+        </div>
+        <div className="mt-6 flex justify-end gap-2">
+          <button onClick={() => setDialog(null)} className="btn-secondary">
+            إلغاء
+          </button>
+          <button onClick={onSave} className="btn-primary">
+            <Save size={17} /> حفظ
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EnhancedEvaluations({ employees, evaluations, setEvaluations, settings, setSettings }) {
+  const [empId, setEmpId] = useState(employees[0]?.id);
+  const [month, setMonth] = useState("2026-07");
+  const [notes, setNotes] = useState("");
+  const [scores, setScores] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [dialog, setDialog] = useState(null);
+  const emp = employees.find((e) => e.id === empId);
+  const model = getJobCriteria(settings, emp?.job);
+  const modelSignature = model
+    .map(
+      (item) =>
+        `${item.name}:${item.weight}:${item.subWeights?.cash200 || 0}:${item.subWeights?.cash500 || 0}:${item.subWeights?.cash1000 || 0}`,
+    )
+    .join("|");
+  const safeScores = normalizeScores(scores, model.length);
+  const total = scoreTotal(safeScores, model);
+  useEffect(() => {
+    const old = evaluations.find((e) => e.employeeId === empId && e.month === month);
+    setScores(normalizeScores(old?.scores, model.length));
+    setNotes(old?.notes || "");
+    setSelected(null);
+  }, [empId, month, evaluations, modelSignature]);
+  const changeEmployee = (nextEmployeeId) => {
+    const nextEmployee = employees.find((item) => item.id === nextEmployeeId);
+    const nextModel = getJobCriteria(settings, nextEmployee?.job);
+    const old = evaluations.find(
+      (item) => item.employeeId === nextEmployeeId && item.month === month,
+    );
+    setEmpId(nextEmployeeId);
+    setScores(normalizeScores(old?.scores, nextModel.length));
+    setNotes(old?.notes || "");
+    setSelected(null);
+  };
+  const printSelectedEvaluation = () => {
+    const rows = model
+      .map((c, i) => {
+        const sub = c.subWeights
+          ? ` <small>200: ${c.subWeights.cash200 || 0}% - 500: ${c.subWeights.cash500 || 0}% - 1000: ${c.subWeights.cash1000 || 0}%</small>`
+          : "";
+        return `<tr><td>${c.name}${sub}</td><td>${c.weight}%</td><td>${safeScores[i]}</td><td>${((safeScores[i] * c.weight) / 5).toFixed(1)}</td></tr>`;
+      })
+      .join("");
+    printDocument(
+      `تقييم أداء الموظف - ${emp?.name || empId}`,
+      `<h1>تقرير تقييم أداء موظف</h1>
+       <div style="margin:14px 0;padding:14px;border:1px solid #d7dce3;border-radius:12px">
+        <h2 style="margin:0 0 8px">اسم الموظف: ${emp?.name || ""}</h2>
+        <p><b>Employee_ID:</b> ${emp?.id || empId || ""}</p>
+        <p><b>الوظيفة:</b> ${emp?.job || ""} &nbsp; <b>الفرع:</b> ${emp?.branch || ""}</p>
+        <p><b>شهر التقييم:</b> ${month}</p>
+       </div>
+       <table><thead><tr><th>المعيار</th><th>الوزن</th><th>الدرجة</th><th>النتيجة</th></tr></thead><tbody>${rows}</tbody></table>
+       <h2>النتيجة النهائية: ${total}% - ${classify(total)}</h2>
+       <p><b>ملاحظات المدير:</b> ${notes || "لا توجد ملاحظات"}</p>`,
+    );
+  };
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const rows = model
+      .map((c, i) => {
+        const sub = c.subWeights
+          ? ` <small>200: ${c.subWeights.cash200 || 0}% - 500: ${c.subWeights.cash500 || 0}% - 1000: ${c.subWeights.cash1000 || 0}%</small>`
+          : "";
+        return `<tr><td>${c.name}${sub}</td><td>${c.weight}%</td><td>${safeScores[i]}</td><td>${((safeScores[i] * c.weight) / 5).toFixed(1)}</td></tr>`;
+      })
+      .join("");
+    window.__activeEvaluationReport = {
+      employeeId: emp?.id || empId,
+      title: `تقييم أداء الموظف - ${emp?.name || empId}`,
+      body: `<h1>تقرير تقييم أداء موظف</h1>
+       <div style="margin:14px 0;padding:14px;border:1px solid #d7dce3;border-radius:12px">
+        <h2 style="margin:0 0 8px">اسم الموظف: ${emp?.name || ""}</h2>
+        <p><b>Employee_ID:</b> ${emp?.id || empId || ""}</p>
+        <p><b>الوظيفة:</b> ${emp?.job || ""} &nbsp; <b>الفرع:</b> ${emp?.branch || ""}</p>
+        <p><b>شهر التقييم:</b> ${month}</p>
+       </div>
+       <table><thead><tr><th>المعيار</th><th>الوزن</th><th>الدرجة</th><th>النتيجة</th></tr></thead><tbody>${rows}</tbody></table>
+       <h2>النتيجة النهائية: ${total}% - ${classify(total)}</h2>
+       <p><b>ملاحظات المدير:</b> ${notes || "لا توجد ملاحظات"}</p>`,
+    };
+  }, [empId, emp?.name, emp?.job, emp?.branch, month, modelSignature, safeScores.join(","), total, notes]);
+  const save = () => {
+    const old = evaluations.find((e) => e.employeeId === empId && e.month === month);
+    const record = {
+      id: old?.id || `EV-${Date.now()}`,
+      employeeId: empId,
+      month,
+      job: emp?.job,
+      scores: safeScores,
+      criteriaSnapshot: model,
+      total,
+      status: old?.status || "قيد المراجعة",
+      notes,
+    };
+    setEvaluations((list) =>
+      old ? list.map((e) => (e.id === old.id ? record : e)) : [record, ...list],
+    );
+    alert(old ? "تم تعديل التقييم السابق" : "تم حفظ التقييم");
+  };
+  const saveCriterion = () => {
+    if (!dialog?.name?.trim() || !emp?.job) return;
+    const next = [...model];
+    const item = {
+      name: dialog.name.trim(),
+      weight: Number(dialog.weight || 0),
+      subWeights: {
+        cash200: Number(dialog.subWeights?.cash200 || 0),
+        cash500: Number(dialog.subWeights?.cash500 || 0),
+        cash1000: Number(dialog.subWeights?.cash1000 || 0),
+      },
+    };
+    if (dialog.mode === "add") {
+      next.push(item);
+      setScores([...safeScores, 4]);
+    } else next[dialog.index] = item;
+    updateJobCriteria(settings, setSettings, emp.job, next);
+    setDialog(null);
+    setSelected(null);
+  };
+  const deleteCriterion = () => {
+    if (selected === null || model.length <= 1 || !emp?.job) return;
+    if (!confirm("هل تريد حذف هذا المعيار من نموذج الوظيفة؟")) return;
+    updateJobCriteria(
+      settings,
+      setSettings,
+      emp.job,
+      model.filter((_, i) => i !== selected),
+    );
+    setScores(safeScores.filter((_, i) => i !== selected));
+    setSelected(null);
+  };
+  return (
+    <div className="space-y-5">
+      <PageHead
+        title="تقييم أداء الموظفين"
+        desc="يعرض النموذج المناسب تلقائيًا حسب وظيفة الموظف مع إمكانية تعديل المعايير والأوزان"
+        action={
+          <button
+            onClick={() =>
+              printDocument(
+                "تقييم أداء الموظف",
+                `<h1>تقييم أداء الموظف</h1><p>${emp?.name || ""} - ${emp?.job || ""}</p><table><thead><tr><th>المعيار</th><th>الوزن</th><th>الدرجة</th><th>النتيجة</th></tr></thead><tbody>${model
+                  .map((c, i) => `<tr><td>${c.name}</td><td>${c.weight}%</td><td>${safeScores[i]}</td><td>${((safeScores[i] * c.weight) / 5).toFixed(1)}</td></tr>`)
+                  .join("")}</tbody></table><h2>النتيجة النهائية: ${total}% - ${classify(total)}</h2><p>${notes || ""}</p>`,
+              )
+            }
+            className="btn-secondary"
+          >
+            <Printer size={17} /> طباعة / PDF
+          </button>
+        }
+      />
+      <div className="panel grid gap-4 p-5 md:grid-cols-3">
+        <Label t="الموظف">
+	          <select value={empId} onChange={(e) => changeEmployee(e.target.value)} className="field mt-2">
+            {employees.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.name}
+              </option>
+            ))}
+          </select>
+        </Label>
+        <Label t="شهر التقييم">
+          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="field mt-2" />
+        </Label>
+        <Label t="الوظيفة">
+          <input value={emp?.job || ""} disabled className="field mt-2 bg-slate-50" />
+        </Label>
+      </div>
+      <div className="grid gap-5 xl:grid-cols-[1fr_290px]">
+        <div className="panel p-5">
+          <div className="mb-4 flex flex-wrap gap-2">
+            <button onClick={() => setDialog({ mode: "add", name: "", weight: 10 })} className="btn-primary">
+              <Plus size={16} /> إضافة معيار
+            </button>
+            <button disabled={selected === null} onClick={() => setDialog({ mode: "edit", index: selected, ...model[selected] })} className="btn-secondary disabled:opacity-40">
+              <Pencil size={16} /> تعديل المعيار/الوزن
+            </button>
+            <button disabled={selected === null} onClick={deleteCriterion} className="inline-flex h-10 items-center gap-2 rounded-xl border border-red-200 bg-white px-4 text-sm font-bold text-red-600 hover:bg-red-50 disabled:opacity-40">
+              <Trash2 size={16} /> حذف
+            </button>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>المعيار</th>
+                  <th>الوزن</th>
+                  <th>الدرجة من 5</th>
+                  <th>النتيجة</th>
+                </tr>
+              </thead>
+              <tbody>
+                {model.map((c, i) => (
+                  <tr key={`${c.name}-${i}`} onClick={() => setSelected(i)} className={selected === i ? "bg-brand-50" : ""}>
+                    <td className="font-bold">{c.name}</td>
+                    <td>{c.weight}%</td>
+                    <td>
+                      <select
+                        value={safeScores[i]}
+                        onChange={(e) =>
+                          setScores(safeScores.map((x, j) => (j === i ? Number(e.target.value) : x)))
+                        }
+                        className="field !h-9 !w-24"
+                      >
+                        {[1, 2, 3, 4, 5].map((n) => (
+                          <option key={n}>{n}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="font-bold text-brand-700">
+                      {((safeScores[i] * c.weight) / 5).toFixed(1)} / {c.weight}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Label t="ملاحظات المدير">
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows="3" className="field mt-2 !h-auto py-3" />
+          </Label>
+        </div>
+        <div className="space-y-4">
+          <div className="panel p-6 text-center">
+            <div className="mx-auto mb-4 grid h-32 w-32 place-items-center rounded-full border-[10px] border-brand-100">
+              <b className="text-4xl text-brand-700">{total}%</b>
+            </div>
+            <Status>{classify(total)}</Status>
+            <p className="mt-4 text-xs leading-5 text-slate-500">محسوب حسب نموذج وظيفة {emp?.job}</p>
+          </div>
+          <button onClick={save} className="btn-primary h-12 w-full">
+            <Save size={18} /> حفظ التقييم
+          </button>
+          <p className="rounded-xl bg-blue-50 p-3 text-xs text-blue-700">
+            وجود تقييم لنفس الشهر يؤدي إلى تعديل السجل السابق، لا إنشاء نسخة مكررة.
+          </p>
+        </div>
+      </div>
+      {dialog && <CriteriaDialog dialog={dialog} setDialog={setDialog} onSave={saveCriterion} />}
+    </div>
+  );
+}
+
+function EnhancedTopEmployees({ employees, evaluations }) {
+  const latestByEmployee = new Map();
+  const approved = evaluations.filter((ev) => {
+    const status = String(ev.status || "");
+    return status.includes("معتمد") || status.includes("ظ…ط¹طھظ…ط¯");
+  });
+  const sourceEvaluations = approved.length ? approved : evaluations;
+  [...sourceEvaluations]
+    .sort((a, b) => String(b.month).localeCompare(String(a.month)) || effectiveEvaluationTotal(b) - effectiveEvaluationTotal(a))
+    .forEach((ev) => {
+      if (!latestByEmployee.has(ev.employeeId)) latestByEmployee.set(ev.employeeId, ev);
+    });
+  const ranked = employees
+    .map((employee) => {
+      const ev = latestByEmployee.get(employee.id);
+      return { ...employee, evaluation: ev, total: ev ? effectiveEvaluationTotal(ev) : 0 };
+    })
+    .sort((a, b) => b.total - a.total || String(a.name).localeCompare(String(b.name), "ar"));
+  const winners = branches
+    .map((branch) => ranked.filter((e) => e.branch === branch)[0])
+    .filter(Boolean);
+  const best = ranked[0] || {};
+  const printCertificate = (employee) =>
+    printDocument(
+      "شهادة موظف الشهر",
+      `<div class="cert"><h1 class="brand">شهادة تقدير</h1><p class="muted">تمنح هذه الشهادة إلى</p><p class="big">${employee.name || ""}</p><p>وذلك لتميزه في الأداء وتحقيقه نتيجة ${employee.total || 0}% خلال الشهر.</p><h3>${employee.job || ""} - ${employee.branch || ""}</h3><p class="muted">نظام تقييم وتحفيز الموظفين</p></div>`,
+    );
+  return (
+    <div className="space-y-5">
+      <PageHead
+        title="موظف الشهر"
+        desc="ترتيب دقيق لأفضل الموظفين حسب أعلى نتيجة تقييم"
+        action={
+          <button onClick={() => printCertificate(best)} className="btn-secondary">
+            <Printer size={17} /> طباعة شهادة الموظف الأول
+          </button>
+        }
+      />
+      <div className="rounded-3xl bg-gradient-to-l from-brand-900 to-[#26151a] p-8 text-white">
+        <div className="flex flex-col items-center gap-6 sm:flex-row">
+          <div className="grid h-28 w-28 place-items-center rounded-full border-4 border-amber-300 bg-white/10 text-3xl font-bold">
+            {best.name?.split(" ").slice(0, 2).map((x) => x[0]).join("")}
+          </div>
+          <div>
+            <span className="rounded-full bg-amber-300 px-3 py-1 text-xs font-bold text-amber-950">الأفضل على مستوى الشركة</span>
+            <h2 className="mt-4 text-3xl font-extrabold">{best.name}</h2>
+            <p className="mt-2 text-red-100/70">{best.job} • {best.branch}</p>
+            <p className="mt-4 text-sm text-red-100/80">سبب الاختيار: أعلى نتيجة تقييم مع الالتزام والانضباط وجودة الأداء.</p>
+          </div>
+          <b className="sm:mr-auto text-5xl text-amber-300">{best.total}%</b>
+        </div>
+      </div>
+      <div className="panel p-5">
+        <h3 className="mb-4 text-lg font-extrabold">أفضل موظف في كل فرع</h3>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {winners.map((x, i) => (
+            <div key={`${x.branch}-${x.id}`} className="rounded-2xl border p-4">
+              <div className="flex items-center gap-3">
+                <div className="grid h-12 w-12 place-items-center rounded-xl bg-brand-50 font-bold text-brand-700">{i + 1}</div>
+                <div>
+                  <b>{x.name}</b>
+                  <p className="text-xs text-slate-500">{x.branch} • {x.job}</p>
+                </div>
+                <b className="mr-auto text-xl text-brand-700">{x.total}%</b>
+              </div>
+              <button onClick={() => printCertificate(x)} className="btn-secondary mt-4 w-full">
+                <Printer size={15} /> طباعة شهادة لهذا الموظف فقط
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="panel p-5">
+        <h3 className="mb-4 text-lg font-extrabold">ترتيب أفضل 10 موظفين</h3>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>الترتيب</th><th>الموظف</th><th>الفرع</th><th>الوظيفة</th><th>النتيجة</th></tr></thead>
+            <tbody>
+              {ranked.slice(0, 10).map((x, i) => (
+                <tr key={x.id}><td>{i + 1}</td><td className="font-bold">{x.name}</td><td>{x.branch}</td><td>{x.job}</td><td>{x.total}%</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EnhancedPlans({ employees, evaluations }) {
+  const [plans, setPlans] = useStore("ep_improvement_plans", []);
+  const [dialog, setDialog] = useState(null);
+  const weak = evaluations
+    .filter((e) => e.total < 70)
+    .map((ev) => ({ ...employees.find((x) => x.id === ev.employeeId), total: ev.total }))
+    .filter((x) => x.id);
+  const visiblePlans = [
+    ...plans.map((p) => ({ ...p, employee: employees.find((e) => e.id === p.employeeId) })),
+    ...weak
+      .filter((e) => !plans.some((p) => p.employeeId === e.id))
+      .map((e) => ({
+        id: `AUTO-${e.id}`,
+        employeeId: e.id,
+        employee: e,
+        reason: "انخفاض نتيجة التقييم عن 70%",
+        weaknesses: "الدقة وسرعة الإنجاز",
+        plan: "جلسات متابعة أسبوعية وتدريب عملي على نقاط الضعف",
+        owner: "مدير الفرع",
+        start: "2026-07-01",
+        end: "2026-07-31",
+        result: "قيد المتابعة",
+        auto: true,
+      })),
+  ];
+  const savePlan = () => {
+    if (!dialog?.employeeId) return;
+    const item = { ...dialog, id: dialog.id || `PLAN-${Date.now()}`, auto: false };
+    setPlans((list) =>
+      dialog.mode === "edit" && !dialog.auto
+        ? list.map((p) => (p.id === dialog.id ? item : p))
+        : [item, ...list.filter((p) => p.id !== dialog.id)],
+    );
+    setDialog(null);
+  };
+  const deletePlan = (plan) => {
+    if (plan.auto) {
+      alert("هذه خطة مقترحة تلقائيًا. أنشئ خطة فعلية أو عدّلها أولًا ثم يمكنك حذفها لاحقًا.");
+      return;
+    }
+    if (!confirm("هل تريد حذف خطة التحسين؟")) return;
+    setPlans((list) => list.filter((p) => p.id !== plan.id));
+  };
+  const openPlan = (plan = {}) =>
+    setDialog({
+      mode: plan.id ? "edit" : "add",
+      id: plan.auto ? "" : plan.id,
+      employeeId: plan.employeeId || weak[0]?.id || employees[0]?.id,
+      reason: plan.reason || "",
+      weaknesses: plan.weaknesses || "",
+      plan: plan.plan || "",
+      owner: plan.owner || "مدير الفرع",
+      start: plan.start || "2026-07-01",
+      end: plan.end || "2026-07-31",
+      result: plan.result || "قيد المتابعة",
+      auto: false,
+    });
+  return (
+    <div className="space-y-5">
+      <PageHead
+        title="خطط تحسين الأداء"
+        desc="إضافة وتعديل وحذف خطط تحسين الموظفين الأقل من 70%"
+        action={
+          <button onClick={() => openPlan()} className="btn-primary">
+            <Plus size={17} /> خطة تحسين
+          </button>
+        }
+      />
+      <div className="grid gap-4 lg:grid-cols-2">
+        {visiblePlans.map((p) => (
+          <div key={p.id} className="panel p-5">
+            <div className="flex items-center gap-3">
+              <div className="grid h-11 w-11 place-items-center rounded-xl bg-red-50 text-red-700"><TrendingUp /></div>
+              <div>
+                <b>{p.employee?.name}</b>
+                <p className="text-xs text-slate-500">{p.employee?.job} • {p.employee?.branch}</p>
+              </div>
+              <div className="mr-auto flex gap-2">
+                <button onClick={() => openPlan(p)} className="btn-secondary !h-9 !px-3"><Pencil size={15} /></button>
+                <button onClick={() => deletePlan(p)} className="inline-flex h-9 items-center rounded-xl border border-red-200 px-3 text-red-600"><Trash2 size={15} /></button>
+              </div>
+            </div>
+            <div className="my-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-4 text-xs">
+              <Info t="سبب الانخفاض" v={p.reason} />
+              <Info t="المسؤول" v={p.owner} />
+              <Info t="بداية الخطة" v={p.start} />
+              <Info t="نهاية الخطة" v={p.end} />
+              <Info t="نقاط الضعف" v={p.weaknesses} />
+              <Info t="نتيجة المتابعة" v={p.result} />
+            </div>
+            <p className="rounded-xl bg-white p-3 text-sm text-slate-600">{p.plan}</p>
+          </div>
+        ))}
+      </div>
+      {dialog && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+          <div className="panel w-full max-w-3xl p-6">
+            <div className="mb-5 flex items-center">
+              <h3 className="text-lg font-extrabold">{dialog.mode === "add" ? "إضافة خطة تحسين" : "تعديل خطة تحسين"}</h3>
+              <button onClick={() => setDialog(null)} className="mr-auto"><X /></button>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Label t="الموظف"><select value={dialog.employeeId} onChange={(e) => setDialog({ ...dialog, employeeId: e.target.value })} className="field mt-2">{employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></Label>
+              <Label t="المسؤول عن المتابعة"><input value={dialog.owner} onChange={(e) => setDialog({ ...dialog, owner: e.target.value })} className="field mt-2" /></Label>
+              <Label t="سبب انخفاض الأداء"><input value={dialog.reason} onChange={(e) => setDialog({ ...dialog, reason: e.target.value })} className="field mt-2" /></Label>
+              <Label t="نقاط الضعف"><input value={dialog.weaknesses} onChange={(e) => setDialog({ ...dialog, weaknesses: e.target.value })} className="field mt-2" /></Label>
+              <Label t="تاريخ بداية الخطة"><input type="date" value={dialog.start} onChange={(e) => setDialog({ ...dialog, start: e.target.value })} className="field mt-2" /></Label>
+              <Label t="تاريخ نهاية الخطة"><input type="date" value={dialog.end} onChange={(e) => setDialog({ ...dialog, end: e.target.value })} className="field mt-2" /></Label>
+              <Label t="خطة التحسين"><textarea value={dialog.plan} onChange={(e) => setDialog({ ...dialog, plan: e.target.value })} className="field mt-2 !h-auto py-3" rows="3" /></Label>
+              <Label t="نتيجة المتابعة"><textarea value={dialog.result} onChange={(e) => setDialog({ ...dialog, result: e.target.value })} className="field mt-2 !h-auto py-3" rows="3" /></Label>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button onClick={() => setDialog(null)} className="btn-secondary">إلغاء</button>
+              <button onClick={savePlan} className="btn-primary"><Save size={17} /> حفظ الخطة</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EnhancedReports({ employees, evaluations }) {
+  const reps = [
+    ["التقرير المالي للأداء الشهري", Wallet],
+    ["التقييم الشهري", CalendarCheck],
+    ["التقييم حسب الفرع", Building2],
+    ["التقييم حسب الوظيفة", BriefcaseBusiness],
+    ["تقرير الحوافز", Gift],
+    ["الموظفون الضعفاء", AlertTriangle],
+    ["أفضل الموظفين", Trophy],
+    ["تقرير الانضباط", Clock3],
+    ["تقرير المخالفات", MessageSquareWarning],
+    ["مقارنة الفروع", FileBarChart],
+  ];
+  const [month, setMonth] = useState("2026-06");
+  const [branch, setBranch] = useState("all");
+  const rowsFor = (title) => {
+    const joined = evaluations.map((ev) => ({ ...ev, employee: employees.find((e) => e.id === ev.employeeId) })).filter((x) => x.employee);
+    const filtered = joined.filter((x) => (month ? x.month === month : true) && (branch === "all" ? true : x.employee.branch === branch));
+    if (title.includes("المالي"))
+      return filtered.map((x, i) => ({
+        ...x,
+        name: x.employee.name,
+        branch: x.employee.branch,
+        job: x.employee.job,
+        receiveAmount: Math.round((x.employee.salary || 4000) * (8 + (i % 5))),
+        payAmount: Math.round((x.employee.salary || 4000) * (6 + (i % 4))),
+        countedAmount200: 200 * (120 + i * 7),
+        countedAmount500: 500 * (90 + i * 5),
+        countedAmount1000: 1000 * (60 + i * 4),
+        totalFinancial: Math.round(
+          (x.employee.salary || 4000) * (14 + (i % 5)) +
+            200 * (120 + i * 7) +
+            500 * (90 + i * 5) +
+            1000 * (60 + i * 4),
+        ),
+      }));
+    if (title === "تقرير الحوافز") return calcIncentivesSafe(employees, filtered);
+    if (title === "الموظفون الضعفاء") return filtered.filter((x) => x.total < 70);
+    if (title === "أفضل الموظفين") return [...filtered].sort((a, b) => effectiveEvaluationTotal(b) - effectiveEvaluationTotal(a)).slice(0, 10);
+    return filtered;
+  };
+  const printableRows = (rows) =>
+    rows
+      .map((r, i) => {
+        const e = r.employee || r;
+        return `<tr><td>${i + 1}</td><td>${e.name || r.name || ""}</td><td>${e.branch || r.branch || ""}</td><td>${e.job || r.job || ""}</td><td>${r.month || ""}</td><td>${r.totalFinancial || r.total || r.incentive || r.amount || 0}</td></tr>`;
+      })
+      .join("");
+  const printReport = (title) => {
+    const rows = rowsFor(title);
+    printDocument(
+      title,
+      `<h1>${title}</h1><p>الشهر: ${month} - الفرع: ${branch === "all" ? "جميع الفروع" : branch}</p><table><thead><tr><th>#</th><th>الموظف</th><th>الفرع</th><th>الوظيفة</th><th>الشهر</th><th>القيمة/النتيجة</th></tr></thead><tbody>${printableRows(rows)}</tbody></table>`,
+    );
+  };
+  return (
+    <div className="space-y-5">
+      <PageHead title="مركز التقارير" desc="طباعة أو تصدير التقرير المحدد فقط" />
+      <div className="panel flex flex-wrap gap-3 p-4">
+        <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="field max-w-[180px]" />
+        <select value={branch} onChange={(e) => setBranch(e.target.value)} className="field max-w-[190px]">
+          <option value="all">جميع الفروع</option>
+          {branches.map((x) => <option key={x}>{x}</option>)}
+        </select>
+        <span className="rounded-xl bg-blue-50 px-4 py-3 text-xs font-bold text-blue-700">كل زر PDF يطبع التقرير الخاص به فقط</span>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {reps.map(([t, I]) => (
+          <div key={t} className="panel p-5">
+            <div className="grid h-11 w-11 place-items-center rounded-xl bg-slate-100 text-brand-700"><I /></div>
+            <h3 className="mt-4 font-extrabold">{t}</h3>
+            <p className="mt-1 text-xs text-slate-500">تقرير تفصيلي جاهز للتصدير والطباعة حسب الفلاتر المختارة</p>
+            <div className="mt-5 flex gap-2">
+              <button onClick={() => exportExcel(rowsFor(t), t)} className="btn-secondary flex-1"><FileSpreadsheet size={15} /> Excel</button>
+              <button onClick={() => printReport(t)} className="btn-secondary flex-1"><Printer size={15} /> PDF</button>
+              <button onClick={() => exportDocx(t, rowsFor(t))} className="btn-secondary flex-1"><Download size={15} /> Word</button>
+              <button onClick={() => printReport(t)} className="btn-secondary !px-3"><Eye size={15} /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EnhancedEmployees({ employees, setEmployees, setEvaluations }) {
+  const [q, setQ] = useState("");
+  const [branch, setBranch] = useState("الكل");
+  const [modal, setModal] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [selected, setSelected] = useState([]);
+  const filtered = employees.filter(
+    (e) =>
+      (e.name.includes(q) || e.id.toLowerCase().includes(q.toLowerCase())) &&
+      (branch === "الكل" || e.branch === branch),
+  );
+  const toggle = (id) =>
+    setSelected((list) =>
+      list.includes(id) ? list.filter((x) => x !== id) : [...list, id],
+    );
+  const deleteSelected = () => {
+    if (!selected.length) return;
+    if (!confirm(`هل تريد حذف ${selected.length} موظف/موظفين من السجل؟`)) return;
+    setEmployees((list) => list.filter((e) => !selected.includes(e.id)));
+    setEvaluations?.((list) => list.filter((e) => !selected.includes(e.employeeId)));
+    setSelected([]);
+  };
+  return (
+    <div className="space-y-5">
+      <PageHead
+        title="سجل الموظفين"
+        desc={`إدارة بيانات ${employees.length} موظف مع إمكانية الحذف المتعدد`}
+        action={
+          <div className="flex flex-wrap gap-2">
+            <button
+              disabled={!selected.length}
+              onClick={deleteSelected}
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-red-200 bg-white px-4 text-sm font-bold text-red-600 hover:bg-red-50 disabled:opacity-40"
+            >
+              <Trash2 size={17} /> حذف المحدد ({selected.length})
+            </button>
+            <button
+              onClick={() => {
+                setEditing(null);
+                setModal(true);
+              }}
+              className="btn-primary"
+            >
+              <Plus size={18} /> إضافة موظف
+            </button>
+          </div>
+        }
+      />
+      <div className="panel p-4">
+        <div className="flex flex-wrap gap-3">
+          <label className="flex h-11 min-w-[220px] flex-1 items-center gap-2 rounded-xl border px-3">
+            <Search size={17} />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="w-full outline-none"
+              placeholder="ابحث بالاسم أو الرقم..."
+            />
+          </label>
+          <select value={branch} onChange={(e) => setBranch(e.target.value)} className="field max-w-[190px]">
+            <option>الكل</option>
+            {branches.map((x) => <option key={x}>{x}</option>)}
+          </select>
+          <button onClick={() => exportExcel(filtered, "الموظفون")} className="btn-secondary">
+            <FileSpreadsheet size={17} /> تصدير Excel
+          </button>
+          <label className="btn-secondary cursor-pointer">
+            <Upload size={17} /> استيراد
+            <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => importEmployees(e, setEmployees)} />
+          </label>
+        </div>
+      </div>
+      <div className="panel p-4">
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>
+                  <input
+                    type="checkbox"
+                    checked={filtered.length > 0 && filtered.every((e) => selected.includes(e.id))}
+                    onChange={(e) => setSelected(e.target.checked ? filtered.map((x) => x.id) : [])}
+                  />
+                </th>
+                <th>الموظف</th>
+                <th>الفرع</th>
+                <th>الوظيفة</th>
+                <th>تاريخ التعيين</th>
+                <th>الراتب</th>
+                <th>الحالة</th>
+                <th>المدير المباشر</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((e) => (
+                <tr key={e.id} className={selected.includes(e.id) ? "bg-brand-50" : ""}>
+                  <td><input type="checkbox" checked={selected.includes(e.id)} onChange={() => toggle(e.id)} /></td>
+                  <td>
+                    <div className="flex items-center gap-3">
+                      <div className="grid h-9 w-9 place-items-center rounded-xl bg-slate-100 text-xs font-bold text-brand-700">
+                        {e.name.split(" ").slice(0, 2).map((x) => x[0]).join("")}
+                      </div>
+                      <div>
+                        <b>{e.name}</b>
+                        <p className="text-xs text-slate-400">{e.id} • {e.phone}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td>{e.branch}</td>
+                  <td>{e.job}</td>
+                  <td>{e.hireDate}</td>
+                  <td className="font-bold">{money(e.salary)}</td>
+                  <td><Status>{e.status}</Status></td>
+                  <td>{e.manager}</td>
+                  <td>
+                    <button onClick={() => { setEditing(e); setModal(true); }} className="p-2 text-blue-600"><Pencil size={16} /></button>
+                    <button
+                      onClick={() => {
+                        if (!confirm(`هل تريد حذف الموظف ${e.name}؟`)) return;
+                        setEmployees((list) => list.filter((item) => item.id !== e.id));
+                        setEvaluations?.((list) => list.filter((item) => item.employeeId !== e.id));
+                        setSelected((list) => list.filter((id) => id !== e.id));
+                      }}
+                      className="p-2 text-red-600"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {modal && <EmployeeModal editing={editing} close={() => setModal(false)} setEmployees={setEmployees} />}
+    </div>
+  );
+}
+
+function IndicatorManager({ title, indicators, setIndicators }) {
+  const [selected, setSelected] = useState(null);
+  const [dialog, setDialog] = useState(null);
+  const save = () => {
+    if (!dialog?.label?.trim() || !dialog?.key?.trim()) return;
+    const item = {
+      key: dialog.key.trim(),
+      label: dialog.label.trim(),
+      type: dialog.type,
+      weight: Number(dialog.weight || 0),
+    };
+    const next = [...indicators];
+    if (dialog.mode === "add") next.push(item);
+    else next[dialog.index] = item;
+    setIndicators(next);
+    setDialog(null);
+    setSelected(null);
+  };
+  const remove = () => {
+    if (selected === null || indicators.length <= 1) return;
+    if (!confirm("هل تريد حذف المؤشر المحدد؟")) return;
+    setIndicators(indicators.filter((_, i) => i !== selected));
+    setSelected(null);
+  };
+  return (
+    <div className="rounded-2xl border border-slate-200 p-4">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <b>{title}</b>
+        <div className="mr-auto flex gap-2">
+          <button onClick={() => setDialog({ mode: "add", key: "", label: "", type: "positive", weight: 1 })} className="btn-primary !h-9"><Plus size={15} /> إضافة</button>
+          <button disabled={selected === null} onClick={() => setDialog({ mode: "edit", index: selected, ...indicators[selected] })} className="btn-secondary !h-9 disabled:opacity-40"><Pencil size={15} /> تعديل</button>
+          <button disabled={selected === null} onClick={remove} className="inline-flex h-9 items-center gap-2 rounded-xl border border-red-200 px-3 text-sm font-bold text-red-600 disabled:opacity-40"><Trash2 size={15} /> حذف</button>
+        </div>
+      </div>
+      <div className="grid gap-2 md:grid-cols-2">
+        {indicators.map((item, i) => (
+          <button key={`${item.key}-${i}`} onClick={() => setSelected(i)} className={`rounded-xl border p-3 text-right text-sm ${selected === i ? "border-brand-700 bg-brand-50" : "border-slate-200"}`}>
+            <b>{item.label}</b>
+            <p className="mt-1 text-xs text-slate-500">{item.type === "negative" ? "خصم" : "إضافة"} × {item.weight}</p>
+          </button>
+        ))}
+      </div>
+      {dialog && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+          <div className="panel w-full max-w-md p-6">
+            <div className="mb-5 flex items-center"><h3 className="text-lg font-extrabold">مؤشر</h3><button onClick={() => setDialog(null)} className="mr-auto"><X /></button></div>
+            <div className="grid gap-4">
+              <Label t="اسم الحقل البرمجي"><input value={dialog.key} onChange={(e) => setDialog({ ...dialog, key: e.target.value.replace(/\s+/g, "_") })} className="field mt-2" /></Label>
+              <Label t="اسم المؤشر"><input value={dialog.label} onChange={(e) => setDialog({ ...dialog, label: e.target.value })} className="field mt-2" /></Label>
+              <Label t="نوع التأثير"><select value={dialog.type} onChange={(e) => setDialog({ ...dialog, type: e.target.value })} className="field mt-2"><option value="positive">إضافة للنقاط</option><option value="negative">خصم من النقاط</option></select></Label>
+              <Label t="الوزن / معامل الاحتساب"><input type="number" value={dialog.weight} onChange={(e) => setDialog({ ...dialog, weight: e.target.value })} className="field mt-2" /></Label>
+            </div>
+            <div className="mt-6 flex justify-end gap-2"><button onClick={() => setDialog(null)} className="btn-secondary">إلغاء</button><button onClick={save} className="btn-primary"><Save size={17} /> حفظ</button></div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EnhancedProductivity({ employees, settings, setSettings }) {
+  const indicators = settings.productivityIndicators || defaultProductivityIndicators;
+  const [values, setValues] = useState(() => ({ ...initialIndicatorValues(indicators), receive: 142, pay: 168, sell: 46, buy: 39, errors: 2, complaints: 1, time: 7 }));
+  const list = employees.filter((e) => ["كاشير", "خدمة عملاء وتحويلات واتس", "عمليات مصرفية"].includes(e.job));
+  const setIndicators = (next) => setSettings({ ...settings, productivityIndicators: next });
+  const score = scoreIndicators(values, indicators, 0);
+  return (
+    <Entry title="مؤشرات الإنتاجية" desc="يمكن إضافة أو تعديل مؤشرات الإنتاجية ومعاملات احتسابها">
+      <Label t="الموظف"><select className="field mt-2 max-w-md">{list.map((e) => <option key={e.id}>{e.name} — {e.job}</option>)}</select></Label>
+      <IndicatorManager title="إدارة مؤشرات الإنتاجية" indicators={indicators} setIndicators={setIndicators} />
+      <ProductivityComparison employees={employees} indicators={indicators} />
+      <Fields values={values} set={setValues} items={indicators.map((x) => [x.key, x.label])} />
+      <Score n={score} label="نقاط الإنتاجية" />
+      <button className="btn-primary"><Save size={17} /> حفظ مؤشرات الشهر</button>
+    </Entry>
+  );
+}
+
+function EnhancedDiscipline({ employees, settings, setSettings }) {
+  const indicators = settings.disciplineIndicators || defaultDisciplineIndicators;
+  const [values, setValues] = useState(() => ({ ...initialIndicatorValues(indicators), present: 25, absent: 1, late: 18, early: 0, violations: 0, penalties: 0 }));
+  const setIndicators = (next) => setSettings({ ...settings, disciplineIndicators: next });
+  const score = scoreIndicators(values, indicators, 100);
+  return (
+    <Entry title="الانضباط الوظيفي" desc="يمكن تعديل مؤشرات الانضباط أو إضافة مؤشرات جديدة">
+      <Label t="الموظف"><select className="field mt-2 max-w-md">{employees.map((e) => <option key={e.id}>{e.name}</option>)}</select></Label>
+      <IndicatorManager title="إدارة مؤشرات الانضباط" indicators={indicators} setIndicators={setIndicators} />
+      <Fields values={values} set={setValues} items={indicators.map((x) => [x.key, x.label])} />
+      <Label t="ملاحظات الموارد البشرية"><textarea className="field mt-2 !h-auto py-3" rows="3" /></Label>
+      <Score n={score} label="درجة الانضباط" />
+      <button className="btn-primary"><Save size={17} /> حفظ سجل الانضباط</button>
+    </Entry>
+  );
+}
+
+function EnhancedIncentives({ employees, evaluations, setEvaluations }) {
+  const [details, setDetails] = useState(null);
+  const data = evaluations.map((ev) => {
+    const employee = employees.find((x) => x.id === ev.employeeId) || {};
+    const total = effectiveEvaluationTotal(ev);
+    const cat = classify(total);
+    const rate = cat === "ممتاز" ? 0.1 : cat === "جيد جدًا" ? 0.07 : cat === "جيد" ? 0.04 : 0;
+    return { ...employee, evaluation: ev, total, rate, amount: (employee.salary || 0) * rate * (total / 100), approval: ev.status };
+  });
+  return (
+    <div className="space-y-5">
+      <PageHead title="الحوافز والمكافآت" desc="احتساب آلي مع عرض تفاصيل أهلية كل موظف" action={<button onClick={() => exportExcel(data, "الحوافز")} className="btn-primary"><Download size={17} /> تصدير الكشف</button>} />
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Mini label="إجمالي الحوافز" value={money(data.reduce((s, x) => s + x.amount, 0))} I={CircleDollarSign} />
+        <Mini label="المستحقون" value={data.filter((x) => x.rate > 0).length} I={UserCheck} />
+        <Mini label="بانتظار الاعتماد" value={evaluations.filter((x) => x.status === "قيد المراجعة").length} I={Clock3} />
+      </div>
+      <div className="panel p-4">
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>الموظف</th><th>الفرع</th><th>الوظيفة</th><th>الراتب</th><th>التقييم</th><th>النسبة</th><th>الحافز المقترح</th><th>الاعتماد</th><th>التفاصيل</th></tr></thead>
+            <tbody>
+              {data.map((x) => (
+                <tr key={`${x.id}-${x.evaluation?.id}`}>
+                  <td className="font-bold">{x.name}</td><td>{x.branch}</td><td>{x.job}</td><td>{money(x.salary)}</td>
+                  <td><Status>{classify(x.total)}</Status> {x.total}%</td><td>{x.rate * 100}%</td><td className="font-bold text-brand-700">{money(x.amount)}</td>
+                  <td>
+                    <select value={x.approval} onChange={(e) => setEvaluations((list) => list.map((ev) => ev.id === x.evaluation.id ? { ...ev, status: e.target.value } : ev))} className="field !h-9">
+                      <option>قيد المراجعة</option><option>معتمد</option><option>مرفوض</option>
+                    </select>
+                  </td>
+                  <td><button onClick={() => setDetails(x)} className="btn-secondary !h-9"><Eye size={15} /> عرض</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {details && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+          <div className="panel w-full max-w-2xl p-6">
+            <div className="mb-5 flex items-center"><h3 className="text-lg font-extrabold">تفاصيل استحقاق الحافز</h3><button onClick={() => setDetails(null)} className="mr-auto"><X /></button></div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <Info t="الموظف" v={details.name} /><Info t="الفرع" v={details.branch} /><Info t="الوظيفة" v={details.job} /><Info t="الراتب" v={money(details.salary)} />
+              <Info t="نتيجة التقييم" v={`${details.total}% - ${classify(details.total)}`} /><Info t="نسبة الحافز" v={`${details.rate * 100}%`} />
+              <Info t="معادلة الحافز" v="الراتب × نسبة الحافز × نسبة التقييم" /><Info t="قيمة الحافز" v={money(details.amount)} />
+              <Info t="الشهر" v={details.evaluation?.month || ""} /><Info t="حالة الاعتماد" v={details.approval} />
+            </div>
+            <div className="mt-5 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">ملاحظات التقييم: {details.evaluation?.notes || "لا توجد ملاحظات"}</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PermissionsMatrix({ settings, setSettings }) {
+  const roles = settings.permissions || defaultSettings.permissions;
+  const roleNames = roles.map((r) => r.name);
+  const [role, setRole] = useState(roleNames[0] || "");
+  const actions = [
+    ["view", "عرض"],
+    ["add", "إضافة"],
+    ["edit", "تعديل"],
+    ["delete", "حذف"],
+  ];
+  const current = settings.rolePermissions?.[role] || {};
+  const setPermission = (pageId, action, checked) =>
+    setSettings({
+      ...settings,
+      rolePermissions: {
+        ...(settings.rolePermissions || {}),
+        [role]: {
+          ...current,
+          [pageId]: { ...(current[pageId] || {}), [action]: checked },
+        },
+      },
+    });
+  const selectAll = (checked) =>
+    setSettings({
+      ...settings,
+      rolePermissions: {
+        ...(settings.rolePermissions || {}),
+        [role]: Object.fromEntries(
+          navItems.map(([id]) => [
+            id,
+            Object.fromEntries(actions.map(([action]) => [action, checked])),
+          ]),
+        ),
+      },
+    });
+  return (
+    <div>
+      <div className="mb-5 flex flex-wrap items-end gap-3">
+        <div className="min-w-[260px]">
+          <Label t="اختيار الوظيفة / الدور">
+            <select value={role} onChange={(e) => setRole(e.target.value)} className="field mt-2">
+              {roleNames.map((name) => (
+                <option key={name}>{name}</option>
+              ))}
+            </select>
+          </Label>
+        </div>
+        <button onClick={() => selectAll(true)} className="btn-primary">
+          <BadgeCheck size={16} /> تحديد الكل
+        </button>
+        <button onClick={() => selectAll(false)} className="btn-secondary">
+          <X size={16} /> إلغاء التحديد
+        </button>
+      </div>
+      <div className="rounded-2xl border border-slate-200">
+        <div className="grid grid-cols-[1.4fr_repeat(4,.55fr)] gap-2 border-b bg-slate-50 p-3 text-sm font-extrabold text-slate-600">
+          <span>القائمة / الصفحة</span>
+          {actions.map(([, label]) => (
+            <span key={label} className="text-center">{label}</span>
+          ))}
+        </div>
+        <div className="divide-y">
+          {navItems.map(([id, label]) => (
+            <div key={id} className="grid grid-cols-[1.4fr_repeat(4,.55fr)] items-center gap-2 p-3">
+              <div className="flex items-center gap-2">
+                <ChevronLeft size={16} className="text-slate-400" />
+                <b className="text-sm">{label}</b>
+              </div>
+              {actions.map(([action]) => (
+                <label key={`${id}-${action}`} className="text-center">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(current[id]?.[action])}
+                    onChange={(e) => setPermission(id, action, e.target.checked)}
+                    className="h-4 w-4 accent-red-800"
+                  />
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+      <p className="mt-3 rounded-xl bg-blue-50 p-3 text-xs text-blue-700">
+        تم حفظ الصلاحيات كمصفوفة تفصيلية قابلة للربط لاحقًا بمنع الأزرار والصفحات حسب الدور.
+      </p>
+    </div>
+  );
+}
+
+function ProductivityComparison({ employees, indicators }) {
+  const [range, setRange] = useState({
+    aFrom: "2026-06-01",
+    aTo: "2026-06-15",
+    bFrom: "2026-06-16",
+    bTo: "2026-06-30",
+    scope: "employee",
+  });
+  const groups = range.scope === "branch" ? branches : employees.slice(0, 8).map((e) => e.name);
+  const rows = groups.map((name, index) => {
+    const a = Math.round(55 + ((index * 13) % 38));
+    const b = Math.round(50 + ((index * 17 + 9) % 45));
+    const change = a ? Math.round(((b - a) / a) * 100) : 0;
+    return { name, الفترة_أ: a, الفترة_ب: b, التغير: change };
+  });
+  return (
+    <div className="rounded-2xl border border-slate-200 p-4">
+      <div className="mb-4 flex flex-wrap items-end gap-3">
+        <h3 className="w-full text-lg font-extrabold">مقارنة الإنتاجية بين فترتين</h3>
+        <Label t="الفترة أ من"><input type="date" value={range.aFrom} onChange={(e) => setRange({ ...range, aFrom: e.target.value })} className="field mt-2" /></Label>
+        <Label t="الفترة أ إلى"><input type="date" value={range.aTo} onChange={(e) => setRange({ ...range, aTo: e.target.value })} className="field mt-2" /></Label>
+        <Label t="الفترة ب من"><input type="date" value={range.bFrom} onChange={(e) => setRange({ ...range, bFrom: e.target.value })} className="field mt-2" /></Label>
+        <Label t="الفترة ب إلى"><input type="date" value={range.bTo} onChange={(e) => setRange({ ...range, bTo: e.target.value })} className="field mt-2" /></Label>
+        <Label t="نطاق المقارنة"><select value={range.scope} onChange={(e) => setRange({ ...range, scope: e.target.value })} className="field mt-2"><option value="employee">الموظف</option><option value="branch">الفرع</option></select></Label>
+      </div>
+      <div className="grid gap-4 xl:grid-cols-[1fr_1.1fr]">
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>{range.scope === "branch" ? "الفرع" : "الموظف"}</th><th>الفترة أ</th><th>الفترة ب</th><th>نسبة التغير</th></tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.name}>
+                  <td className="font-bold">{r.name}</td>
+                  <td>{r.الفترة_أ}</td>
+                  <td>{r.الفترة_ب}</td>
+                  <td className={r.التغير >= 0 ? "font-bold text-emerald-600" : "font-bold text-red-600"}>{r.التغير}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <ResponsiveContainer width="100%" height={260}>
+          <BarChart data={rows}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+            <YAxis />
+            <Tooltip />
+            <Bar dataKey="الفترة_أ" fill="#94a3b8" radius={[6, 6, 0, 0]} />
+            <Bar dataKey="الفترة_ب" fill="#7f1d1d" radius={[6, 6, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+const xmlEscape = (value = "") =>
+  String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const crc32 = (input) => {
+  const table = crc32.table || (crc32.table = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  }));
+  const bytes = new TextEncoder().encode(input);
+  let crc = -1;
+  for (const b of bytes) crc = (crc >>> 8) ^ table[(crc ^ b) & 255];
+  return (crc ^ -1) >>> 0;
+};
+const u16 = (n) => [n & 255, (n >>> 8) & 255];
+const u32 = (n) => [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255];
+function makeZip(files) {
+  const encoder = new TextEncoder();
+  const chunks = [];
+  const central = [];
+  let offset = 0;
+  files.forEach(({ name, content }) => {
+    const nameBytes = encoder.encode(name);
+    const data = encoder.encode(content);
+    const crc = crc32(content);
+    const local = new Uint8Array([
+      ...u32(0x04034b50), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0),
+      ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(nameBytes.length), ...u16(0),
+      ...nameBytes, ...data,
+    ]);
+    chunks.push(local);
+    central.push({ nameBytes, crc, size: data.length, offset });
+    offset += local.length;
+  });
+  const centralStart = offset;
+  central.forEach((f) => {
+    const c = new Uint8Array([
+      ...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0),
+      ...u32(f.crc), ...u32(f.size), ...u32(f.size), ...u16(f.nameBytes.length), ...u16(0), ...u16(0),
+      ...u16(0), ...u16(0), ...u32(0), ...u32(f.offset), ...f.nameBytes,
+    ]);
+    chunks.push(c);
+    offset += c.length;
+  });
+  chunks.push(new Uint8Array([...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(central.length), ...u16(central.length), ...u32(offset - centralStart), ...u32(centralStart), ...u16(0)]));
+  return new Blob(chunks, { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+}
+function exportDocx(title, rows) {
+  const tableRows = rows.map((r) => {
+    const e = r.employee || r;
+    return [e.name || r.name || "", e.branch || r.branch || "", e.job || r.job || "", r.month || "", r.total || r.amount || 0]
+      .map((v) => `<w:tc><w:p><w:r><w:t>${xmlEscape(v)}</w:t></w:r></w:p></w:tc>`)
+      .join("");
+  }).map((cells) => `<w:tr>${cells}</w:tr>`).join("");
+  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${xmlEscape(title)}</w:t></w:r></w:p><w:tbl>${tableRows}</w:tbl></w:body></w:document>`;
+  const blob = makeZip([
+    { name: "[Content_Types].xml", content: `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>` },
+    { name: "_rels/.rels", content: `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>` },
+    { name: "word/document.xml", content: documentXml },
+  ]);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${title}.docx`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function Label({ t, children }) {
+  return (
+    <label className="block text-sm font-bold">
+      {t}
+      {children}
+    </label>
+  );
+}
+function PageHead({ title, desc, action }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h2 className="text-2xl font-extrabold">{title}</h2>
+        <p className="mt-1 text-sm text-slate-500">{desc}</p>
+      </div>
+      {action}
+    </div>
+  );
+}
+function Mini({ label, value, I }) {
+  return (
+    <div className="panel flex items-center gap-4 p-5">
+      <div className="grid h-11 w-11 place-items-center rounded-xl bg-brand-50 text-brand-700">
+        <I />
+      </div>
+      <div>
+        <p className="text-xs text-slate-500">{label}</p>
+        <b className="text-xl">{value}</b>
+      </div>
+    </div>
+  );
+}
+function Info({ t, v }) {
+  return (
+    <div>
+      <span className="text-slate-400">{t}</span>
+      <p className="mt-1 font-bold">{v}</p>
+    </div>
+  );
+}
+function exportExcel(data, name) {
+  const ws = XLSX.utils.json_to_sheet(data),
+    wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "البيانات");
+  XLSX.writeFile(wb, `${name}.xlsx`);
+}
+function importEmployees(event, setEmployees) {
+  const f = event.target.files?.[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = (e) => {
+    const wb = XLSX.read(e.target.result, { type: "array" }),
+      rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+    if (rows.length) setEmployees((p) => [...rows, ...p]);
+  };
+  r.readAsArrayBuffer(f);
+}
