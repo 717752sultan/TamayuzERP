@@ -46,6 +46,39 @@ export const supabase = {
       body: JSON.stringify(Array.isArray(rows) ? rows : [rows]),
     });
   },
+  from(table) {
+    const client = this;
+    return {
+      upsert(payload) {
+        const rows = Array.isArray(payload) ? payload : [payload];
+        const execute = async () => {
+          try {
+            const data = await client.request(`/rest/v1/${table}`, {
+              method: "POST",
+              prefer: "resolution=merge-duplicates,return=representation",
+              body: JSON.stringify(rows),
+            });
+            return { data, error: null };
+          } catch (error) {
+            return { data: null, error };
+          }
+        };
+        return {
+          select() {
+            return {
+              async single() {
+                const { data, error } = await execute();
+                return {
+                  data: Array.isArray(data) ? data[0] : data,
+                  error,
+                };
+              },
+            };
+          },
+        };
+      },
+    };
+  },
   remove(table, id) {
     return this.request(`/rest/v1/${table}?id=eq.${encodeURIComponent(id)}`, {
       method: "DELETE",

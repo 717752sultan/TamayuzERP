@@ -69,6 +69,7 @@ import { employeesService } from "./services/employees";
 import { evaluationsService } from "./services/evaluations";
 import { settingsService } from "./services/settings";
 import { loginWithSupabase as cloudLoginWithSupabase } from "./services/auth";
+import { supabase } from "./services/supabase";
 const icons = {
   dashboard: LayoutDashboard,
   employees: Users,
@@ -1328,9 +1329,11 @@ function Employees({ employees, setEmployees }) {
     </div>
   );
 }
-function EmployeeModal({ employee, close, save }) {
+function EmployeeModal({ employee, editing, close, save, setEmployees }) {
+  const currentEmployee = employee || editing;
+  const [saving, setSaving] = useState(false);
   const [f, setF] = useState(
-    employee || {
+    currentEmployee || {
       id: `EMP-${Date.now().toString().slice(-4)}`,
       name: "",
       branch: branches[0],
@@ -1345,15 +1348,64 @@ function EmployeeModal({ employee, close, save }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
       <form
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
-          save({ ...f, salary: Number(f.salary) });
+          const payload = {
+            id: f.id,
+            name: f.name,
+            branch: f.branch,
+            job: f.job,
+            hire_date: f.hireDate,
+            salary: Number(f.salary || 0),
+            phone: f.phone,
+            status: f.status,
+            manager: f.manager,
+          };
+          setSaving(true);
+          try {
+            const { data, error } = await supabase.from("employees").upsert(payload).select().single();
+            if (error) {
+              console.error(error);
+              alert(error.message);
+              return;
+            }
+            if (!data) {
+              throw new Error("لم يرجع Supabase بيانات الموظف بعد الحفظ");
+            }
+            const savedEmployee = {
+              id: data.id,
+              name: data.name,
+              branch: data.branch,
+              job: data.job,
+              hireDate: data.hire_date,
+              salary: Number(data.salary || 0),
+              phone: data.phone || "",
+              status: data.status || "نشط",
+              manager: data.manager || "",
+            };
+            if (save) {
+              save(savedEmployee);
+            } else {
+              setEmployees?.((list) => {
+                const exists = list.some((item) => item.id === savedEmployee.id);
+                return exists
+                  ? list.map((item) => (item.id === savedEmployee.id ? savedEmployee : item))
+                  : [savedEmployee, ...list];
+              });
+              close();
+            }
+          } catch (error) {
+            console.error(error);
+            alert(error.message || "تعذر حفظ بيانات الموظف");
+          } finally {
+            setSaving(false);
+          }
         }}
         className="panel max-h-[90vh] w-full max-w-2xl overflow-y-auto p-6"
       >
         <div className="mb-6 flex">
           <h3 className="text-xl font-extrabold">
-            {employee ? "تعديل بيانات الموظف" : "إضافة موظف جديد"}
+            {currentEmployee ? "تعديل بيانات الموظف" : "إضافة موظف جديد"}
           </h3>
           <button type="button" onClick={close} className="mr-auto">
             <X />
@@ -1416,7 +1468,7 @@ function EmployeeModal({ employee, close, save }) {
           <button type="button" onClick={close} className="btn-secondary">
             إلغاء
           </button>
-          <button className="btn-primary">
+          <button disabled={saving} className="btn-primary">
             <Save size={17} /> حفظ البيانات
           </button>
         </div>
