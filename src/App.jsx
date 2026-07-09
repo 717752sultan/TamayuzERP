@@ -65,6 +65,10 @@ import {
   seedEvaluations,
   navItems,
 } from "./data";
+import { employeesService } from "./services/employees";
+import { evaluationsService } from "./services/evaluations";
+import { settingsService } from "./services/settings";
+import { loginWithSupabase as cloudLoginWithSupabase } from "./services/auth";
 const icons = {
   dashboard: LayoutDashboard,
   employees: Users,
@@ -149,100 +153,13 @@ const Status = ({ children }) => (
     {children}
   </span>
 );
-const supabaseConfig = () => ({
-  url: import.meta.env.VITE_SUPABASE_URL,
-  anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-});
-const normalizeCloudUser = (raw = {}, fallbackUsername = "") => {
-  const source = Array.isArray(raw) ? raw[0] || {} : raw;
-  const user = source.user || source;
-  const metadata = user.user_metadata || user.raw_user_meta_data || {};
-  return {
-    name:
-      source.name ||
-      user.name ||
-      metadata.name ||
-      metadata.full_name ||
-      fallbackUsername,
-    username: source.username || user.username || user.email || fallbackUsername,
-    role:
-      source.role ||
-      source.permission ||
-      metadata.role ||
-      metadata.permission ||
-      "الموظف",
-    employeeId:
-      source.employee_id ||
-      source.employeeId ||
-      metadata.employee_id ||
-      metadata.employeeId ||
-      "",
-    cloudId: source.id || user.id || "",
-    email: user.email || source.email || "",
-  };
-};
-async function loginWithSupabase(username, password, employeeNumber) {
-  const { url, anonKey } = supabaseConfig();
-  if (!url || !anonKey)
-    throw new Error("لم يتم ضبط متغيرات Supabase في البيئة.");
-  const headers = {
-    apikey: anonKey,
-    Authorization: `Bearer ${anonKey}`,
-    "Content-Type": "application/json",
-  };
-  const rpc = await fetch(`${url}/rest/v1/rpc/verify_app_login`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      p_username: username,
-      p_password: password,
-      p_employee_id: employeeNumber,
-    }),
+const changedRows = (prev, next) =>
+  next.filter((item) => {
+    const old = prev.find((row) => row.id === item.id);
+    return !old || JSON.stringify(old) !== JSON.stringify(item);
   });
-  const rpcData = await rpc.json().catch(() => ({}));
-  if (rpc.ok && rpcData && (!Array.isArray(rpcData) || rpcData.length))
-    return normalizeCloudUser(rpcData, username);
-  const usersRes = await fetch(
-    `${url}/rest/v1/app_users?username=eq.${encodeURIComponent(username)}&employee_id=eq.${encodeURIComponent(employeeNumber)}&is_active=eq.true&select=id,name,username,role,employee_id,email`,
-    { headers },
-  );
-  const users = await usersRes.json().catch(() => []);
-  if (usersRes.ok && users.length === 1) {
-    throw new Error(
-      "تم العثور على المستخدم، لكن التحقق من كلمة المرور يجب أن يتم عبر دالة Supabase RPC باسم verify_app_login.",
-    );
-  }
-  throw new Error("اسم المستخدم أو كلمة المرور غير صحيحة.");
-}
-async function syncToSupabaseCloud({ settings, employees, evaluations }) {
-  const { url, anonKey } = supabaseConfig();
-  if (!url || !anonKey)
-    throw new Error("لم يتم ضبط متغيرات Supabase في البيئة.");
-  const payload = {
-    id: "default",
-    settings,
-    employees,
-    evaluations,
-    objections: JSON.parse(localStorage.getItem("ep_objections") || "[]"),
-    updated_at: new Date().toISOString(),
-  };
-  const token = localStorage.getItem("ep_supabase_access_token") || anonKey;
-  const res = await fetch(`${url}/rest/v1/hrms_snapshots`, {
-    method: "POST",
-    headers: {
-      apikey: anonKey,
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates,return=minimal",
-    },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || "تعذرت مزامنة البيانات مع Supabase.");
-  }
-  return payload.updated_at;
-}
+const deletedIds = (prev, next) =>
+  prev.filter((item) => !next.some((row) => row.id === item.id)).map((item) => item.id);
 const defaultWeightsFor = (count) => {
   if (count === 10) return [15, 15, 10, 10, 10, 10, 10, 10, 5, 5];
   const base = Math.floor(100 / Math.max(count, 1));
@@ -515,34 +432,104 @@ function syncSettings(s) {
         })),
   );
 }
-function useStore(k, initial) {
-  const [v, setV] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(k));
-      return k === "ep_system_settings"
-        ? hydrateSettings(saved || initial)
-        : saved || initial;
-    } catch {
-      return k === "ep_system_settings" ? hydrateSettings(initial) : initial;
-    }
-  });
-  useEffect(() => localStorage.setItem(k, JSON.stringify(v)), [k, v]);
-  if (k === "ep_system_settings") syncSettings(v);
-  return [v, setV];
+function LoadingScreen({ message = "جاري تحميل البيانات..." }) {
+  return (
+    <div className="grid min-h-screen place-items-center bg-slate-50" dir="rtl">
+      <div className="panel p-8 text-center">
+        <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-brand-100 border-t-brand-700" />
+        <b>{message}</b>
+      </div>
+    </div>
+  );
 }
 export default function App() {
   const [logged, setLogged] = useState(
       () => localStorage.getItem("ep_logged") === "1",
     ),
-	    [page, setPage] = useState("dashboard"),
-	    [sidebar, setSidebar] = useState(false),
-	    [syncing, setSyncing] = useState(false),
-	    [role, setRole] = useState(
+    [page, setPage] = useState("dashboard"),
+    [sidebar, setSidebar] = useState(false),
+    [role, setRole] = useState(
       () => localStorage.getItem("ep_role") || "مدير النظام",
     ),
-    [employees, setEmployees] = useStore("ep_employees", seedEmployees),
-    [evaluations, setEvaluations] = useStore("ep_evaluations", seedEvaluations),
-    [settings, setSettings] = useStore("ep_system_settings", defaultSettings);
+    [employees, setEmployeesState] = useState([]),
+    [evaluations, setEvaluationsState] = useState([]),
+    [settings, setSettingsState] = useState(hydrateSettings(defaultSettings)),
+    [dataLoading, setDataLoading] = useState(false),
+    [dataError, setDataError] = useState("");
+  const setEmployees = (updater) =>
+    setEmployeesState((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      const changed = changedRows(prev, next);
+      const deleted = deletedIds(prev, next);
+      if (changed.length) employeesService.upsert(changed).catch((e) => setDataError(e.message));
+      deleted.forEach((id) => employeesService.remove(id).catch((e) => setDataError(e.message)));
+      return next;
+    });
+  const setEvaluations = (updater) =>
+    setEvaluationsState((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      const changed = changedRows(prev, next);
+      const deleted = deletedIds(prev, next);
+      if (changed.length) evaluationsService.upsert(changed).catch((e) => setDataError(e.message));
+      deleted.forEach((id) => evaluationsService.remove(id).catch((e) => setDataError(e.message)));
+      return next;
+    });
+  const setSettings = (updater) =>
+    setSettingsState((prev) => {
+      const next = hydrateSettings(typeof updater === "function" ? updater(prev) : updater);
+      syncSettings(next);
+      settingsService.save(next).catch((e) => setDataError(e.message));
+      return next;
+    });
+  useEffect(() => {
+    syncSettings(settings);
+  }, [settings]);
+  useEffect(() => {
+    if (!logged) return;
+    let alive = true;
+    setDataLoading(true);
+    setDataError("");
+    Promise.all([
+      employeesService.list(),
+      evaluationsService.list(),
+      settingsService.get(defaultSettings),
+    ])
+      .then(([remoteEmployees, remoteEvaluations, remoteSettings]) => {
+        if (!alive) return;
+        setEmployeesState(remoteEmployees);
+        setEvaluationsState(remoteEvaluations);
+        setSettingsState(hydrateSettings(remoteSettings));
+      })
+      .catch((error) => alive && setDataError(error.message))
+      .finally(() => alive && setDataLoading(false));
+    const unsubEmployees = employeesService.subscribe(async () => {
+      try {
+        setEmployeesState(await employeesService.list());
+      } catch (e) {
+        setDataError(e.message);
+      }
+    });
+    const unsubEvaluations = evaluationsService.subscribe(async () => {
+      try {
+        setEvaluationsState(await evaluationsService.list());
+      } catch (e) {
+        setDataError(e.message);
+      }
+    });
+    const unsubSettings = settingsService.subscribe(async () => {
+      try {
+        setSettingsState(hydrateSettings(await settingsService.get(defaultSettings)));
+      } catch (e) {
+        setDataError(e.message);
+      }
+    });
+    return () => {
+      alive = false;
+      unsubEmployees?.();
+      unsubEvaluations?.();
+      unsubSettings?.();
+    };
+  }, [logged]);
   if (!logged)
     return (
       <Login
@@ -557,11 +544,25 @@ export default function App() {
         }}
       />
     );
+  if (dataLoading) return <LoadingScreen />;
+  if (dataError)
+    return (
+      <div className="grid min-h-screen place-items-center bg-slate-50 p-5" dir="rtl">
+        <div className="panel max-w-xl p-6 text-center">
+          <AlertTriangle className="mx-auto mb-3 text-red-600" />
+          <h2 className="text-xl font-extrabold">تعذر تحميل بيانات Supabase</h2>
+          <p className="mt-2 text-sm text-slate-500">{dataError}</p>
+          <button onClick={() => location.reload()} className="btn-primary mt-5">إعادة المحاولة</button>
+        </div>
+      </div>
+    );
   if (role === "الموظف")
     return (
       <EmployeePortal
         employees={employees}
         evaluations={evaluations}
+        settings={settings}
+        setSettings={setSettings}
         onLogout={() => {
           localStorage.removeItem("ep_logged");
           localStorage.removeItem("ep_role");
@@ -685,24 +686,6 @@ export default function App() {
                 placeholder="بحث سريع..."
               />
             </label>
-	            <button
-	              type="button"
-	              disabled={syncing}
-	              onClick={async () => {
-	                setSyncing(true);
-	                try {
-	                  await syncToSupabaseCloud({ settings, employees, evaluations });
-	                  alert("تمت مزامنة البيانات وحفظ التعديلات في Supabase بنجاح.");
-	                } catch (error) {
-	                  alert(error.message || "تعذرت مزامنة البيانات.");
-	                } finally {
-	                  setSyncing(false);
-	                }
-	              }}
-	              className="btn-secondary hidden md:inline-flex disabled:cursor-not-allowed disabled:opacity-60"
-	            >
-	              <Save size={17} /> {syncing ? "جاري الحفظ..." : "مزامنة وحفظ"}
-	            </button>
 	            <button className="relative rounded-xl border p-2.5">
               <Bell size={19} />
               <i className="absolute -left-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-brand-700" />
@@ -750,7 +733,7 @@ function Login({ onLogin }) {
     }
     setLoading(true);
     try {
-      const user = await loginWithSupabase(u.trim(), pw, employeeNo.trim());
+      const user = await cloudLoginWithSupabase(u.trim(), pw, employeeNo.trim());
       onLogin(user);
     } catch (error) {
       setErr(error.message || "تعذر تسجيل الدخول. تحقق من البيانات وحاول مرة أخرى.");
@@ -835,7 +818,7 @@ function Login({ onLogin }) {
     </div>
   );
 }
-function EmployeePortal({ employees, evaluations, onLogout }) {
+function EmployeePortal({ employees, evaluations, settings, setSettings, onLogout }) {
   const employeeId = localStorage.getItem("ep_employee_id");
   const employee = employees.find((item) => item.id === employeeId);
   const ownEvaluations = evaluations
@@ -861,10 +844,10 @@ function EmployeePortal({ employees, evaluations, onLogout }) {
     );
   const submitObjection = () => {
     if (!objection.trim()) return;
-    const old = JSON.parse(localStorage.getItem("ep_objections") || "[]");
-    localStorage.setItem(
-      "ep_objections",
-      JSON.stringify([
+    const old = settings.objections || [];
+    setSettings({
+      ...settings,
+      objections: [
         ...old,
         {
           id: Date.now(),
@@ -874,8 +857,8 @@ function EmployeePortal({ employees, evaluations, onLogout }) {
           status: "قيد المراجعة",
           createdAt: new Date().toISOString(),
         },
-      ]),
-    );
+      ],
+    });
     setObjection("");
     setSent(true);
   };
@@ -2522,10 +2505,8 @@ function SettingsPage({
       exportedAt: new Date().toISOString(),
       settings,
       employees,
-      evaluations: JSON.parse(
-        localStorage.getItem("ep_evaluations") || "[]",
-      ),
-      objections: JSON.parse(localStorage.getItem("ep_objections") || "[]"),
+      evaluations,
+      objections: settings.objections || [],
     };
     const blob = new Blob([JSON.stringify(backup, null, 2)], {
       type: "application/json;charset=utf-8",
@@ -2549,10 +2530,7 @@ function SettingsPage({
         setSettings(backup.settings);
         setEmployees(backup.employees);
         setEvaluations(backup.evaluations || []);
-        localStorage.setItem(
-          "ep_objections",
-          JSON.stringify(backup.objections || []),
-        );
+        setSettings({ ...(backup.settings || {}), objections: backup.objections || [] });
         alert("تم استيراد النسخة الاحتياطية بنجاح.");
       } catch {
         alert("ملف النسخة الاحتياطية غير صالح.");
@@ -3425,8 +3403,12 @@ function EnhancedTopEmployees({ employees, evaluations }) {
   );
 }
 
-function EnhancedPlans({ employees, evaluations }) {
-  const [plans, setPlans] = useStore("ep_improvement_plans", []);
+function EnhancedPlans({ employees, evaluations, settings, setSettings }) {
+  const plans = settings.improvementPlans || [];
+  const setPlans = (updater) => {
+    const nextPlans = typeof updater === "function" ? updater(plans) : updater;
+    setSettings({ ...settings, improvementPlans: nextPlans });
+  };
   const [dialog, setDialog] = useState(null);
   const weak = evaluations
     .filter((e) => e.total < 70)
