@@ -8,6 +8,23 @@ export const permissionPages = [
   "guarantees",
   "overtime",
   "shifts",
+  "inventory",
+  "inventory_dashboard",
+  "inventory_items",
+  "inventory_suppliers",
+  "inventory_purchase_requests",
+  "inventory_purchase_orders",
+  "inventory_receipts",
+  "inventory_invoices",
+  "inventory_issue_vouchers",
+  "inventory_returns",
+  "inventory_transfers",
+  "inventory_adjustments",
+  "inventory_stocktakes",
+  "inventory_balances",
+  "inventory_forecast",
+  "inventory_reports",
+  "inventory_settings",
   "reports_center",
   "reports",
   "settings",
@@ -21,6 +38,7 @@ export const systemRoles = [
   "مدير فرع",
   "الإدارة العليا",
   "الموظف",
+  "مسؤول المخزون",
 ];
 
 const userFromDb = (row = {}) => ({
@@ -57,6 +75,10 @@ const permissionFromDb = (row = {}) => ({
   can_delete: row.can_delete === true,
   can_export: row.can_export === true,
   can_approve: row.can_approve === true,
+  can_cancel: row.can_cancel === true,
+  can_post: row.can_post === true,
+  can_print: row.can_print === true,
+  can_override_stock: row.can_override_stock === true,
 });
 
 const permissionToDb = (item = {}) => ({
@@ -69,6 +91,10 @@ const permissionToDb = (item = {}) => ({
   can_delete: item.can_delete === true,
   can_export: item.can_export === true,
   can_approve: item.can_approve === true,
+  can_cancel: item.can_cancel === true,
+  can_post: item.can_post === true,
+  can_print: item.can_print === true,
+  can_override_stock: item.can_override_stock === true,
 });
 
 export const adminService = {

@@ -80,6 +80,11 @@ import { auditService } from "./services/audit";
 import { shiftsService, shiftPeriods, calculateShiftHours } from "./services/shifts";
 import { shiftScenariosService, scenarioTypes } from "./services/shiftScenarios";
 import { shiftAssignmentsService, shiftAssignmentStatuses } from "./services/shiftAssignments";
+import { inventoryService, inventoryCategories, inventoryUnits } from "./services/inventory";
+import { inventoryDocumentsService, inventoryDocumentConfigs } from "./services/inventoryDocuments";
+import { generateInventoryReports, inventoryRowsForExport } from "./services/inventoryReports";
+import { generateBranchForecast } from "./services/inventoryForecast";
+import { canInventory } from "./services/inventoryPermissions";
 const icons = {
   dashboard: LayoutDashboard,
   employees: Users,
@@ -95,6 +100,7 @@ const icons = {
   guarantees: ShieldCheck,
   overtime: Clock3,
   shifts: CalendarCheck,
+  inventory: Wallet,
   users_permissions: UserRoundCog,
   reports_center: FileBarChart,
   audit_logs: ClipboardList,
@@ -104,6 +110,7 @@ const navItems = [
   ["guarantees", "ضمانات الموظفين"],
   ["overtime", "العمل الإضافي"],
   ["shifts", "شفتات الموظفين"],
+  ["inventory", "إدارة المخزون"],
   ["users_permissions", "المستخدمون والصلاحيات"],
   ["reports_center", "مركز التقارير"],
   ["audit_logs", "سجل العمليات"],
@@ -821,6 +828,7 @@ export default function App() {
 	          {page === "guarantees" && <EmployeeGuaranteesPage {...p} />}{" "}
 	          {page === "overtime" && <OvertimePage {...p} />}{" "}
 	          {page === "shifts" && <EmployeeShiftsPage {...p} />}{" "}
+	          {page === "inventory" && <InventoryManagementPage {...p} />}{" "}
 	          {page === "users_permissions" && <UsersPermissionsPage {...p} />}{" "}
 	          {page === "reports_center" && <EnterpriseReportsCenter {...p} />}{" "}
 	          {page === "audit_logs" && <AuditLogsPage {...p} />}{" "}
@@ -4427,9 +4435,286 @@ const makeShiftMessage = (row) =>
 const upsertLocal = (list, item, key) =>
   list.some((x) => x[key] === item[key]) ? list.map((x) => (x[key] === item[key] ? item : x)) : [item, ...list];
 
+const inventoryTabs = [
+  ["dashboard", "لوحة المخزون", "inventory_dashboard"],
+  ["items", "الأصناف", "inventory_items"],
+  ["suppliers", "الموردون", "inventory_suppliers"],
+  ["purchase_requests", "طلب شراء", "inventory_purchase_requests"],
+  ["purchase_orders", "أمر شراء", "inventory_purchase_orders"],
+  ["receipts", "إذن استلام", "inventory_receipts"],
+  ["invoices", "فاتورة شراء", "inventory_invoices"],
+  ["issues", "سند صرف للفروع", "inventory_issue_vouchers"],
+  ["returns", "سند إرجاع من الفروع", "inventory_returns"],
+  ["transfers", "سند تحويل مخزني", "inventory_transfers"],
+  ["adjustments", "التسويات", "inventory_adjustments"],
+  ["stocktakes", "الجرد", "inventory_stocktakes"],
+  ["balances", "أرصدة المخزون", "inventory_balances"],
+  ["forecast", "توقع احتياج الفروع", "inventory_forecast"],
+  ["reports", "تقارير المخزون", "inventory_reports"],
+  ["settings", "إعدادات المخزون", "inventory_settings"],
+];
+const inventoryDocTypes = ["purchase_requests", "purchase_orders", "receipts", "invoices", "issues", "returns", "transfers", "adjustments", "stocktakes"];
+const inventoryStatusFlow = ["مسودة", "قيد المراجعة", "معتمد", "مرفوض", "مرحل", "ملغي"];
+
+function InventoryManagementPage({ can, currentUser }) {
+  const [tab, setTab] = useState("dashboard");
+  const [items, setItems] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [movements, setMovements] = useState([]);
+  const [documents, setDocuments] = useState({});
+  const [dialog, setDialog] = useState(null);
+  const [filters, setFilters] = useState({ q: "", category: "all", branch: "all", status: "all", supplier: "all", month: "" });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const visibleTabs = inventoryTabs.filter(([, , key]) => canInventory(can, key, "can_view"));
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [loadedItems, loadedSuppliers, loadedMovements, ...docLists] = await Promise.all([
+        inventoryService.loadInventoryItems(),
+        inventoryService.loadSuppliers(),
+        inventoryService.loadInventoryMovements(),
+        ...inventoryDocTypes.map((type) => inventoryDocumentsService.loadDocuments(type).catch((e) => {
+          console.error(`Supabase inventory ${type} load/save error:`, e);
+          return [];
+        })),
+      ]);
+      setItems(loadedItems);
+      setSuppliers(loadedSuppliers);
+      setMovements(loadedMovements);
+      setDocuments(Object.fromEntries(inventoryDocTypes.map((type, index) => [type, docLists[index]])));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    load();
+    const unsubs = [
+      inventoryService.subscribeItems(load),
+      inventoryService.subscribeSuppliers(load),
+      inventoryService.subscribeMovements(load),
+      ...inventoryDocTypes.map((type) => inventoryDocumentsService.subscribe(type, load)),
+    ];
+    return () => unsubs.forEach((u) => u?.());
+  }, []);
+  const canTab = (action) => canInventory(can, inventoryTabs.find(([id]) => id === tab)?.[2] || "inventory_dashboard", action);
+  const balances = inventoryBalances(items, movements);
+  const reports = generateInventoryReports({ items: balances, suppliers, documents, movements });
+  const forecast = generateBranchForecast({ movements, items: balances, branch: filters.branch, month: filters.month });
+  const saveItem = async (event) => {
+    event.preventDefault();
+    if (!canTab(dialog.item_id ? "can_edit" : "can_create")) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    try {
+      const saved = await inventoryService.saveInventoryItem(dialog);
+      setItems((list) => upsertLocal(list, saved, "item_id"));
+      auditService.log({ user_id: currentUser?.user_id || currentUser?.username, user_name: currentUser?.username, action: dialog.item_id ? "تعديل صنف" : "إضافة صنف", module_name: "inventory_items", record_id: saved.item_id, new_data: saved }).catch(() => {});
+      setDialog(null);
+    } catch (e) { alert(e.message); }
+  };
+  const saveSupplier = async (event) => {
+    event.preventDefault();
+    if (!canTab(dialog.supplier_id ? "can_edit" : "can_create")) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    try {
+      const saved = await inventoryService.saveSupplier(dialog);
+      setSuppliers((list) => upsertLocal(list, saved, "supplier_id"));
+      setDialog(null);
+    } catch (e) { alert(e.message); }
+  };
+  const saveDocument = async (event) => {
+    event.preventDefault();
+    if (!canTab(dialog.id ? "can_edit" : "can_create")) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!dialog.document_date) return alert("يجب تحديد تاريخ المستند");
+    if (dialog.details?.length === 0 && !["invoices", "adjustments"].includes(dialog.type)) return alert("يجب إضافة صنف واحد على الأقل");
+    try {
+      const config = inventoryDocumentConfigs[dialog.type];
+      const saved = await inventoryDocumentsService.saveDocument(dialog.type, { ...dialog, [config.idKey]: dialog.id }, dialog.details || []);
+      setDocuments((all) => ({ ...all, [dialog.type]: upsertLocal(all[dialog.type] || [], saved, "id") }));
+      setDialog(null);
+    } catch (e) { alert(e.message); }
+  };
+  const deleteRecord = async (kind, record) => {
+    if (!canTab("can_delete")) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (record.status && record.status !== "مسودة") return alert("لا يمكن حذف مستند مرحل");
+    if (!confirm("هل تريد حذف السجل؟")) return;
+    try {
+      if (kind === "items") {
+        await inventoryService.deleteInventoryItem(record.item_id);
+        setItems((list) => list.filter((x) => x.item_id !== record.item_id));
+      } else if (kind === "suppliers") {
+        await inventoryService.deleteSupplier(record.supplier_id);
+        setSuppliers((list) => list.filter((x) => x.supplier_id !== record.supplier_id));
+      } else {
+        await inventoryDocumentsService.deleteDocument(kind, record.id);
+        setDocuments((all) => ({ ...all, [kind]: (all[kind] || []).filter((x) => x.id !== record.id) }));
+      }
+    } catch (e) { alert(e.message); }
+  };
+  const updateDocStatus = async (type, doc, status) => {
+    const action = status === "معتمد" ? "can_approve" : status === "مرحل" ? "can_post" : "can_edit";
+    if (!canTab(action)) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    try {
+      const details = await inventoryDocumentsService.loadDetails(type, doc.id).catch(() => []);
+      if (status === "مرحل") await inventoryDocumentsService.postStock(type, doc, details, currentUser?.username || "");
+      else await inventoryDocumentsService.updateStatus(type, doc, status, { approved_by: currentUser?.username || "", approved_at: new Date().toISOString() });
+      approvalService.log({ module_name: type, record_id: doc.id, action: status, old_status: doc.status, new_status: status, performed_by: currentUser?.username || "", notes: "" }).catch(() => {});
+      load();
+    } catch (e) { alert(e.message); }
+  };
+  return (
+    <div className="space-y-5">
+      <PageHead title="إدارة المخزون" desc="الدورة المستندية الكاملة للمخزون والمشتريات وحركة الأصناف" action={<button onClick={() => setTab("items")} className="btn-primary"><Wallet size={18} /> الأصناف</button>} />
+      {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
+      <div className="panel flex flex-wrap gap-2 p-2">{visibleTabs.map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === id ? "bg-brand-700 text-white" : "bg-slate-100 text-slate-600"}`}>{label}</button>)}</div>
+      {loading ? <div className="panel p-6 text-center text-sm text-slate-500">جاري تحميل بيانات المخزون...</div> : (
+        <>
+          {tab === "dashboard" && <InventoryDashboard items={balances} documents={documents} movements={movements} />}
+          {tab === "items" && <InventoryItemsTab rows={items} filters={filters} setFilters={setFilters} setDialog={setDialog} deleteRecord={deleteRecord} canCreate={canTab("can_create")} />}
+          {tab === "suppliers" && <InventorySuppliersTab rows={suppliers} filters={filters} setFilters={setFilters} setDialog={setDialog} deleteRecord={deleteRecord} canCreate={canTab("can_create")} />}
+          {inventoryDocTypes.includes(tab) && <InventoryDocumentsTab type={tab} rows={documents[tab] || []} items={items} suppliers={suppliers} filters={filters} setFilters={setFilters} setDialog={setDialog} deleteRecord={deleteRecord} updateDocStatus={updateDocStatus} canCreate={canTab("can_create")} />}
+          {tab === "balances" && <InventoryBalancesTab rows={balances} filters={filters} setFilters={setFilters} />}
+          {tab === "forecast" && <InventoryForecastTab rows={forecast} filters={filters} setFilters={setFilters} />}
+          {tab === "reports" && <InventoryReportsTab reports={reports} filters={filters} setFilters={setFilters} canExport={canTab("can_export")} />}
+          {tab === "settings" && <InventorySettingsTab />}
+        </>
+      )}
+      {dialog?.kind === "item" && <InventoryItemDialog dialog={dialog} setDialog={setDialog} save={saveItem} />}
+      {dialog?.kind === "supplier" && <InventorySupplierDialog dialog={dialog} setDialog={setDialog} save={saveSupplier} />}
+      {dialog?.kind === "document" && <InventoryDocumentDialog dialog={dialog} setDialog={setDialog} save={saveDocument} items={items} suppliers={suppliers} />}
+      {dialog?.kind === "details" && <DetailsDialog title="تفاصيل المستند" row={dialog.row} close={() => setDialog(null)} />}
+    </div>
+  );
+}
+
+const inventoryBalances = (items, movements) => items.map((item) => {
+  const itemMovements = movements.filter((m) => m.item_id === item.item_id);
+  const totalPurchases = itemMovements.filter((m) => m.movement_type === "استلام شراء").reduce((s, m) => s + m.quantity_in, 0);
+  const totalIssued = itemMovements.filter((m) => m.movement_type === "صرف فرع").reduce((s, m) => s + m.quantity_out, 0);
+  const totalReturns = itemMovements.filter((m) => m.movement_type === "إرجاع فرع").reduce((s, m) => s + m.quantity_in, 0);
+  const quantityIn = itemMovements.reduce((s, m) => s + m.quantity_in, 0);
+  const quantityOut = itemMovements.reduce((s, m) => s + m.quantity_out, 0);
+  const current = Number(item.opening_balance || 0) + quantityIn - quantityOut;
+  const status = current <= 0 ? "نفد" : current <= Number(item.reorder_point || 0) ? "يحتاج شراء" : current <= Number(item.minimum_stock || 0) ? "منخفض" : "متوفر";
+  return { ...item, total_purchases: totalPurchases, total_issued: totalIssued, total_returns: totalReturns, total_adjustments: quantityIn - quantityOut, current_balance: current, average_unit_cost: item.default_unit_cost, estimated_stock_value: current * Number(item.default_unit_cost || 0), stock_status: status };
+});
+
+function InventoryDashboard({ items, documents, movements }) {
+  const month = new Date().toISOString().slice(0, 7);
+  const issueMovements = movements.filter((m) => m.movement_type === "صرف فرع");
+  const cards = [
+    ["إجمالي الأصناف", items.length, Wallet],
+    ["الأصناف النشطة", items.filter((x) => x.is_active).length, BadgeCheck],
+    ["الأصناف منخفضة المخزون", items.filter((x) => x.stock_status === "منخفض").length, AlertTriangle],
+    ["الأصناف النافدة", items.filter((x) => x.stock_status === "نفد").length, AlertTriangle],
+    ["إجمالي قيمة المخزون", money(items.reduce((s, x) => s + Number(x.estimated_stock_value || 0), 0)), CircleDollarSign],
+    ["مشتريات الشهر", movements.filter((m) => m.movement_type === "استلام شراء" && String(m.movement_date).startsWith(month)).length, FileSpreadsheet],
+    ["صرف الفروع هذا الشهر", issueMovements.filter((m) => String(m.movement_date).startsWith(month)).length, Building2],
+    ["طلبات شراء قيد الاعتماد", (documents.purchase_requests || []).filter((d) => d.approval_status === "قيد المراجعة").length, Clock3],
+  ];
+  const byBranch = Object.entries(groupCount(issueMovements, "branch")).map(([name, value]) => ({ name, value }));
+  const byCategory = Object.entries(groupCount(items, "category")).map(([name, value]) => ({ name, value }));
+  return <div className="space-y-5"><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{cards.map(([label, value, I]) => <Mini key={label} label={label} value={value} I={I} />)}</div><div className="grid gap-5 xl:grid-cols-2"><Chart title="الصرف حسب الفروع" sub="حركات صرف الفروع"><ResponsiveContainer width="100%" height={240}><BarChart data={byBranch}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></Chart><Chart title="الأصناف حسب التصنيف" sub="توزيع الأصناف"><ResponsiveContainer width="100%" height={240}><PieChart><Pie data={byCategory} dataKey="value" innerRadius={55} outerRadius={85}>{["#7f1d1d", "#991b1b", "#dc2626", "#f59e0b", "#64748b"].map((c) => <Cell key={c} fill={c} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer></Chart></div></div>;
+}
+
+function InventoryItemsTab({ rows, filters, setFilters, setDialog, deleteRecord, canCreate }) {
+  const filtered = rows.filter((x) => (!filters.q || x.item_name.includes(filters.q) || x.item_code.includes(filters.q)) && (filters.category === "all" || x.category === filters.category) && (filters.status === "all" || x.stock_status === filters.status || String(x.is_active) === filters.status));
+  const exportRows = inventoryRowsForExport(filtered, [{ key: "item_code", label: "الكود" }, { key: "item_name", label: "الصنف" }, { key: "category", label: "التصنيف" }, { key: "unit_type", label: "الوحدة" }, { key: "current_balance", label: "الرصيد" }]);
+  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="بحث بالصنف أو الكود..." /><select value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })} className="field max-w-[180px]"><option value="all">كل التصنيفات</option>{inventoryCategories.map((c) => <option key={c}>{c}</option>)}</select><button disabled={!canCreate} onClick={() => setDialog({ kind: "item", item_id: `ITM-${Date.now()}`, item_code: "", item_name: "", category: inventoryCategories[0], unit_type: inventoryUnits[0], default_unit_cost: 0, minimum_stock: 0, reorder_point: 0, opening_balance: 0, current_balance: 0, is_active: true, notes: "" })} className="btn-primary"><Plus size={17} /> إضافة صنف</button><button onClick={() => exportExcel(exportRows, "الأصناف")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>الكود</th><th>الصنف</th><th>التصنيف</th><th>الوحدة</th><th>الرصيد</th><th>نقطة الطلب</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((r) => <tr key={r.item_id}><td>{r.item_code}</td><td>{r.item_name}</td><td>{r.category}</td><td>{r.unit_type}</td><td>{r.current_balance}</td><td>{r.reorder_point}</td><td><Status>{r.is_active ? "نشط" : "غير نشط"}</Status></td><td><button onClick={() => setDialog({ ...r, kind: "item" })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => setDialog({ kind: "details", row: r })} className="p-2 text-slate-600"><Eye size={16} /></button><button onClick={() => deleteRecord("items", r)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div></div>;
+}
+
+function InventorySuppliersTab({ rows, filters, setFilters, setDialog, deleteRecord, canCreate }) {
+  const filtered = rows.filter((x) => !filters.q || x.supplier_name.includes(filters.q) || x.phone.includes(filters.q));
+  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="بحث بالمورد..." /><button disabled={!canCreate} onClick={() => setDialog({ kind: "supplier", supplier_id: `SUP-${Date.now()}`, supplier_name: "", phone: "", address: "", tax_number: "", commercial_register: "", contact_person: "", is_active: true, notes: "" })} className="btn-primary"><Plus size={17} /> إضافة مورد</button><button onClick={() => exportExcel(filtered, "الموردون")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>المورد</th><th>الهاتف</th><th>السجل التجاري</th><th>مسؤول التواصل</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((r) => <tr key={r.supplier_id}><td>{r.supplier_name}</td><td>{r.phone}</td><td>{r.commercial_register}</td><td>{r.contact_person}</td><td><Status>{r.is_active ? "نشط" : "غير نشط"}</Status></td><td><button onClick={() => setDialog({ ...r, kind: "supplier" })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => deleteRecord("suppliers", r)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div></div>;
+}
+
+function InventoryDocumentsTab({ type, rows, items, suppliers, filters, setFilters, setDialog, deleteRecord, updateDocStatus, canCreate }) {
+  const config = inventoryDocumentConfigs[type];
+  const filtered = rows.filter((x) => (!filters.q || String(x.document_number || "").includes(filters.q) || String(x.supplier_name || x.branch || "").includes(filters.q)) && (filters.status === "all" || x.status === filters.status || x.approval_status === filters.status) && (!filters.month || String(x.document_date || "").startsWith(filters.month)));
+  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[200px] flex-1" placeholder="بحث بالمستند..." /><input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field max-w-[170px]" /><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[170px]"><option value="all">كل الحالات</option>{["مسودة", "قيد المراجعة", "معتمد", "مرحل", "مرفوض", "ملغي"].map((s) => <option key={s}>{s}</option>)}</select><button disabled={!canCreate} onClick={() => setDialog({ kind: "document", type, id: `${type.toUpperCase()}-${Date.now()}`, document_number: `${config.label}-${Date.now()}`, document_date: new Date().toISOString().slice(0, 10), status: "مسودة", approval_status: "مسودة", supplier_id: suppliers[0]?.supplier_id || "", supplier_name: suppliers[0]?.supplier_name || "", branch: branches[0], priority: "عادي", details: [] })} className="btn-primary"><Plus size={17} /> إضافة</button><button onClick={() => exportExcel(filtered, config.label)} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button><button onClick={() => printDocument(config.label, rowsToReportHtml(config.label, filtered, [{ key: "document_number", label: "الرقم" }, { key: "document_date", label: "التاريخ" }, { key: "supplier_name", label: "المورد" }, { key: "branch", label: "الفرع" }, { key: "status", label: "الحالة" }]))} className="btn-secondary"><Printer size={17} /> طباعة</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>رقم المستند</th><th>التاريخ</th><th>المورد/الفرع</th><th>الحالة</th><th>الاعتماد</th><th>القيمة</th><th></th></tr></thead><tbody>{filtered.map((r) => <tr key={r.id}><td>{r.document_number}</td><td>{r.document_date}</td><td>{r.supplier_name || r.branch || r.requesting_branch}</td><td><Status>{r.status}</Status></td><td><Status>{r.approval_status}</Status></td><td>{money(r.total_amount || 0)}</td><td><button onClick={() => setDialog({ kind: "details", row: r })} className="p-2 text-slate-600"><Eye size={16} /></button><button onClick={() => setDialog({ ...r, kind: "document", type, details: [] })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => updateDocStatus(type, r, "قيد المراجعة")} className="btn-secondary !h-8 !px-2">إرسال</button><button onClick={() => updateDocStatus(type, r, "معتمد")} className="btn-secondary !h-8 !px-2">اعتماد</button><button onClick={() => updateDocStatus(type, r, "مرحل")} className="btn-secondary !h-8 !px-2">ترحيل</button><button onClick={() => deleteRecord(type, r)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div></div>;
+}
+
+function InventoryBalancesTab({ rows, filters, setFilters }) {
+  const filtered = rows.filter((x) => (filters.category === "all" || x.category === filters.category) && (filters.status === "all" || x.stock_status === filters.status));
+  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><select value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })} className="field max-w-[180px]"><option value="all">كل التصنيفات</option>{inventoryCategories.map((c) => <option key={c}>{c}</option>)}</select><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[180px]"><option value="all">كل الحالات</option>{["متوفر", "منخفض", "نفد", "يحتاج شراء"].map((s) => <option key={s}>{s}</option>)}</select><button onClick={() => exportExcel(filtered, "أرصدة المخزون")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>الصنف</th><th>الافتتاحي</th><th>المشتريات</th><th>الصرف</th><th>الإرجاع</th><th>الرصيد</th><th>القيمة</th><th>الحالة</th></tr></thead><tbody>{filtered.map((r) => <tr key={r.item_id}><td>{r.item_code} - {r.item_name}</td><td>{r.opening_balance}</td><td>{r.total_purchases}</td><td>{r.total_issued}</td><td>{r.total_returns}</td><td>{r.current_balance}</td><td>{money(r.estimated_stock_value)}</td><td><Status>{r.stock_status}</Status></td></tr>)}</tbody></table></div></div></div>;
+}
+
+function InventoryForecastTab({ rows, filters, setFilters }) {
+  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field max-w-[170px]" /><button onClick={() => exportExcel(rows, "توقع احتياج الفروع")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>الفرع</th><th>الصنف</th><th>إجمالي الصرف</th><th>متوسط شهري</th><th>احتياج شهر</th><th>احتياج 3 أشهر</th><th>الرصيد</th><th>الموصى بشرائه</th></tr></thead><tbody>{rows.map((r) => <tr key={`${r.branch}-${r.item_id}`}><td>{r.branch}</td><td>{r.item_name}</td><td>{r.total_issued_quantity}</td><td>{r.average_monthly_consumption}</td><td>{r.expected_need_next_month}</td><td>{r.expected_need_next_3_months}</td><td>{r.current_balance}</td><td>{r.recommended_purchase_quantity}</td></tr>)}</tbody></table></div></div></div>;
+}
+
+function InventoryReportsTab({ reports, filters, setFilters, canExport }) {
+  const reportList = [["تقرير الأصناف", reports.items], ["تقرير الموردين", reports.suppliers], ["تقرير طلبات الشراء", reports.purchase_requests], ["تقرير أوامر الشراء", reports.purchase_orders], ["تقرير إذون الاستلام", reports.receipts], ["تقرير فواتير الشراء", reports.invoices], ["تقرير الصرف للفروع", reports.issues], ["تقرير إرجاع الفروع", reports.returns], ["تقرير التحويلات", reports.transfers], ["تقرير التسويات", reports.adjustments], ["تقرير الجرد", reports.stocktakes], ["تقرير الرصيد الحالي", reports.balances], ["تقرير حركة صنف", reports.movements], ["تقرير الأصناف منخفضة المخزون", reports.low_stock]];
+  return <div className="space-y-4"><div className="panel grid gap-3 p-4 md:grid-cols-4"><input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field" /><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><select value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })} className="field"><option value="all">كل التصنيفات</option>{inventoryCategories.map((c) => <option key={c}>{c}</option>)}</select></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{reportList.map(([title, rows]) => <div key={title} className="panel p-5"><FileBarChart className="text-brand-700" /><h3 className="mt-3 font-extrabold">{title}</h3><p className="mt-1 text-xs text-slate-500">عدد السجلات: {(rows || []).length}</p><div className="mt-5 flex gap-2"><button disabled={!canExport} onClick={() => exportExcel(rows || [], title)} className="btn-secondary flex-1"><FileSpreadsheet size={15} /> Excel</button><button onClick={() => printDocument(title, rowsToReportHtml(title, rows || [], [{ key: "document_number", label: "الرقم" }, { key: "item_name", label: "الصنف" }, { key: "supplier_name", label: "المورد" }, { key: "branch", label: "الفرع" }, { key: "status", label: "الحالة" }]))} className="btn-secondary flex-1"><Printer size={15} /> PDF</button><button disabled={!canExport} onClick={() => exportDocx(title, rows || [])} className="btn-secondary flex-1"><Download size={15} /> Word</button></div></div>)}</div></div>;
+}
+
+function InventorySettingsTab() {
+  return <div className="grid gap-4 md:grid-cols-2"><div className="panel p-5"><h3 className="font-extrabold">تصنيفات الأصناف</h3><div className="mt-3 flex flex-wrap gap-2">{inventoryCategories.map((c) => <span key={c} className="rounded-xl bg-slate-100 px-3 py-2 text-sm">{c}</span>)}</div></div><div className="panel p-5"><h3 className="font-extrabold">وحدات القياس</h3><div className="mt-3 flex flex-wrap gap-2">{inventoryUnits.map((u) => <span key={u} className="rounded-xl bg-slate-100 px-3 py-2 text-sm">{u}</span>)}</div></div></div>;
+}
+
+function InventoryItemDialog({ dialog, setDialog, save }) {
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6"><DialogTitle title="بيانات الصنف" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="كود الصنف"><input required value={dialog.item_code} onChange={(e) => setDialog({ ...dialog, item_code: e.target.value })} className="field mt-2" /></Label><Label t="اسم الصنف"><input required value={dialog.item_name} onChange={(e) => setDialog({ ...dialog, item_name: e.target.value })} className="field mt-2" /></Label><Label t="التصنيف"><select value={dialog.category} onChange={(e) => setDialog({ ...dialog, category: e.target.value })} className="field mt-2">{inventoryCategories.map((c) => <option key={c}>{c}</option>)}</select></Label><Label t="وحدة القياس"><select value={dialog.unit_type} onChange={(e) => setDialog({ ...dialog, unit_type: e.target.value })} className="field mt-2">{inventoryUnits.map((u) => <option key={u}>{u}</option>)}</select></Label><Label t="تكلفة الوحدة"><input type="number" value={dialog.default_unit_cost} onChange={(e) => setDialog({ ...dialog, default_unit_cost: e.target.value })} className="field mt-2" /></Label><Label t="الحد الأدنى"><input type="number" value={dialog.minimum_stock} onChange={(e) => setDialog({ ...dialog, minimum_stock: e.target.value })} className="field mt-2" /></Label><Label t="نقطة إعادة الطلب"><input type="number" value={dialog.reorder_point} onChange={(e) => setDialog({ ...dialog, reorder_point: e.target.value })} className="field mt-2" /></Label><Label t="الرصيد الافتتاحي"><input type="number" value={dialog.opening_balance} onChange={(e) => setDialog({ ...dialog, opening_balance: e.target.value, current_balance: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">غير نشط</option></select></Label><Label t="ملاحظات"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>;
+}
+
+function InventorySupplierDialog({ dialog, setDialog, save }) {
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-3xl overflow-y-auto p-6"><DialogTitle title="بيانات المورد" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-2"><Label t="اسم المورد"><input required value={dialog.supplier_name} onChange={(e) => setDialog({ ...dialog, supplier_name: e.target.value })} className="field mt-2" /></Label><Label t="الهاتف"><input value={dialog.phone} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label><Label t="العنوان"><input value={dialog.address} onChange={(e) => setDialog({ ...dialog, address: e.target.value })} className="field mt-2" /></Label><Label t="الرقم الضريبي"><input value={dialog.tax_number} onChange={(e) => setDialog({ ...dialog, tax_number: e.target.value })} className="field mt-2" /></Label><Label t="السجل التجاري"><input value={dialog.commercial_register} onChange={(e) => setDialog({ ...dialog, commercial_register: e.target.value })} className="field mt-2" /></Label><Label t="مسؤول التواصل"><input value={dialog.contact_person} onChange={(e) => setDialog({ ...dialog, contact_person: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">غير نشط</option></select></Label><Label t="ملاحظات"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>;
+}
+
+function InventoryDocumentDialog({ dialog, setDialog, save, items, suppliers }) {
+  const addDetail = () => {
+    const item = items[0] || {};
+    setDialog({ ...dialog, details: [...(dialog.details || []), { detail_id: `D-${Date.now()}`, item_id: item.item_id || "", item_code: item.item_code || "", item_name: item.item_name || "", category: item.category || "", unit_type: item.unit_type || "", quantity: 1, unit_cost: item.default_unit_cost || 0, unit_price: item.default_unit_cost || 0, total_value: item.default_unit_cost || 0, notes: "" }] });
+  };
+  const updateDetail = (index, patch) => setDialog({ ...dialog, details: (dialog.details || []).map((d, i) => i === index ? { ...d, ...patch, total_value: Number((patch.quantity ?? d.quantity) || 0) * Number((patch.unit_cost ?? patch.unit_price ?? d.unit_cost ?? d.unit_price) || 0), total_amount: Number((patch.quantity ?? d.quantity) || 0) * Number((patch.unit_cost ?? patch.unit_price ?? d.unit_cost ?? d.unit_price) || 0) } : d) });
+  const selectItem = (index, itemId) => {
+    const item = items.find((x) => x.item_id === itemId) || {};
+    updateDetail(index, { item_id: item.item_id, item_code: item.item_code, item_name: item.item_name, category: item.category, unit_type: item.unit_type, unit_cost: item.default_unit_cost, unit_price: item.default_unit_cost });
+  };
+  const selectSupplier = (supplierId) => {
+    const supplier = suppliers.find((x) => x.supplier_id === supplierId);
+    setDialog({ ...dialog, supplier_id: supplierId, supplier_name: supplier?.supplier_name || "" });
+  };
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-6xl overflow-y-auto p-6"><DialogTitle title={inventoryDocumentConfigs[dialog.type]?.label || "مستند مخزني"} close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-4"><Label t="رقم المستند"><input value={dialog.document_number} onChange={(e) => setDialog({ ...dialog, document_number: e.target.value })} className="field mt-2" /></Label><Label t="تاريخ المستند"><input required type="date" value={dialog.document_date} onChange={(e) => setDialog({ ...dialog, document_date: e.target.value })} className="field mt-2" /></Label><Label t="المورد"><select value={dialog.supplier_id} onChange={(e) => selectSupplier(e.target.value)} className="field mt-2"><option value="">بدون مورد</option>{suppliers.map((s) => <option key={s.supplier_id} value={s.supplier_id}>{s.supplier_name}</option>)}</select></Label><Label t="الفرع"><select value={dialog.branch || dialog.requesting_branch} onChange={(e) => setDialog({ ...dialog, branch: e.target.value, requesting_branch: e.target.value })} className="field mt-2">{branches.map((b) => <option key={b}>{b}</option>)}</select></Label><Label t="الأولوية"><select value={dialog.priority || "عادي"} onChange={(e) => setDialog({ ...dialog, priority: e.target.value })} className="field mt-2"><option>عادي</option><option>عاجل</option><option>طارئ</option></select></Label><Label t="الحالة"><select value={dialog.status} onChange={(e) => setDialog({ ...dialog, status: e.target.value, approval_status: e.target.value })} className="field mt-2">{inventoryStatusFlow.map((s) => <option key={s}>{s}</option>)}</select></Label><Label t="ملاحظات"><input value={dialog.notes || ""} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2" /></Label></div>{dialog.type !== "invoices" && dialog.type !== "adjustments" && <div className="mt-6 rounded-2xl border p-4"><div className="mb-3 flex"><h4 className="font-extrabold">تفاصيل الأصناف</h4><button type="button" onClick={addDetail} className="btn-secondary mr-auto"><Plus size={15} /> إضافة صنف</button></div><div className="space-y-2">{(dialog.details || []).map((d, i) => <div key={d.detail_id || i} className="grid gap-2 rounded-xl bg-slate-50 p-3 md:grid-cols-6"><select value={d.item_id} onChange={(e) => selectItem(i, e.target.value)} className="field"><option value="">اختر الصنف</option>{items.map((item) => <option key={item.item_id} value={item.item_id}>{item.item_name}</option>)}</select><input value={d.unit_type} readOnly className="field bg-white" /><input type="number" value={d.quantity} onChange={(e) => updateDetail(i, { quantity: e.target.value })} className="field" placeholder="الكمية" /><input type="number" value={d.unit_cost || d.unit_price} onChange={(e) => updateDetail(i, { unit_cost: e.target.value, unit_price: e.target.value })} className="field" placeholder="السعر" /><input value={d.total_value || d.total_amount || 0} readOnly className="field bg-white" /><button type="button" onClick={() => setDialog({ ...dialog, details: dialog.details.filter((_, idx) => idx !== i) })} className="btn-secondary text-red-600">حذف</button></div>)}</div></div>}<DialogActions close={() => setDialog(null)} /></form></div>;
+}
+const normalizeLegacyShiftPeriods = (types, periods) => {
+  const existing = Array.isArray(periods) ? periods : [];
+  const generated = types
+    .filter((type) => !existing.some((period) => period.shift_type_id === type.shift_type_id) && type.start_time && type.end_time)
+    .map((type) => ({
+      period_id: `LEGACY-${type.shift_type_id}`,
+      shift_type_id: type.shift_type_id,
+      period_name: type.shift_period || "فترة العمل",
+      start_time: type.start_time,
+      end_time: type.end_time,
+      total_hours: calculateShiftHours(type.start_time, type.end_time),
+      sort_order: 1,
+      is_active: true,
+      notes: "",
+      legacy: true,
+    }));
+  return [...existing, ...generated].sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
+};
+const periodsForShift = (shiftTypeId, periods) => periods.filter((period) => period.shift_type_id === shiftTypeId && period.is_active !== false);
+const shiftTotalHours = (type, periods) => {
+  if (type.shift_mode === "مرن") return Number(type.required_hours || type.total_hours || 0);
+  const rows = periodsForShift(type.shift_type_id, periods);
+  return Number((rows.reduce((sum, period) => sum + Number(period.total_hours || calculateShiftHours(period.start_time, period.end_time)), 0) || type.total_hours || 0).toFixed(2));
+};
+const shiftTimelineStyle = (period) => {
+  const start = minutesOf(period.start_time);
+  let end = minutesOf(period.end_time);
+  if (end <= start) end += 1440;
+  return {
+    right: `${Math.min(100, (start / 1440) * 100)}%`,
+    width: `${Math.max(4, Math.min(100, ((end - start) / 1440) * 100))}%`,
+  };
+};
+
 function EmployeeShiftsPage({ employees, setEmployees, role, currentUser, can }) {
   const [tab, setTab] = useState("types");
   const [shiftTypes, setShiftTypes] = useState([]);
+  const [shiftTypePeriods, setShiftTypePeriods] = useState([]);
   const [usedShifts, setUsedShifts] = useState([]);
   const [scenarios, setScenarios] = useState([]);
   const [scenarioDetails, setScenarioDetails] = useState([]);
@@ -4447,14 +4732,17 @@ function EmployeeShiftsPage({ employees, setEmployees, role, currentUser, can })
     setLoading(true);
     setError("");
     try {
-      const [types, used, sc, details, ass] = await Promise.all([
+	      const [types, used, periods, sc, details, ass] = await Promise.all([
         shiftsService.listTypes(),
         shiftsService.listUsed(),
+        shiftsService.listPeriods(),
         shiftScenariosService.listScenarios(),
         shiftScenariosService.listDetails(),
         shiftAssignmentsService.list(),
       ]);
-      setShiftTypes(types);
+      const normalizedPeriods = normalizeLegacyShiftPeriods(types, periods);
+      setShiftTypes(types.map((type) => ({ ...type, total_hours: shiftTotalHours(type, normalizedPeriods) })));
+      setShiftTypePeriods(normalizedPeriods);
       setUsedShifts(used);
       setScenarios(sc);
       setScenarioDetails(details);
@@ -4469,6 +4757,7 @@ function EmployeeShiftsPage({ employees, setEmployees, role, currentUser, can })
     load();
     const unsubs = [
       shiftsService.subscribeTypes(load),
+      shiftsService.subscribePeriods(load),
       shiftsService.subscribeUsed(load),
       shiftScenariosService.subscribeScenarios(load),
       shiftScenariosService.subscribeDetails(load),
@@ -4509,9 +4798,28 @@ function EmployeeShiftsPage({ employees, setEmployees, role, currentUser, can })
     e.preventDefault();
     const exists = shiftTypes.some((s) => s.shift_type_id === dialog.shift_type_id);
     if ((exists && !canEdit) || (!exists && !canCreate)) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    const activePeriods = (dialog.periods || []).filter((period) => period.is_active !== false);
+    if (!dialog.shift_name?.trim()) return alert("يجب إدخال اسم الشفت");
+    if (!dialog.shift_mode) return alert("يجب تحديد نوع الشفت ثابت أو مرن");
+    if (dialog.shift_mode === "ثابت" && !activePeriods.length) return alert("يجب إضافة فترة واحدة على الأقل");
+    if (activePeriods.some((period) => !period.start_time || !period.end_time)) return alert("يجب إدخال وقت البداية والنهاية");
+    if (activePeriods.some((period) => calculateShiftHours(period.start_time, period.end_time) <= 0)) return alert("عدد ساعات الشفت غير صحيح");
+    if (dialog.shift_mode === "مرن" && (!Number(dialog.required_hours) || !dialog.flexible_start_from || !dialog.flexible_end_until)) return alert("يجب تحديد نطاق الشفت المرن وعدد الساعات المطلوبة");
     try {
-      const saved = await shiftsService.saveType({ ...dialog, total_hours: calculateShiftHours(dialog.start_time, dialog.end_time) });
+      const totalHours = dialog.shift_mode === "مرن"
+        ? Number(dialog.required_hours || 0)
+        : activePeriods.reduce((sum, period) => sum + calculateShiftHours(period.start_time, period.end_time), 0);
+      const primary = activePeriods[0] || dialog;
+      const saved = await shiftsService.saveType({ ...dialog, start_time: primary.start_time, end_time: primary.end_time, total_hours: totalHours });
+      const savedPeriods = await shiftsService.savePeriods(saved.shift_type_id, activePeriods.map((period, index) => ({
+        ...period,
+        period_id: String(period.period_id || "").startsWith("LEGACY-") ? `STP-${Date.now()}-${index}` : period.period_id,
+        shift_type_id: saved.shift_type_id,
+        total_hours: calculateShiftHours(period.start_time, period.end_time),
+        sort_order: index + 1,
+      })));
       setShiftTypes((list) => upsertLocal(list, saved, "shift_type_id"));
+      setShiftTypePeriods((list) => [...list.filter((period) => period.shift_type_id !== saved.shift_type_id), ...savedPeriods]);
       setDialog(null);
     } catch (err) { alert(err.message); }
   };
@@ -4536,7 +4844,19 @@ function EmployeeShiftsPage({ employees, setEmployees, role, currentUser, can })
   };
   const selectShiftForDialog = (shiftTypeId) => {
     const s = shiftTypes.find((x) => x.shift_type_id === shiftTypeId);
-    setDialog((d) => ({ ...d, shift_type_id: shiftTypeId, shift_name: s?.shift_name || "", start_time: s?.start_time || "", end_time: s?.end_time || "", total_hours: s?.total_hours || 0 }));
+    const rows = periodsForShift(shiftTypeId, shiftTypePeriods);
+    const first = rows[0] || s || {};
+    const last = rows[rows.length - 1] || s || {};
+    setDialog((d) => ({
+      ...d,
+      shift_type_id: shiftTypeId,
+      shift_name: s?.shift_name || "",
+      shift_mode: s?.shift_mode || "ثابت",
+      shift_periods: rows,
+      start_time: first.start_time || "",
+      end_time: last.end_time || "",
+      total_hours: shiftTotalHours(s || {}, shiftTypePeriods),
+    }));
   };
   const saveAssignments = async (e) => {
     e.preventDefault();
@@ -4552,9 +4872,11 @@ function EmployeeShiftsPage({ employees, setEmployees, role, currentUser, can })
       job: emp.job,
       shift_type_id: dialog.shift_type_id,
       shift_name: dialog.shift_name,
+      shift_mode: dialog.shift_mode || "ثابت",
+      shift_periods: dialog.shift_periods || [],
       start_time: dialog.start_time,
       end_time: dialog.end_time,
-      total_hours: calculateShiftHours(dialog.start_time, dialog.end_time),
+      total_hours: Number(dialog.total_hours || calculateShiftHours(dialog.start_time, dialog.end_time)),
       status: "مجدول",
       notes: dialog.notes || "",
     }));
@@ -4610,16 +4932,16 @@ function EmployeeShiftsPage({ employees, setEmployees, role, currentUser, can })
       <div className="panel flex flex-wrap gap-2 p-2">{shiftTabs.map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === id ? "bg-brand-700 text-white" : "bg-slate-100 text-slate-600"}`}>{label}</button>)}</div>
       {loading ? <div className="panel p-6 text-center text-sm text-slate-500">جاري تحميل بيانات الشفتات...</div> : (
         <>
-          {tab === "types" && <ShiftTypesTab rows={shiftTypes} setDialog={setDialog} removeRecord={removeRecord} filters={filters} setFilters={setFilters} />}
-          {tab === "used" && <UsedShiftsTab rows={usedShifts} shiftTypes={shiftTypes} setDialog={setDialog} removeRecord={removeRecord} filters={filters} setFilters={setFilters} />}
+          {tab === "types" && <ShiftTypesTab rows={shiftTypes} periods={shiftTypePeriods} setDialog={setDialog} removeRecord={removeRecord} filters={filters} setFilters={setFilters} />}
+          {tab === "used" && <UsedShiftsTab rows={usedShifts} shiftTypes={shiftTypes} periods={shiftTypePeriods} setDialog={setDialog} removeRecord={removeRecord} filters={filters} setFilters={setFilters} />}
           {tab === "scenarios" && <ShiftScenariosTab rows={scenarios} details={scenarioDetails} shiftTypes={shiftTypes} setDialog={setDialog} removeRecord={removeRecord} filters={filters} setFilters={setFilters} />}
-          {tab === "assignments" && <ShiftAssignmentsTab rows={filteredAssignments} employees={employees} shiftTypes={shiftTypes} setDialog={setDialog} removeRecord={removeRecord} filters={filters} setFilters={setFilters} copyShiftSchedule={copyShiftSchedule} setEmployeeDialog={setEmployeeDialog} />}
+          {tab === "assignments" && <ShiftAssignmentsTab rows={filteredAssignments} employees={employees} shiftTypes={shiftTypes} periods={shiftTypePeriods} setDialog={setDialog} removeRecord={removeRecord} filters={filters} setFilters={setFilters} copyShiftSchedule={copyShiftSchedule} setEmployeeDialog={setEmployeeDialog} />}
           {tab === "reports" && <ShiftReportsTab rows={filteredAssignments} employees={employees} assignments={assignments} shiftTypes={shiftTypes} filters={filters} setFilters={setFilters} canExport={canExport} exportShiftReport={exportShiftReport} />}
         </>
       )}
       <ShiftCharts assignments={visibleAssignments} usedShifts={usedShifts} conflicts={conflictRows} />
       {dialog?.kind === "type" && <ShiftTypeDialog dialog={dialog} setDialog={setDialog} save={saveType} />}
-      {dialog?.kind === "used" && <UsedShiftDialog dialog={dialog} setDialog={setDialog} save={saveUsed} shiftTypes={shiftTypes} selectShift={selectShiftForDialog} />}
+      {dialog?.kind === "used" && <UsedShiftDialog dialog={dialog} setDialog={setDialog} save={saveUsed} shiftTypes={shiftTypes} periods={shiftTypePeriods} selectShift={selectShiftForDialog} />}
       {dialog?.kind === "scenario" && <ScenarioDialog dialog={dialog} setDialog={setDialog} save={saveScenario} shiftTypes={shiftTypes} />}
       {dialog?.kind === "assignment" && <AssignmentDialog dialog={dialog} setDialog={setDialog} save={saveAssignments} employees={employees} shiftTypes={shiftTypes} selectShift={selectShiftForDialog} />}
       {employeeDialog && <EmployeeModal editing={employeeDialog.editing} close={() => setEmployeeDialog(null)} setEmployees={setEmployees} />}
@@ -4642,14 +4964,14 @@ const pageLabels = {
   audit_logs: "سجل العمليات",
 };
 
-function ShiftTypesTab({ rows, setDialog, removeRecord, filters, setFilters }) {
+function ShiftTypesTab({ rows, periods, setDialog, removeRecord, filters, setFilters }) {
   const filtered = rows.filter((r) => (!filters.q || r.shift_name.includes(filters.q)) && (filters.period === "all" || r.shift_period === filters.period));
-  return <div className="panel p-4"><div className="mb-4 flex flex-wrap gap-3"><input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="بحث باسم الشفت..." /><select value={filters.period} onChange={(e) => setFilters({ ...filters, period: e.target.value })} className="field max-w-[170px]"><option value="all">كل الفترات</option>{shiftPeriods.map((p) => <option key={p}>{p}</option>)}</select><button onClick={() => setDialog({ kind: "type", shift_type_id: `ST-${Date.now()}`, shift_name: "", start_time: "08:00", end_time: "15:00", total_hours: 7, break_minutes: 0, shift_period: "صباحي", is_active: true, notes: "" })} className="btn-primary"><Plus size={17} /> إضافة نوع</button></div><div className="table-wrap"><table><thead><tr><th>الشفت</th><th>الفترة</th><th>من</th><th>إلى</th><th>الساعات</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((r) => <tr key={r.shift_type_id}><td>{r.shift_name}</td><td>{r.shift_period}</td><td>{r.start_time}</td><td>{r.end_time}</td><td>{r.total_hours}</td><td><Status>{r.is_active ? "نشط" : "غير نشط"}</Status></td><td><button onClick={() => setDialog({ ...r, kind: "type" })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => removeRecord("type", r.shift_type_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div>;
+  return <div className="panel p-4"><div className="mb-4 flex flex-wrap gap-3"><input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="بحث باسم الشفت..." /><select value={filters.period} onChange={(e) => setFilters({ ...filters, period: e.target.value })} className="field max-w-[170px]"><option value="all">كل الفترات</option>{shiftPeriods.map((p) => <option key={p}>{p}</option>)}</select><button onClick={() => setDialog({ kind: "type", shift_type_id: `ST-${Date.now()}`, shift_name: "", start_time: "08:00", end_time: "15:00", total_hours: 7, break_minutes: 0, shift_period: "صباحي", shift_mode: "ثابت", flexible_start_from: "", flexible_end_until: "", required_hours: 0, is_active: true, notes: "", periods: [{ period_id: `STP-${Date.now()}`, period_name: "فترة العمل", start_time: "08:00", end_time: "15:00", total_hours: 7, sort_order: 1, is_active: true, notes: "" }] })} className="btn-primary"><Plus size={17} /> إضافة نوع</button></div><div className="table-wrap"><table><thead><tr><th>الشفت</th><th>نوع الشفت</th><th>عدد الفترات</th><th>الساعات</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((r) => { const rows = periodsForShift(r.shift_type_id, periods); return <tr key={r.shift_type_id}><td><b>{r.shift_name}</b><div className="mt-2 space-y-1 text-xs text-slate-500">{rows.map((p) => <p key={p.period_id}>{p.period_name}: {p.start_time} - {p.end_time}</p>)}</div></td><td><Status>{r.shift_mode || "ثابت"}</Status></td><td>{rows.length}</td><td>{shiftTotalHours(r, periods)}</td><td><Status>{r.is_active ? "نشط" : "غير نشط"}</Status></td><td><button onClick={() => setDialog({ ...r, kind: "type", periods: rows })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => removeRecord("type", r.shift_type_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>; })}</tbody></table></div></div>;
 }
 
-function UsedShiftsTab({ rows, shiftTypes, setDialog, removeRecord, filters, setFilters }) {
+function UsedShiftsTab({ rows, shiftTypes, periods, setDialog, removeRecord, filters, setFilters }) {
   const filtered = rows.filter((r) => (filters.branch === "all" || r.branch === filters.branch) && (filters.active === "all" || String(r.is_active) === filters.active));
-  return <div className="panel p-4"><div className="mb-4 flex flex-wrap gap-3"><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><select value={filters.active} onChange={(e) => setFilters({ ...filters, active: e.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option><option value="true">نشط</option><option value="false">غير نشط</option></select><button onClick={() => setDialog({ kind: "used", used_shift_id: `US-${Date.now()}`, branch: branches[0], shift_type_id: shiftTypes[0]?.shift_type_id || "", shift_name: shiftTypes[0]?.shift_name || "", start_time: shiftTypes[0]?.start_time || "08:00", end_time: shiftTypes[0]?.end_time || "15:00", required_employees: 1, min_employees: 1, max_employees: 3, active_from: new Date().toISOString().slice(0, 10), active_to: "", is_active: true, notes: "" })} className="btn-primary"><Plus size={17} /> إضافة شفت مستخدم</button></div><div className="table-wrap"><table><thead><tr><th>الفرع</th><th>الشفت</th><th>من</th><th>إلى</th><th>المطلوب</th><th>الأدنى/الأقصى</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((r) => <tr key={r.used_shift_id}><td>{r.branch}</td><td>{r.shift_name}</td><td>{r.start_time}</td><td>{r.end_time}</td><td>{r.required_employees}</td><td>{r.min_employees} / {r.max_employees}</td><td><Status>{r.is_active ? "نشط" : "غير نشط"}</Status></td><td><button onClick={() => setDialog({ ...r, kind: "used" })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => removeRecord("used", r.used_shift_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div>;
+  return <div className="panel p-4"><div className="mb-4 flex flex-wrap gap-3"><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><select value={filters.active} onChange={(e) => setFilters({ ...filters, active: e.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option><option value="true">نشط</option><option value="false">غير نشط</option></select><button onClick={() => setDialog({ kind: "used", used_shift_id: `US-${Date.now()}`, branch: branches[0], shift_type_id: shiftTypes[0]?.shift_type_id || "", shift_name: shiftTypes[0]?.shift_name || "", start_time: shiftTypes[0]?.start_time || "08:00", end_time: shiftTypes[0]?.end_time || "15:00", required_employees: 1, min_employees: 1, max_employees: 3, active_from: new Date().toISOString().slice(0, 10), active_to: "", is_active: true, notes: "" })} className="btn-primary"><Plus size={17} /> إضافة شفت مستخدم</button></div><div className="table-wrap"><table><thead><tr><th>الفرع</th><th>الشفت</th><th>الفترات</th><th>الإجمالي</th><th>المطلوب</th><th>الأدنى/الأقصى</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((r) => { const rows = periodsForShift(r.shift_type_id, periods); return <tr key={r.used_shift_id}><td>{r.branch}</td><td>{r.shift_name}</td><td><div className="space-y-1 text-xs text-slate-500">{rows.map((p) => <p key={p.period_id}>{p.period_name}: {p.start_time}-{p.end_time}</p>)}</div></td><td>{rows.reduce((s, p) => s + Number(p.total_hours || 0), 0) || calculateShiftHours(r.start_time, r.end_time)}</td><td>{r.required_employees}</td><td>{r.min_employees} / {r.max_employees}</td><td><Status>{r.is_active ? "نشط" : "غير نشط"}</Status></td><td><button onClick={() => setDialog({ ...r, kind: "used" })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => removeRecord("used", r.used_shift_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>; })}</tbody></table></div></div>;
 }
 
 function ShiftScenariosTab({ rows, details, setDialog, removeRecord, filters, setFilters }) {
@@ -4657,8 +4979,10 @@ function ShiftScenariosTab({ rows, details, setDialog, removeRecord, filters, se
   return <div className="panel p-4"><div className="mb-4 flex flex-wrap gap-3"><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option><option>كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[160px]"><option value="all">كل الأنواع</option>{scenarioTypes.map((s) => <option key={s}>{s}</option>)}</select><button onClick={() => setDialog({ kind: "scenario", scenario_id: `SC-${Date.now()}`, scenario_name: "", branch: "كل الفروع", scenario_type: "عادي", description: "", is_active: true, details: [] })} className="btn-primary"><Plus size={17} /> إضافة سيناريو</button></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((r) => <div key={r.scenario_id} className="rounded-2xl border p-4"><div className="flex"><b>{r.scenario_name}</b><Status>{r.is_active ? "نشط" : "غير نشط"}</Status></div><p className="mt-2 text-sm text-slate-500">{r.branch} • {r.scenario_type}</p><p className="mt-2 text-xs text-slate-400">عدد الشفتات: {details.filter((d) => d.scenario_id === r.scenario_id).length}</p><div className="mt-4 flex gap-2"><button onClick={() => setDialog({ ...r, kind: "scenario", details: details.filter((d) => d.scenario_id === r.scenario_id) })} className="btn-secondary"><Pencil size={15} /> تعديل</button><button onClick={() => removeRecord("scenario", r.scenario_id)} className="btn-secondary text-red-600"><Trash2 size={15} /></button></div></div>)}</div></div>;
 }
 
-function ShiftAssignmentsTab({ rows, employees, shiftTypes, setDialog, removeRecord, filters, setFilters, copyShiftSchedule, setEmployeeDialog }) {
-  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><input type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} className="field max-w-[170px]" /><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field min-w-[180px]" placeholder="بحث بالموظف..." /><select value={filters.shift} onChange={(e) => setFilters({ ...filters, shift: e.target.value })} className="field max-w-[180px]"><option value="all">كل الشفتات</option>{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option>{shiftAssignmentStatuses.map((s) => <option key={s}>{s}</option>)}</select><button onClick={() => setDialog({ kind: "assignment", assignment_date: new Date().toISOString().slice(0, 10), shift_type_id: shiftTypes[0]?.shift_type_id || "", shift_name: shiftTypes[0]?.shift_name || "", start_time: shiftTypes[0]?.start_time || "08:00", end_time: shiftTypes[0]?.end_time || "15:00", selected_employee_ids: [], notes: "" })} className="btn-primary"><Plus size={17} /> توزيع شفت</button><button onClick={() => setEmployeeDialog({ editing: null })} className="btn-secondary"><Users size={17} /> إضافة موظف</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr>{shiftAssignmentColumns.map((c) => <th key={c.key}>{c.label}</th>)}<th>واتساب</th><th></th></tr></thead><tbody>{rows.map((r) => <tr key={r.assignment_id}><td>{r.assignment_date}</td><td>{r.employee_name}</td><td>{r.branch}</td><td>{r.shift_name}</td><td>{r.start_time}</td><td>{r.end_time}</td><td>{r.total_hours}</td><td><Status>{r.status}</Status></td><td><button onClick={() => navigator.clipboard?.writeText(makeShiftMessage(r)).then(() => alert("تم نسخ الرسالة"))} className="btn-secondary !h-9 !px-3">نسخ الرسالة</button><button onClick={() => window.open(`https://wa.me/${normalizeWhatsAppPhone(r.employee_phone)}?text=${encodeURIComponent(makeShiftMessage(r))}`, "_blank")} className="btn-secondary !h-9 !px-3">فتح واتساب</button></td><td><button onClick={() => removeRecord("assignment", r.assignment_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div><CopyScheduleBox copyShiftSchedule={copyShiftSchedule} /></div>;
+function ShiftAssignmentsTab({ rows, employees, shiftTypes, periods, setDialog, removeRecord, filters, setFilters, copyShiftSchedule, setEmployeeDialog }) {
+  const firstShift = shiftTypes[0] || {};
+  const firstPeriods = periodsForShift(firstShift.shift_type_id, periods);
+  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><input type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} className="field max-w-[170px]" /><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field min-w-[180px]" placeholder="بحث بالموظف..." /><select value={filters.shift} onChange={(e) => setFilters({ ...filters, shift: e.target.value })} className="field max-w-[180px]"><option value="all">كل الشفتات</option>{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option>{shiftAssignmentStatuses.map((s) => <option key={s}>{s}</option>)}</select><button onClick={() => setDialog({ kind: "assignment", assignment_date: new Date().toISOString().slice(0, 10), shift_type_id: firstShift.shift_type_id || "", shift_name: firstShift.shift_name || "", shift_mode: firstShift.shift_mode || "ثابت", shift_periods: firstPeriods, start_time: firstPeriods[0]?.start_time || firstShift.start_time || "08:00", end_time: firstPeriods[firstPeriods.length - 1]?.end_time || firstShift.end_time || "15:00", total_hours: shiftTotalHours(firstShift, periods), selected_employee_ids: [], notes: "" })} className="btn-primary"><Plus size={17} /> توزيع شفت</button><button onClick={() => setEmployeeDialog({ editing: null })} className="btn-secondary"><Users size={17} /> إضافة موظف</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr>{shiftAssignmentColumns.map((c) => <th key={c.key}>{c.label}</th>)}<th>واتساب</th><th></th></tr></thead><tbody>{rows.map((r) => <tr key={r.assignment_id}><td>{r.assignment_date}</td><td>{r.employee_name}</td><td>{r.branch}</td><td><b>{r.shift_name}</b><p className="mt-1 text-xs text-slate-400">{r.shift_mode || "ثابت"}</p><div className="mt-1 space-y-1 text-xs text-slate-500">{(r.shift_periods || []).map((p) => <p key={p.period_id || p.period_name}>{p.period_name}: {p.start_time}-{p.end_time}</p>)}</div></td><td>{r.start_time}</td><td>{r.end_time}</td><td>{r.total_hours}</td><td><Status>{r.status}</Status></td><td><button onClick={() => navigator.clipboard?.writeText(makeShiftMessage(r)).then(() => alert("تم نسخ الرسالة"))} className="btn-secondary !h-9 !px-3">نسخ الرسالة</button><button onClick={() => window.open(`https://wa.me/${normalizeWhatsAppPhone(r.employee_phone)}?text=${encodeURIComponent(makeShiftMessage(r))}`, "_blank")} className="btn-secondary !h-9 !px-3">فتح واتساب</button></td><td><button onClick={() => removeRecord("assignment", r.assignment_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div><CopyScheduleBox copyShiftSchedule={copyShiftSchedule} /></div>;
 }
 
 function CopyScheduleBox({ copyShiftSchedule }) {
@@ -4686,7 +5010,11 @@ function ShiftCharts({ assignments, usedShifts, conflicts }) {
 }
 
 function ShiftTypeDialog({ dialog, setDialog, save }) {
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel w-full max-w-3xl p-6"><DialogTitle title="بيانات نوع الشفت" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-2"><Label t="اسم الشفت"><input required value={dialog.shift_name} onChange={(e) => setDialog({ ...dialog, shift_name: e.target.value })} className="field mt-2" /></Label><Label t="الفترة"><select value={dialog.shift_period} onChange={(e) => setDialog({ ...dialog, shift_period: e.target.value })} className="field mt-2">{shiftPeriods.map((p) => <option key={p}>{p}</option>)}</select></Label><Label t="من الساعة"><input type="time" value={dialog.start_time} onChange={(e) => setDialog({ ...dialog, start_time: e.target.value, total_hours: calculateShiftHours(e.target.value, dialog.end_time) })} className="field mt-2" /></Label><Label t="إلى الساعة"><input type="time" value={dialog.end_time} onChange={(e) => setDialog({ ...dialog, end_time: e.target.value, total_hours: calculateShiftHours(dialog.start_time, e.target.value) })} className="field mt-2" /></Label><Label t="إجمالي الساعات"><input readOnly value={calculateShiftHours(dialog.start_time, dialog.end_time)} className="field mt-2 bg-slate-50" /></Label><Label t="دقائق الاستراحة"><input type="number" value={dialog.break_minutes} onChange={(e) => setDialog({ ...dialog, break_minutes: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">غير نشط</option></select></Label><Label t="ملاحظات"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>;
+  const periods = dialog.periods || [];
+  const updatePeriod = (index, patch) => setDialog({ ...dialog, periods: periods.map((period, i) => i === index ? { ...period, ...patch } : period) });
+  const addPeriod = () => setDialog({ ...dialog, periods: [...periods, { period_id: `STP-${Date.now()}`, period_name: `فترة ${periods.length + 1}`, start_time: "08:00", end_time: "12:00", total_hours: 4, sort_order: periods.length + 1, is_active: true, notes: "" }] });
+  const totalHours = dialog.shift_mode === "مرن" ? Number(dialog.required_hours || 0) : periods.filter((p) => p.is_active !== false).reduce((sum, p) => sum + calculateShiftHours(p.start_time, p.end_time), 0);
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="بيانات نوع الشفت" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="اسم الشفت"><input required value={dialog.shift_name} onChange={(e) => setDialog({ ...dialog, shift_name: e.target.value })} className="field mt-2" /></Label><Label t="نوع الشفت"><select value={dialog.shift_mode || "ثابت"} onChange={(e) => setDialog({ ...dialog, shift_mode: e.target.value })} className="field mt-2"><option>ثابت</option><option>مرن</option></select></Label><Label t="الفترة"><select value={dialog.shift_period} onChange={(e) => setDialog({ ...dialog, shift_period: e.target.value })} className="field mt-2">{shiftPeriods.map((p) => <option key={p}>{p}</option>)}</select></Label><Label t="إجمالي الساعات"><input readOnly value={Number(totalHours).toFixed(2)} className="field mt-2 bg-slate-50" /></Label><Label t="دقائق الاستراحة"><input type="number" value={dialog.break_minutes} onChange={(e) => setDialog({ ...dialog, break_minutes: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">غير نشط</option></select></Label>{dialog.shift_mode === "مرن" && <><Label t="بداية النطاق المسموح"><input type="time" value={dialog.flexible_start_from || ""} onChange={(e) => setDialog({ ...dialog, flexible_start_from: e.target.value })} className="field mt-2" /></Label><Label t="نهاية النطاق المسموح"><input type="time" value={dialog.flexible_end_until || ""} onChange={(e) => setDialog({ ...dialog, flexible_end_until: e.target.value })} className="field mt-2" /></Label><Label t="عدد الساعات المطلوبة"><input type="number" step="0.25" value={dialog.required_hours || ""} onChange={(e) => setDialog({ ...dialog, required_hours: e.target.value })} className="field mt-2" /></Label></>}<Label t="ملاحظات"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><div className="mt-6 rounded-2xl border p-4"><div className="mb-3 flex"><h4 className="font-extrabold">فترات الشفت</h4><button type="button" onClick={addPeriod} className="btn-secondary mr-auto"><Plus size={15} /> إضافة فترة</button></div><div className="space-y-3">{periods.map((period, index) => <div key={period.period_id || index} className="rounded-2xl bg-slate-50 p-3"><div className="grid gap-3 md:grid-cols-5"><input value={period.period_name} onChange={(e) => updatePeriod(index, { period_name: e.target.value })} className="field" placeholder="اسم الفترة" /><input type="time" value={period.start_time} onChange={(e) => updatePeriod(index, { start_time: e.target.value, total_hours: calculateShiftHours(e.target.value, period.end_time) })} className="field" /><input type="time" value={period.end_time} onChange={(e) => updatePeriod(index, { end_time: e.target.value, total_hours: calculateShiftHours(period.start_time, e.target.value) })} className="field" /><input readOnly value={calculateShiftHours(period.start_time, period.end_time)} className="field bg-white" /><button type="button" onClick={() => setDialog({ ...dialog, periods: periods.filter((_, i) => i !== index) })} className="btn-secondary text-red-600">حذف</button></div><input value={period.notes || ""} onChange={(e) => updatePeriod(index, { notes: e.target.value })} className="field mt-2" placeholder="ملاحظات الفترة" /><ShiftPeriodTimeline periods={[period]} /></div>)}</div></div><DialogActions close={() => setDialog(null)} /></form></div>;
 }
 
 function UsedShiftDialog({ dialog, setDialog, save, shiftTypes, selectShift }) {
@@ -4701,7 +5029,11 @@ function ScenarioDialog({ dialog, setDialog, save, shiftTypes }) {
 
 function AssignmentDialog({ dialog, setDialog, save, employees, shiftTypes, selectShift }) {
   const selectEmployees = (ids) => setDialog({ ...dialog, selected_employee_ids: ids });
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="توزيع الموظفين على الشفتات" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="التاريخ"><input type="date" value={dialog.assignment_date} onChange={(e) => setDialog({ ...dialog, assignment_date: e.target.value })} className="field mt-2" /></Label><Label t="الشفت"><select value={dialog.shift_type_id} onChange={(e) => selectShift(e.target.value)} className="field mt-2">{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select></Label><Label t="الساعات"><input readOnly value={calculateShiftHours(dialog.start_time, dialog.end_time)} className="field mt-2 bg-slate-50" /></Label><Label t="من"><input type="time" value={dialog.start_time} onChange={(e) => setDialog({ ...dialog, start_time: e.target.value })} className="field mt-2" /></Label><Label t="إلى"><input type="time" value={dialog.end_time} onChange={(e) => setDialog({ ...dialog, end_time: e.target.value })} className="field mt-2" /></Label><Label t="ملاحظات"><input value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2" /></Label></div><div className="mt-5 flex flex-wrap gap-2"><button type="button" onClick={() => selectEmployees(employees.map((e) => e.id))} className="btn-secondary">اختيار كل الموظفين</button>{branches.map((b) => <button type="button" key={b} onClick={() => selectEmployees(employees.filter((e) => e.branch === b).map((e) => e.id))} className="btn-secondary">{b}</button>)}</div><div className="mt-4 grid max-h-72 gap-2 overflow-y-auto rounded-2xl border p-3 md:grid-cols-2">{employees.map((e) => <label key={e.id} className="flex items-center gap-2 rounded-xl bg-slate-50 p-2 text-sm"><input type="checkbox" checked={(dialog.selected_employee_ids || []).includes(e.id)} onChange={(ev) => setDialog({ ...dialog, selected_employee_ids: ev.target.checked ? [...(dialog.selected_employee_ids || []), e.id] : (dialog.selected_employee_ids || []).filter((id) => id !== e.id) })} />{e.name} - {e.branch} - {e.job}</label>)}</div><p className="mt-3 rounded-xl bg-blue-50 p-3 text-sm font-bold text-blue-700">عدد الموظفين المختارين: {(dialog.selected_employee_ids || []).length}</p><DialogActions close={() => setDialog(null)} /></form></div>;
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="توزيع الموظفين على الشفتات" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="التاريخ"><input type="date" value={dialog.assignment_date} onChange={(e) => setDialog({ ...dialog, assignment_date: e.target.value })} className="field mt-2" /></Label><Label t="الشفت"><select value={dialog.shift_type_id} onChange={(e) => selectShift(e.target.value)} className="field mt-2">{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select></Label><Label t="نوع الشفت"><input readOnly value={dialog.shift_mode || "ثابت"} className="field mt-2 bg-slate-50" /></Label><Label t="الساعات"><input readOnly value={Number(dialog.total_hours || calculateShiftHours(dialog.start_time, dialog.end_time)).toFixed(2)} className="field mt-2 bg-slate-50" /></Label><Label t="من"><input type="time" value={dialog.start_time} onChange={(e) => setDialog({ ...dialog, start_time: e.target.value })} className="field mt-2" /></Label><Label t="إلى"><input type="time" value={dialog.end_time} onChange={(e) => setDialog({ ...dialog, end_time: e.target.value })} className="field mt-2" /></Label><Label t="ملاحظات"><input value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2" /></Label></div><div className="mt-4 rounded-2xl border p-3"><b className="text-sm">فترات الشفت</b><div className="mt-2 grid gap-2 md:grid-cols-2">{(dialog.shift_periods || []).map((p) => <div key={p.period_id || p.period_name} className="rounded-xl bg-slate-50 p-3 text-sm"><b>{p.period_name}</b><p className="text-slate-500">{p.start_time} - {p.end_time} • {p.total_hours} ساعات</p></div>)}</div><ShiftPeriodTimeline periods={dialog.shift_periods || []} /></div><div className="mt-5 flex flex-wrap gap-2"><button type="button" onClick={() => selectEmployees(employees.map((e) => e.id))} className="btn-secondary">اختيار كل الموظفين</button>{branches.map((b) => <button type="button" key={b} onClick={() => selectEmployees(employees.filter((e) => e.branch === b).map((e) => e.id))} className="btn-secondary">{b}</button>)}</div><div className="mt-4 grid max-h-72 gap-2 overflow-y-auto rounded-2xl border p-3 md:grid-cols-2">{employees.map((e) => <label key={e.id} className="flex items-center gap-2 rounded-xl bg-slate-50 p-2 text-sm"><input type="checkbox" checked={(dialog.selected_employee_ids || []).includes(e.id)} onChange={(ev) => setDialog({ ...dialog, selected_employee_ids: ev.target.checked ? [...(dialog.selected_employee_ids || []), e.id] : (dialog.selected_employee_ids || []).filter((id) => id !== e.id) })} />{e.name} - {e.branch} - {e.job}</label>)}</div><p className="mt-3 rounded-xl bg-blue-50 p-3 text-sm font-bold text-blue-700">عدد الموظفين المختارين: {(dialog.selected_employee_ids || []).length}</p><DialogActions close={() => setDialog(null)} /></form></div>;
+}
+
+function ShiftPeriodTimeline({ periods }) {
+  return <div className="mt-3 rounded-xl bg-white p-3"><div className="relative h-7 rounded-full bg-slate-100">{(periods || []).filter((p) => p.is_active !== false).map((period) => <div key={period.period_id || period.period_name} className="absolute top-1 h-5 rounded-full bg-brand-700" style={shiftTimelineStyle(period)} title={`${period.period_name}: ${period.start_time}-${period.end_time}`} />)}</div><div className="mt-1 flex justify-between text-[10px] text-slate-400"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div></div>;
 }
 
 function DialogTitle({ title, close }) {
