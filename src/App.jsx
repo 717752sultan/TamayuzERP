@@ -73,6 +73,10 @@ import { supabase } from "./services/supabase";
 import { guaranteesService } from "./services/guarantees";
 import { overtimeService } from "./services/overtime";
 import { reportRowsForExport, rowsToReportHtml } from "./services/reports";
+import { adminService, permissionPages, systemRoles } from "./services/admin";
+import { approvalService, approvalStatuses } from "./services/workflow";
+import { notificationsService } from "./services/notifications";
+import { auditService } from "./services/audit";
 const icons = {
   dashboard: LayoutDashboard,
   employees: Users,
@@ -87,11 +91,17 @@ const icons = {
   settings: Settings,
   guarantees: ShieldCheck,
   overtime: Clock3,
+  users_permissions: UserRoundCog,
+  reports_center: FileBarChart,
+  audit_logs: ClipboardList,
 };
 const navItems = [
   ...baseNavItems.slice(0, -2),
   ["guarantees", "ضمانات الموظفين"],
   ["overtime", "العمل الإضافي"],
+  ["users_permissions", "المستخدمون والصلاحيات"],
+  ["reports_center", "مركز التقارير"],
+  ["audit_logs", "سجل العمليات"],
   ...baseNavItems.slice(-2),
 ];
 const nf = new Intl.NumberFormat("ar-SA"),
@@ -454,6 +464,16 @@ function LoadingScreen({ message = "جاري تحميل البيانات..." }) 
     </div>
   );
 }
+const isAdminLikeRole = (role = "") =>
+  ["مدير النظام", "الإدارة العليا", "ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…", "ط§ظ„ط¥ط¯ط§ط±ط© ط§ظ„ط¹ظ„ظٹط§"].some((x) =>
+    String(role).includes(x),
+  );
+const canByPermission = (permissions, role, pageKey, action = "can_view") => {
+  if (!permissions?.length) return true;
+  if (isAdminLikeRole(role)) return true;
+  const row = permissions.find((p) => p.role === role && p.page_key === pageKey);
+  return row ? row[action] === true : action === "can_view" ? false : true;
+};
 export default function App() {
   const [logged, setLogged] = useState(
       () => localStorage.getItem("ep_logged") === "1",
@@ -466,8 +486,11 @@ export default function App() {
     [employees, setEmployeesState] = useState([]),
     [evaluations, setEvaluationsState] = useState([]),
     [settings, setSettingsState] = useState(hydrateSettings(defaultSettings)),
-    [dataLoading, setDataLoading] = useState(false),
-    [dataError, setDataError] = useState("");
+	    [dataLoading, setDataLoading] = useState(false),
+	    [dataError, setDataError] = useState(""),
+	    [appPermissions, setAppPermissions] = useState([]),
+	    [notifications, setNotifications] = useState([]),
+	    [notificationsOpen, setNotificationsOpen] = useState(false);
   const setEmployees = (updater) =>
     setEmployeesState((prev) => {
       const next = typeof updater === "function" ? updater(prev) : updater;
@@ -496,9 +519,9 @@ export default function App() {
   useEffect(() => {
     syncSettings(settings);
   }, [settings]);
-  useEffect(() => {
-    if (!logged) return;
-    let alive = true;
+	  useEffect(() => {
+	    if (!logged) return;
+	    let alive = true;
     setDataLoading(true);
     setDataError("");
     Promise.all([
@@ -539,7 +562,39 @@ export default function App() {
       alive = false;
       unsubEmployees?.();
       unsubEvaluations?.();
-      unsubSettings?.();
+	      unsubSettings?.();
+	    };
+	  }, [logged]);
+  useEffect(() => {
+    if (!logged) return;
+    let alive = true;
+    const currentUser = JSON.parse(localStorage.getItem("ep_current_user") || "{}");
+    const loadAdminData = async () => {
+      try {
+        const [permissionsRows, notificationRows] = await Promise.all([
+          adminService.listPermissions().catch((e) => {
+            console.error("Supabase app_permissions load/save error:", e);
+            return [];
+          }),
+          notificationsService.list(currentUser.user_id || currentUser.username || "").catch((e) => {
+            console.error("Supabase notifications load/save error:", e);
+            return [];
+          }),
+        ]);
+        if (!alive) return;
+        setAppPermissions(permissionsRows);
+        setNotifications(notificationRows);
+      } catch (e) {
+        console.error("Supabase enterprise data load error:", e);
+      }
+    };
+    loadAdminData();
+    const unsubPermissions = adminService.subscribePermissions(loadAdminData);
+    const unsubNotifications = notificationsService.subscribe(loadAdminData);
+    return () => {
+      alive = false;
+      unsubPermissions?.();
+      unsubNotifications?.();
     };
   }, [logged]);
   if (!logged)
@@ -584,11 +639,13 @@ export default function App() {
         }}
       />
     );
-  const roleMatrix = settings.rolePermissions?.[role] || {},
-    hasRoleMatrix = Object.keys(roleMatrix).length > 0,
-    visibleNavItems = hasRoleMatrix
-      ? navItems.filter(([id]) => roleMatrix[id]?.view)
-      : navItems,
+	  const roleMatrix = settings.rolePermissions?.[role] || {},
+	    hasRoleMatrix = Object.keys(roleMatrix).length > 0,
+	    visibleNavItems = appPermissions.length
+	      ? navItems.filter(([id]) => canByPermission(appPermissions, role, id === "reports" ? "reports" : id, "can_view"))
+	      : hasRoleMatrix
+	        ? navItems.filter(([id]) => roleMatrix[id]?.view)
+	        : navItems,
     title = navItems.find((x) => x[0] === page)?.[1],
     manager = settings.manager || defaultSettings.manager,
     initials = manager.name
@@ -606,6 +663,7 @@ export default function App() {
 	      setSettings,
 	      role,
 	      currentUser: JSON.parse(localStorage.getItem("ep_current_user") || "{}"),
+	      can: (pageKey, action = "can_view") => canByPermission(appPermissions, role, pageKey, action),
 	    };
   return (
     <div className="min-h-screen" dir="rtl">
@@ -700,10 +758,40 @@ export default function App() {
                 placeholder="بحث سريع..."
               />
             </label>
-	            <button className="relative rounded-xl border p-2.5">
-              <Bell size={19} />
-              <i className="absolute -left-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-brand-700" />
-            </button>
+		            <div className="relative">
+	              <button onClick={() => setNotificationsOpen((v) => !v)} className="relative rounded-xl border p-2.5">
+	                <Bell size={19} />
+	                {notifications.some((n) => !n.is_read) && (
+	                  <i className="absolute -left-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full border-2 border-white bg-brand-700 px-1 text-[10px] font-bold text-white">
+	                    {notifications.filter((n) => !n.is_read).length}
+	                  </i>
+	                )}
+	              </button>
+	              {notificationsOpen && (
+	                <div className="absolute left-0 top-12 z-50 w-80 rounded-2xl border bg-white p-3 shadow-xl">
+	                  <div className="mb-2 flex items-center"><b className="text-sm">الإشعارات</b><span className="mr-auto text-xs text-slate-400">{notifications.length}</span></div>
+	                  <div className="max-h-80 space-y-2 overflow-y-auto">
+	                    {notifications.length ? notifications.slice(0, 10).map((n) => (
+	                      <button
+	                        key={n.id}
+	                        onClick={async () => {
+	                          try {
+	                            const saved = await notificationsService.markRead(n);
+	                            setNotifications((list) => list.map((x) => (x.id === saved.id ? saved : x)));
+	                          } catch (e) {
+	                            alert(e.message);
+	                          }
+	                        }}
+	                        className={`w-full rounded-xl p-3 text-right text-sm ${n.is_read ? "bg-slate-50" : "bg-brand-50"}`}
+	                      >
+	                        <b>{n.title}</b>
+	                        <p className="mt-1 text-xs text-slate-500">{n.message}</p>
+	                      </button>
+	                    )) : <p className="p-4 text-center text-sm text-slate-400">لا توجد إشعارات</p>}
+	                  </div>
+	                </div>
+	              )}
+	            </div>
             <div className="hidden items-center gap-2 border-r pr-4 sm:flex">
               <div className="grid h-10 w-10 place-items-center rounded-xl bg-slate-900 text-white">
                 {initials}
@@ -727,6 +815,9 @@ export default function App() {
 	          {page === "plans" && <EnhancedPlans {...p} />}{" "}
 	          {page === "guarantees" && <EmployeeGuaranteesPage {...p} />}{" "}
 	          {page === "overtime" && <OvertimePage {...p} />}{" "}
+	          {page === "users_permissions" && <UsersPermissionsPage {...p} />}{" "}
+	          {page === "reports_center" && <EnterpriseReportsCenter {...p} />}{" "}
+	          {page === "audit_logs" && <AuditLogsPage {...p} />}{" "}
 	          {page === "reports" && <EnhancedReports {...p} />}{" "}
 	          {page === "settings" && <SettingsPage {...p} />}
         </main>
@@ -1030,8 +1121,8 @@ function Dashboard({ employees, evaluations, setPage, settings }) {
           </button>
         }
       />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {cards.map(([l, v, I, c]) => (
+	      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+	        {cards.map(([l, v, I, c]) => (
           <div key={l} className="panel flex items-center gap-4 p-5">
             <div
               className={`grid h-12 w-12 place-items-center rounded-2xl ${c}`}
@@ -1043,9 +1134,10 @@ function Dashboard({ employees, evaluations, setPage, settings }) {
               <b className="text-2xl">{v}</b>
             </div>
           </div>
-        ))}
-      </div>
-      <div className="grid gap-5 xl:grid-cols-[1.45fr_.8fr]">
+	        ))}
+	      </div>
+	      <EnterpriseDashboardWidgets employees={employees} evaluations={evaluations} />
+	      <div className="grid gap-5 xl:grid-cols-[1.45fr_.8fr]">
         <Chart
           title="متوسط تقييم الموظفين حسب الفروع"
           sub="مقارنة النتائج المعتمدة"
@@ -1172,6 +1264,71 @@ function Dashboard({ employees, evaluations, setPage, settings }) {
             </button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+	}
+function EnterpriseDashboardWidgets({ employees, evaluations }) {
+  const [guarantees, setGuarantees] = useState([]);
+  const [assignments, setAssignments] = useState([]);
+  const [assignmentEmployees, setAssignmentEmployees] = useState([]);
+  useEffect(() => {
+    const load = () =>
+      Promise.all([
+        guaranteesService.list().catch(() => []),
+        overtimeService.listAssignments().catch(() => []),
+        overtimeService.listAssignmentEmployees().catch(() => []),
+      ]).then(([g, a, ae]) => {
+        setGuarantees(g);
+        setAssignments(a);
+        setAssignmentEmployees(ae);
+      });
+    load();
+    const u1 = guaranteesService.subscribe(load);
+    const u2 = overtimeService.subscribeAssignments(load);
+    const u3 = overtimeService.subscribeAssignmentEmployees(load);
+    return () => { u1?.(); u2?.(); u3?.(); };
+  }, []);
+  const validGuaranteeEmployeeIds = new Set(guarantees.filter((g) => g.guarantee_status === "سارية").map((g) => g.employee_id));
+  const overtimeRows = assignmentEmployees.map((row) => ({ ...assignments.find((a) => a.assignment_id === row.assignment_id), ...row }));
+  const overtimeHours = overtimeRows.reduce((sum, row) => {
+    if (!row.start_time || !row.end_time) return sum;
+    const [sh, sm] = row.start_time.split(":").map(Number);
+    const [eh, em] = row.end_time.split(":").map(Number);
+    return sum + Math.max(0, (eh * 60 + em - (sh * 60 + sm)) / 60);
+  }, 0);
+  const mostBranch = Object.entries(groupCount(overtimeRows, "branch")).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
+  const mostEmployee = Object.entries(groupCount(overtimeRows, "employee_name")).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
+  const guaranteeStatusChart = Object.entries(groupCount(guarantees, "guarantee_status")).map(([name, value]) => ({ name, value }));
+  const overtimeBranchChart = Object.entries(groupCount(overtimeRows, "branch")).map(([name, value]) => ({ name, value }));
+  const overtimeMonthChart = Object.entries(groupCount(overtimeRows.map((r) => ({ ...r, month: String(r.assignment_date || "").slice(0, 7) })), "month")).map(([name, value]) => ({ name, value }));
+  const extraCards = [
+    ["الموظفون الموقوفون", employees.filter((e) => e.status === "موقوف" || e.status === "ظ…ظˆظ‚ظˆظپ").length, AlertTriangle],
+    ["الموظفون بدون ضمانة", employees.filter((e) => !validGuaranteeEmployeeIds.has(e.id)).length, ShieldCheck],
+    ["إجمالي الضمانات", guarantees.length, ShieldCheck],
+    ["ضمانات تحتاج مراجعة", guarantees.filter((g) => ["ناقصة", "منتهية"].includes(g.guarantee_status) || g.approval_status === "قيد المراجعة").length, AlertTriangle],
+    ["تكليفات العمل الإضافي", assignments.length, Clock3],
+    ["ساعات العمل الإضافي", overtimeHours.toFixed(1), Gauge],
+    ["أكثر فرع لديه عمل إضافي", mostBranch, Building2],
+    ["أكثر موظف تم تكليفه", mostEmployee, UserCheck],
+    ["تكليفات قيد الاعتماد", assignments.filter((a) => a.approval_status === "قيد المراجعة").length, BadgeCheck],
+    ["أصحاب الأداء الضعيف", evaluations.filter((e) => e.total < 60).length, AlertTriangle],
+  ];
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        {extraCards.map(([label, value, I]) => <Mini key={label} label={label} value={value} I={I} />)}
+      </div>
+      <div className="grid gap-5 xl:grid-cols-3">
+        <Chart title="العمل الإضافي حسب الفرع" sub="عدد التكليفات المسجلة">
+          <ResponsiveContainer width="100%" height={220}><BarChart data={overtimeBranchChart}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer>
+        </Chart>
+        <Chart title="العمل الإضافي حسب الشهر" sub="مقارنة شهرية للتكليفات">
+          <ResponsiveContainer width="100%" height={220}><BarChart data={overtimeMonthChart}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#991b1b" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer>
+        </Chart>
+        <Chart title="الضمانات حسب الحالة" sub="توزيع حالات الضمانات">
+          <ResponsiveContainer width="100%" height={220}><PieChart><Pie data={guaranteeStatusChart} dataKey="value" innerRadius={55} outerRadius={85}>{["#059669", "#dc2626", "#f59e0b", "#64748b"].map((c) => <Cell key={c} fill={c} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer>
+        </Chart>
       </div>
     </div>
   );
@@ -3859,13 +4016,16 @@ const tableColumnsOvertime = [
   { key: "status", label: "الحالة" },
 ];
 
-function EmployeeGuaranteesPage({ employees }) {
+function EmployeeGuaranteesPage({ employees, currentUser, can }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState(null);
   const [viewing, setViewing] = useState(null);
   const [filters, setFilters] = useState({ q: "", branch: "all", status: "all", month: "" });
+  const canCreate = can?.("guarantees", "can_create") !== false;
+  const canEdit = can?.("guarantees", "can_edit") !== false;
+  const canDelete = can?.("guarantees", "can_delete") !== false;
   const load = async () => {
     setLoading(true);
     setError("");
@@ -3901,7 +4061,8 @@ function EmployeeGuaranteesPage({ employees }) {
     ["الضمانات الناقصة", items.filter((g) => g.guarantee_status === "ناقصة").length, FileBarChart],
     ["الموظفون بدون ضمانة", employees.filter((e) => !activeEmployeeIds.has(e.id)).length, Users],
   ];
-  const openAdd = () =>
+  const openAdd = () => {
+    if (!canCreate) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
     setDialog({
       guarantee_id: `G-${Date.now()}`,
       employee_id: "",
@@ -3919,6 +4080,7 @@ function EmployeeGuaranteesPage({ employees }) {
       guarantee_status: "سارية",
       notes: "",
     });
+  };
   const selectEmployee = (id) => {
     const employee = employees.find((e) => e.id === id);
     setDialog((d) => ({
@@ -3931,6 +4093,8 @@ function EmployeeGuaranteesPage({ employees }) {
   };
   const save = async (event) => {
     event.preventDefault();
+    if (!canEdit && items.some((g) => g.guarantee_id === dialog.guarantee_id)) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!canCreate && !items.some((g) => g.guarantee_id === dialog.guarantee_id)) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
     const required = [
       ["employee_id", "الموظف"],
       ["guarantor_name", "اسم الضامن"],
@@ -3957,6 +4121,14 @@ function EmployeeGuaranteesPage({ employees }) {
     if (duplicateRegister && !confirm("رقم السجل التجاري مستخدم لموظف نشط آخر. هل تريد المتابعة؟")) return;
     try {
       const saved = await guaranteesService.upsert(dialog);
+      auditService.log({
+        user_id: currentUser?.user_id || currentUser?.username,
+        user_name: currentUser?.username || currentUser?.name,
+        action: items.some((g) => g.guarantee_id === dialog.guarantee_id) ? "تعديل ضمانة" : "إضافة ضمانة",
+        module_name: "employee_guarantees",
+        record_id: saved.guarantee_id,
+        new_data: saved,
+      }).catch((e) => console.error("Supabase audit_logs load/save error:", e));
       setItems((list) => {
         const exists = list.some((g) => g.guarantee_id === saved.guarantee_id);
         return exists ? list.map((g) => (g.guarantee_id === saved.guarantee_id ? saved : g)) : [saved, ...list];
@@ -3967,6 +4139,7 @@ function EmployeeGuaranteesPage({ employees }) {
     }
   };
   const remove = async (id) => {
+    if (!canDelete) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
     if (!confirm("هل تريد حذف الضمانة؟")) return;
     try {
       await guaranteesService.remove(id);
@@ -4028,13 +4201,15 @@ function EmployeeGuaranteesPage({ employees }) {
   );
 }
 
-function OvertimePage({ employees, role, currentUser }) {
+function OvertimePage({ employees, role, currentUser, can }) {
   const [assignments, setAssignments] = useState([]);
   const [assignmentEmployees, setAssignmentEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState(null);
   const [filters, setFilters] = useState({ date: "", branch: "all", employee: "", status: "all", month: "" });
+  const canCreate = can?.("overtime", "can_create") !== false;
+  const canEdit = can?.("overtime", "can_edit") !== false;
   const load = async () => {
     setLoading(true);
     setError("");
@@ -4080,7 +4255,10 @@ function OvertimePage({ employees, role, currentUser }) {
     ["تكليفات حسب الفرع", Object.keys(groupCount(filtered, "branch")).length, Building2],
     ["تكليفات حسب الشهر", Object.keys(groupCount(filtered, "assignment_date")).length, CalendarCheck],
   ];
-  const startCreate = () => setDialog({ assignment_id: `OT-${Date.now()}`, assignment_date: new Date().toISOString().slice(0, 10), branch: branches[0], location: "", start_time: "16:00", end_time: "20:00", reason: "", notes: "", mode: "branch", selected: [] });
+  const startCreate = () => {
+    if (!canCreate) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    setDialog({ assignment_id: `OT-${Date.now()}`, assignment_date: new Date().toISOString().slice(0, 10), branch: branches[0], location: "", start_time: "16:00", end_time: "20:00", reason: "", notes: "", mode: "branch", selected: [] });
+  };
   const selectedEmployees = () => {
     if (!dialog) return [];
     if (dialog.mode === "branch") return employees.filter((e) => e.branch === dialog.branch);
@@ -4089,6 +4267,7 @@ function OvertimePage({ employees, role, currentUser }) {
   };
   const create = async (event) => {
     event.preventDefault();
+    if (!canCreate) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
     const selected = selectedEmployees();
     if (!selected.length) return alert("يرجى اختيار موظف واحد على الأقل.");
     const employeeRows = selected.map((e) => ({
@@ -4104,6 +4283,24 @@ function OvertimePage({ employees, role, currentUser }) {
     }));
     try {
       const saved = await overtimeService.createAssignment({ ...dialog, created_by: currentUser?.username || role || "" }, employeeRows);
+      auditService.log({
+        user_id: currentUser?.user_id || currentUser?.username,
+        user_name: currentUser?.username || currentUser?.name,
+        action: "إضافة تكليف عمل إضافي",
+        module_name: "overtime_assignments",
+        record_id: saved.assignment.assignment_id,
+        new_data: saved.assignment,
+      }).catch((e) => console.error("Supabase audit_logs load/save error:", e));
+      saved.employees.forEach((employee) => {
+        notificationsService.create({
+          user_id: employee.employee_id,
+          title: "تكليف عمل إضافي جديد",
+          message: `تم تكليف ${employee.employee_name} بالعمل الإضافي بتاريخ ${saved.assignment.assignment_date}`,
+          type: "overtime",
+          related_module: "overtime",
+          related_record_id: saved.assignment.assignment_id,
+        }).catch((e) => console.error("Supabase notifications load/save error:", e));
+      });
       setAssignments((list) => [saved.assignment, ...list.filter((a) => a.assignment_id !== saved.assignment.assignment_id)]);
       setAssignmentEmployees((list) => [...saved.employees, ...list.filter((r) => r.assignment_id !== saved.assignment.assignment_id)]);
       setDialog(null);
@@ -4112,6 +4309,7 @@ function OvertimePage({ employees, role, currentUser }) {
     }
   };
   const updateStatus = async (row, status) => {
+    if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
     try {
       const saved = await overtimeService.updateAssignmentEmployee({ ...row, status, sent_at: status === "تم الإرسال" ? new Date().toISOString() : row.sent_at });
       setAssignmentEmployees((list) => list.map((x) => (x.id === saved.id ? saved : x)));
@@ -4175,6 +4373,245 @@ function OvertimePage({ employees, role, currentUser }) {
           </form>
         </div>
       )}
+    </div>
+  );
+}
+
+const pageLabels = {
+  dashboard: "لوحة التحكم",
+  employees: "الموظفون",
+  evaluations: "التقييمات",
+  incentives: "الحوافز",
+  guarantees: "ضمانات الموظفين",
+  overtime: "العمل الإضافي",
+  reports_center: "مركز التقارير",
+  reports: "التقارير",
+  settings: "الإعدادات",
+  users_permissions: "المستخدمون والصلاحيات",
+  audit_logs: "سجل العمليات",
+};
+
+function UsersPermissionsPage({ employees, can }) {
+  const [users, setUsers] = useState([]);
+  const [permissions, setPermissions] = useState([]);
+  const [filters, setFilters] = useState({ q: "", role: "all", branch: "all", status: "all" });
+  const [dialog, setDialog] = useState(null);
+  const [selectedRole, setSelectedRole] = useState(systemRoles[0]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const canEdit = can?.("users_permissions", "can_edit") !== false;
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [u, p] = await Promise.all([adminService.listUsers(), adminService.listPermissions()]);
+      setUsers(u);
+      setPermissions(p);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    load();
+    const u1 = adminService.subscribeUsers(load);
+    const u2 = adminService.subscribePermissions(load);
+    return () => { u1?.(); u2?.(); };
+  }, []);
+  const filtered = users.filter((u) =>
+    (!filters.q || u.employee_name.includes(filters.q) || u.username.includes(filters.q) || u.employee_id.includes(filters.q)) &&
+    (filters.role === "all" || u.role === filters.role) &&
+    (filters.branch === "all" || u.branch === filters.branch) &&
+    (filters.status === "all" || String(u.is_active) === filters.status)
+  );
+  const selectEmployee = (id) => {
+    const employee = employees.find((e) => e.id === id);
+    setDialog((d) => ({ ...d, employee_id: id, employee_name: employee?.name || "", branch: employee?.branch || "" }));
+  };
+  const saveUser = async (e) => {
+    e.preventDefault();
+    if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!dialog.username) return alert("اسم المستخدم مطلوب");
+    try {
+      const saved = await adminService.saveUser(dialog);
+      setUsers((list) => {
+        const exists = list.some((x) => x.user_id === saved.user_id);
+        return exists ? list.map((x) => (x.user_id === saved.user_id ? saved : x)) : [saved, ...list];
+      });
+      setDialog(null);
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+  const permissionRows = permissionPages.map((page) => permissions.find((p) => p.role === selectedRole && p.page_key === page) || {
+    id: `${selectedRole}-${page}`,
+    role: selectedRole,
+    page_key: page,
+    can_view: isAdminLikeRole(selectedRole),
+    can_create: isAdminLikeRole(selectedRole),
+    can_edit: isAdminLikeRole(selectedRole),
+    can_delete: isAdminLikeRole(selectedRole),
+    can_export: isAdminLikeRole(selectedRole),
+    can_approve: isAdminLikeRole(selectedRole),
+  });
+  const updatePermission = (pageKey, key, value) => {
+    setPermissions((list) => {
+      const row = permissionRows.find((p) => p.page_key === pageKey);
+      const next = { ...row, [key]: value };
+      const exists = list.some((p) => p.role === selectedRole && p.page_key === pageKey);
+      return exists ? list.map((p) => (p.role === selectedRole && p.page_key === pageKey ? next : p)) : [...list, next];
+    });
+  };
+  const selectAll = (value) => {
+    setPermissions((list) => {
+      const others = list.filter((p) => p.role !== selectedRole);
+      return [
+        ...others,
+        ...permissionPages.map((page) => ({
+          id: `${selectedRole}-${page}`,
+          role: selectedRole,
+          page_key: page,
+          can_view: value,
+          can_create: value,
+          can_edit: value,
+          can_delete: value,
+          can_export: value,
+          can_approve: value,
+        })),
+      ];
+    });
+  };
+  const savePermissions = async () => {
+    if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    try {
+      const saved = await adminService.savePermissions(permissionRows);
+      setPermissions((list) => [...list.filter((p) => p.role !== selectedRole), ...saved]);
+      alert("تم حفظ الصلاحيات");
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+  return (
+    <div className="space-y-5">
+      <PageHead title="المستخدمون والصلاحيات" desc="إدارة مستخدمي النظام ومصفوفة صلاحيات الأدوار" action={<button disabled={!canEdit} onClick={() => setDialog({ user_id: `USR-${Date.now()}`, employee_id: "", employee_name: "", username: "", role: "الموظف", branch: "", is_active: true })} className="btn-primary"><Plus size={18} /> إضافة مستخدم</button>} />
+      {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
+      <div className="panel flex flex-wrap gap-3 p-4">
+        <input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="بحث بالاسم أو اسم المستخدم أو الرقم..." />
+        <select value={filters.role} onChange={(e) => setFilters({ ...filters, role: e.target.value })} className="field max-w-[190px]"><option value="all">كل الأدوار</option>{systemRoles.map((r) => <option key={r}>{r}</option>)}</select>
+        <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select>
+        <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option><option value="true">نشط</option><option value="false">معطل</option></select>
+      </div>
+      <div className="grid gap-5 xl:grid-cols-2">
+        <div className="panel p-4">
+          <h3 className="mb-3 font-extrabold">المستخدمون</h3>
+          {loading ? <p className="text-sm text-slate-400">جاري التحميل...</p> : <div className="table-wrap"><table><thead><tr><th>المستخدم</th><th>الموظف</th><th>الدور</th><th>الفرع</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((u) => <tr key={u.user_id}><td>{u.username}</td><td>{u.employee_name}<p className="text-xs text-slate-400">{u.employee_id}</p></td><td>{u.role}</td><td>{u.branch}</td><td><Status>{u.is_active ? "نشط" : "معطل"}</Status></td><td><button disabled={!canEdit} onClick={() => setDialog(u)} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canEdit} onClick={() => adminService.saveUser({ ...u, is_active: !u.is_active }).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600">{u.is_active ? "تعطيل" : "تفعيل"}</button></td></tr>)}</tbody></table></div>}
+        </div>
+        <div className="panel p-4">
+          <div className="mb-3 flex flex-wrap items-center gap-2"><h3 className="font-extrabold">مصفوفة الصلاحيات</h3><select value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)} className="field mr-auto max-w-[220px]">{systemRoles.map((r) => <option key={r}>{r}</option>)}</select></div>
+          <div className="mb-3 flex gap-2"><button onClick={() => selectAll(true)} className="btn-secondary">تحديد الكل</button><button onClick={() => selectAll(false)} className="btn-secondary">إلغاء الكل</button><button onClick={savePermissions} className="btn-primary"><Save size={17} /> حفظ الصلاحيات</button></div>
+          <div className="table-wrap"><table><thead><tr><th>القائمة</th>{["عرض", "إضافة", "تعديل", "حذف", "تصدير", "اعتماد"].map((x) => <th key={x}>{x}</th>)}</tr></thead><tbody>{permissionRows.map((p) => <tr key={p.page_key}><td>{pageLabels[p.page_key] || p.page_key}</td>{["can_view", "can_create", "can_edit", "can_delete", "can_export", "can_approve"].map((k) => <td key={k}><input type="checkbox" checked={p[k]} onChange={(e) => updatePermission(p.page_key, k, e.target.checked)} /></td>)}</tr>)}</tbody></table></div>
+        </div>
+      </div>
+      {dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={saveUser} className="panel w-full max-w-3xl p-6"><div className="mb-5 flex"><h3 className="text-xl font-extrabold">بيانات المستخدم</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div><div className="grid gap-4 md:grid-cols-2"><Label t="ربط الموظف"><select value={dialog.employee_id} onChange={(e) => selectEmployee(e.target.value)} className="field mt-2"><option value="">بدون ربط</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.name} - {e.id}</option>)}</select></Label><Label t="اسم الموظف"><input value={dialog.employee_name} onChange={(e) => setDialog({ ...dialog, employee_name: e.target.value })} className="field mt-2" /></Label><Label t="اسم المستخدم"><input required value={dialog.username} onChange={(e) => setDialog({ ...dialog, username: e.target.value })} className="field mt-2" /></Label><Label t="الدور"><select value={dialog.role} onChange={(e) => setDialog({ ...dialog, role: e.target.value })} className="field mt-2">{systemRoles.map((r) => <option key={r}>{r}</option>)}</select></Label><Label t="الفرع"><select value={dialog.branch} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className="field mt-2"><option value="">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select></Label><Label t="الحالة"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label></div><div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ البيانات</button></div></form></div>}
+    </div>
+  );
+}
+
+function EnterpriseReportsCenter({ employees, evaluations, can }) {
+  const [guarantees, setGuarantees] = useState([]);
+  const [assignments, setAssignments] = useState([]);
+  const [assignmentEmployees, setAssignmentEmployees] = useState([]);
+  const [filters, setFilters] = useState({ from: "", to: "", month: "", branch: "all", employee: "", job: "all", status: "all", approval: "all" });
+  useEffect(() => {
+    Promise.all([
+      guaranteesService.list().catch(() => []),
+      overtimeService.listAssignments().catch(() => []),
+      overtimeService.listAssignmentEmployees().catch(() => []),
+    ]).then(([g, a, ae]) => {
+      setGuarantees(g);
+      setAssignments(a);
+      setAssignmentEmployees(ae);
+    });
+  }, []);
+  const overtimeRows = assignmentEmployees.map((row) => ({ ...assignments.find((a) => a.assignment_id === row.assignment_id), ...row }));
+  const reportTypes = [
+    ["employees", "تقرير الموظفين", employees],
+    ["guarantees", "تقرير الضمانات", guarantees],
+    ["overtime", "تقرير العمل الإضافي", overtimeRows],
+    ["evaluations", "تقرير التقييمات", evaluations],
+    ["incentives", "تقرير الحوافز", calcIncentivesSafe(employees, evaluations)],
+    ["branch", "تقرير حسب الفرع", employees],
+    ["employee", "تقرير حسب الموظف", evaluations],
+    ["month", "تقرير حسب الشهر", evaluations],
+    ["branches_compare", "تقرير مقارنة بين الفروع", overtimeRows],
+    ["employees_compare", "تقرير مقارنة بين الموظفين", evaluations],
+    ["months_compare", "تقرير مقارنة بين الأشهر", evaluations],
+  ];
+  const filterRows = (rows) => rows.filter((r) => {
+    const date = r.assignment_date || r.guarantee_date || r.month || r.hireDate || "";
+    const employeeName = r.employee_name || r.employee?.name || r.name || "";
+    return (!filters.month || String(date).startsWith(filters.month)) &&
+      (!filters.from || String(date) >= filters.from) &&
+      (!filters.to || String(date) <= filters.to) &&
+      (filters.branch === "all" || r.branch === filters.branch || r.employee?.branch === filters.branch) &&
+      (!filters.employee || employeeName.includes(filters.employee) || String(r.employee_id || r.employeeId || r.id || "").includes(filters.employee)) &&
+      (filters.job === "all" || r.job === filters.job || r.employee?.job === filters.job) &&
+      (filters.status === "all" || r.status === filters.status || r.guarantee_status === filters.status) &&
+      (filters.approval === "all" || r.approval_status === filters.approval);
+  });
+  const reportColumns = [
+    { key: "name", label: "الاسم" },
+    { key: "employee_name", label: "الموظف" },
+    { key: "branch", label: "الفرع" },
+    { key: "job", label: "الوظيفة" },
+    { key: "month", label: "الشهر" },
+    { key: "total", label: "النتيجة" },
+    { key: "status", label: "الحالة" },
+    { key: "approval_status", label: "الاعتماد" },
+  ];
+  const printReport = (title, rows) => {
+    const filteredRows = filterRows(rows);
+    const body = `<div class="brand"><h1>${title}</h1></div><p class="muted">تاريخ التقرير: ${new Date().toLocaleDateString("ar-SA")}</p><p>الفلاتر: الفرع ${filters.branch} - الشهر ${filters.month || "الكل"}</p>${rowsToReportHtml("", filteredRows, reportColumns)}<div style="margin-top:40px;display:flex;justify-content:space-between"><b>إعداد الموارد البشرية</b><b>اعتماد الإدارة</b></div>`;
+    printDocument(title, body);
+  };
+  return (
+    <div className="space-y-5">
+      <PageHead title="مركز التقارير" desc="تقارير إدارية احترافية قابلة للطباعة والتصدير" />
+      <div className="panel grid gap-3 p-4 md:grid-cols-4 xl:grid-cols-8">
+        <input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} className="field" />
+        <input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} className="field" />
+        <input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field" />
+        <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select>
+        <input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field" placeholder="الموظف" />
+        <select value={filters.job} onChange={(e) => setFilters({ ...filters, job: e.target.value })} className="field"><option value="all">كل الوظائف</option>{jobs.map((j) => <option key={j}>{j}</option>)}</select>
+        <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field"><option value="all">كل الحالات</option>{["نشط", "سارية", "منتهية", "مكلف", "معتمد", "مرفوض"].map((s) => <option key={s}>{s}</option>)}</select>
+        <select value={filters.approval} onChange={(e) => setFilters({ ...filters, approval: e.target.value })} className="field"><option value="all">كل الاعتمادات</option>{approvalStatuses.map((s) => <option key={s}>{s}</option>)}</select>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{reportTypes.map(([key, title, rows]) => {
+        const filteredRows = filterRows(rows);
+        const exportRows = reportRowsForExport(filteredRows, reportColumns);
+        return <div key={key} className="panel p-5"><div className="grid h-11 w-11 place-items-center rounded-xl bg-slate-100 text-brand-700"><FileBarChart /></div><h3 className="mt-4 font-extrabold">{title}</h3><p className="mt-1 text-xs text-slate-500">عدد السجلات: {filteredRows.length}</p><div className="mt-5 flex gap-2"><button disabled={can?.("reports_center", "can_export") === false} onClick={() => exportExcel(exportRows, title)} className="btn-secondary flex-1"><FileSpreadsheet size={15} /> Excel</button><button onClick={() => printReport(title, rows)} className="btn-secondary flex-1"><Printer size={15} /> PDF</button><button disabled={can?.("reports_center", "can_export") === false} onClick={() => exportDocx(title, exportRows)} className="btn-secondary flex-1"><Download size={15} /> Word</button></div></div>;
+      })}</div>
+    </div>
+  );
+}
+
+function AuditLogsPage({ role }) {
+  const [rows, setRows] = useState([]);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (!isAdminLikeRole(role)) return;
+    const load = () => auditService.list().then(setRows).catch((e) => setError(e.message));
+    load();
+    return auditService.subscribe(load);
+  }, [role]);
+  if (!isAdminLikeRole(role)) return <div className="panel p-6 text-center font-bold text-red-600">لا تملك صلاحية عرض سجل العمليات</div>;
+  return (
+    <div className="space-y-5">
+      <PageHead title="سجل العمليات" desc="تتبع العمليات الحساسة داخل النظام" />
+      {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
+      <div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>المستخدم</th><th>الإجراء</th><th>الوحدة</th><th>السجل</th></tr></thead><tbody>{rows.map((r) => <tr key={r.id}><td>{r.created_at}</td><td>{r.user_name}</td><td>{r.action}</td><td>{r.module_name}</td><td>{r.record_id}</td></tr>)}</tbody></table></div></div>
     </div>
   );
 }
