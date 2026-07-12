@@ -77,6 +77,9 @@ import { adminService, permissionPages, systemRoles } from "./services/admin";
 import { approvalService, approvalStatuses } from "./services/workflow";
 import { notificationsService } from "./services/notifications";
 import { auditService } from "./services/audit";
+import { shiftsService, shiftPeriods, calculateShiftHours } from "./services/shifts";
+import { shiftScenariosService, scenarioTypes } from "./services/shiftScenarios";
+import { shiftAssignmentsService, shiftAssignmentStatuses } from "./services/shiftAssignments";
 const icons = {
   dashboard: LayoutDashboard,
   employees: Users,
@@ -91,6 +94,7 @@ const icons = {
   settings: Settings,
   guarantees: ShieldCheck,
   overtime: Clock3,
+  shifts: CalendarCheck,
   users_permissions: UserRoundCog,
   reports_center: FileBarChart,
   audit_logs: ClipboardList,
@@ -99,6 +103,7 @@ const navItems = [
   ...baseNavItems.slice(0, -2),
   ["guarantees", "ضمانات الموظفين"],
   ["overtime", "العمل الإضافي"],
+  ["shifts", "شفتات الموظفين"],
   ["users_permissions", "المستخدمون والصلاحيات"],
   ["reports_center", "مركز التقارير"],
   ["audit_logs", "سجل العمليات"],
@@ -815,6 +820,7 @@ export default function App() {
 	          {page === "plans" && <EnhancedPlans {...p} />}{" "}
 	          {page === "guarantees" && <EmployeeGuaranteesPage {...p} />}{" "}
 	          {page === "overtime" && <OvertimePage {...p} />}{" "}
+	          {page === "shifts" && <EmployeeShiftsPage {...p} />}{" "}
 	          {page === "users_permissions" && <UsersPermissionsPage {...p} />}{" "}
 	          {page === "reports_center" && <EnterpriseReportsCenter {...p} />}{" "}
 	          {page === "audit_logs" && <AuditLogsPage {...p} />}{" "}
@@ -4377,6 +4383,250 @@ function OvertimePage({ employees, role, currentUser, can }) {
   );
 }
 
+const shiftTabs = [
+  ["types", "أنواع الشفتات"],
+  ["used", "الشفتات المستخدمة"],
+  ["scenarios", "سيناريوهات الشفتات"],
+  ["assignments", "توزيع الموظفين على الشفتات"],
+  ["reports", "تقارير الشفتات"],
+];
+const shiftAssignmentColumns = [
+  { key: "assignment_date", label: "التاريخ" },
+  { key: "employee_name", label: "الموظف" },
+  { key: "branch", label: "الفرع" },
+  { key: "shift_name", label: "الشفت" },
+  { key: "start_time", label: "من" },
+  { key: "end_time", label: "إلى" },
+  { key: "total_hours", label: "الساعات" },
+  { key: "status", label: "الحالة" },
+];
+const canOverrideShiftConflicts = (role = "") =>
+  isAdminLikeRole(role) || String(role).includes("الموارد") || String(role).includes("ط§ظ„ظ…ظˆط§ط±ط¯");
+const minutesOf = (time) => {
+  const [h, m] = String(time || "00:00").split(":").map(Number);
+  return (Number.isNaN(h) ? 0 : h) * 60 + (Number.isNaN(m) ? 0 : m);
+};
+const shiftsOverlap = (a, b) => {
+  let aStart = minutesOf(a.start_time), aEnd = minutesOf(a.end_time);
+  let bStart = minutesOf(b.start_time), bEnd = minutesOf(b.end_time);
+  if (aEnd <= aStart) aEnd += 1440;
+  if (bEnd <= bStart) bEnd += 1440;
+  return aStart < bEnd && bStart < aEnd;
+};
+const makeShiftMessage = (row) =>
+  `الأخ/ الموظف: ${row.employee_name}
+
+تحية طيبة،
+
+نحيطكم علماً بأنه تم جدولتكم للعمل يوم ${arabicDayName(row.assignment_date)} الموافق ${row.assignment_date}م، في ${row.branch} ضمن شفت ${row.shift_name} من الساعة ${row.start_time} حتى الساعة ${row.end_time}.
+
+يرجى الالتزام بالحضور والانصراف في الوقت المحدد وإثبات البصمة حسب الإجراء المعتمد.
+
+شاكرين لكم تعاونكم والتزامكم.
+إدارة الموارد البشرية`;
+const upsertLocal = (list, item, key) =>
+  list.some((x) => x[key] === item[key]) ? list.map((x) => (x[key] === item[key] ? item : x)) : [item, ...list];
+
+function EmployeeShiftsPage({ employees, setEmployees, role, currentUser, can }) {
+  const [tab, setTab] = useState("types");
+  const [shiftTypes, setShiftTypes] = useState([]);
+  const [usedShifts, setUsedShifts] = useState([]);
+  const [scenarios, setScenarios] = useState([]);
+  const [scenarioDetails, setScenarioDetails] = useState([]);
+  const [assignments, setAssignments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [dialog, setDialog] = useState(null);
+  const [employeeDialog, setEmployeeDialog] = useState(null);
+  const [filters, setFilters] = useState({ q: "", branch: "all", period: "all", active: "all", date: "", month: "", employee: "", shift: "all", status: "all" });
+  const canCreate = can?.("shifts", "can_create") !== false;
+  const canEdit = can?.("shifts", "can_edit") !== false;
+  const canDelete = can?.("shifts", "can_delete") !== false;
+  const canExport = can?.("shifts", "can_export") !== false;
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [types, used, sc, details, ass] = await Promise.all([
+        shiftsService.listTypes(),
+        shiftsService.listUsed(),
+        shiftScenariosService.listScenarios(),
+        shiftScenariosService.listDetails(),
+        shiftAssignmentsService.list(),
+      ]);
+      setShiftTypes(types);
+      setUsedShifts(used);
+      setScenarios(sc);
+      setScenarioDetails(details);
+      setAssignments(ass);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    load();
+    const unsubs = [
+      shiftsService.subscribeTypes(load),
+      shiftsService.subscribeUsed(load),
+      shiftScenariosService.subscribeScenarios(load),
+      shiftScenariosService.subscribeDetails(load),
+      shiftAssignmentsService.subscribe(load),
+    ];
+    return () => unsubs.forEach((u) => u?.());
+  }, []);
+  const visibleAssignments = assignments.filter((a) => {
+    if (String(role).includes("الموظف") && currentUser?.employeeId) return a.employee_id === currentUser.employeeId;
+    if (String(role).includes("مدير فرع") && currentUser?.branch) return a.branch === currentUser.branch;
+    return true;
+  });
+  const today = new Date().toISOString().slice(0, 10);
+  const todayAssignments = visibleAssignments.filter((a) => a.assignment_date === today);
+  const scheduledIds = new Set(todayAssignments.map((a) => a.employee_id));
+  const shortageBranches = usedShifts.filter((u) => u.is_active && u.min_employees).filter((u) => todayAssignments.filter((a) => a.branch === u.branch && a.shift_type_id === u.shift_type_id).length < u.min_employees);
+  const conflictRows = visibleAssignments.filter((a, i, arr) => arr.some((b, j) => i !== j && a.assignment_date === b.assignment_date && a.employee_id === b.employee_id && shiftsOverlap(a, b)));
+  const pressureBranch = Object.entries(groupCount(todayAssignments, "branch")).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
+  const cards = [
+    ["إجمالي الشفتات", shiftTypes.length, CalendarCheck],
+    ["الشفتات النشطة", shiftTypes.filter((s) => s.is_active).length, BadgeCheck],
+    ["الموظفون المجدولون اليوم", scheduledIds.size, Users],
+    ["الفروع التي لديها نقص تغطية", new Set(shortageBranches.map((x) => x.branch)).size, AlertTriangle],
+    ["إجمالي ساعات العمل اليوم", todayAssignments.reduce((s, a) => s + Number(a.total_hours || 0), 0).toFixed(1), Clock3],
+    ["عدد التعارضات", conflictRows.length, MessageSquareWarning],
+    ["الموظفون غير المجدولين", employees.filter((e) => !scheduledIds.has(e.id)).length, UserCheck],
+    ["أكثر فرع لديه ضغط شفتات", pressureBranch, Building2],
+  ];
+  const filteredAssignments = visibleAssignments.filter((a) =>
+    (!filters.date || a.assignment_date === filters.date) &&
+    (!filters.month || String(a.assignment_date || "").startsWith(filters.month)) &&
+    (filters.branch === "all" || a.branch === filters.branch) &&
+    (!filters.employee || a.employee_name.includes(filters.employee) || a.employee_id.includes(filters.employee)) &&
+    (filters.shift === "all" || a.shift_type_id === filters.shift) &&
+    (filters.status === "all" || a.status === filters.status)
+  );
+  const saveType = async (e) => {
+    e.preventDefault();
+    const exists = shiftTypes.some((s) => s.shift_type_id === dialog.shift_type_id);
+    if ((exists && !canEdit) || (!exists && !canCreate)) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    try {
+      const saved = await shiftsService.saveType({ ...dialog, total_hours: calculateShiftHours(dialog.start_time, dialog.end_time) });
+      setShiftTypes((list) => upsertLocal(list, saved, "shift_type_id"));
+      setDialog(null);
+    } catch (err) { alert(err.message); }
+  };
+  const saveUsed = async (e) => {
+    e.preventDefault();
+    const duplicate = usedShifts.find((u) => u.used_shift_id !== dialog.used_shift_id && u.is_active && dialog.is_active !== false && u.branch === dialog.branch && u.start_time === dialog.start_time && u.end_time === dialog.end_time);
+    if (duplicate && !confirm("يوجد شفت نشط بنفس الفرع ونفس الفترة. هل تريد المتابعة؟")) return;
+    try {
+      const saved = await shiftsService.saveUsed(dialog);
+      setUsedShifts((list) => upsertLocal(list, saved, "used_shift_id"));
+      setDialog(null);
+    } catch (err) { alert(err.message); }
+  };
+  const saveScenario = async (e) => {
+    e.preventDefault();
+    try {
+      const saved = await shiftScenariosService.saveScenario(dialog, dialog.details || []);
+      setScenarios((list) => upsertLocal(list, saved.scenario, "scenario_id"));
+      if (saved.details.length) setScenarioDetails((list) => [...list.filter((d) => d.scenario_id !== saved.scenario.scenario_id), ...saved.details]);
+      setDialog(null);
+    } catch (err) { alert(err.message); }
+  };
+  const selectShiftForDialog = (shiftTypeId) => {
+    const s = shiftTypes.find((x) => x.shift_type_id === shiftTypeId);
+    setDialog((d) => ({ ...d, shift_type_id: shiftTypeId, shift_name: s?.shift_name || "", start_time: s?.start_time || "", end_time: s?.end_time || "", total_hours: s?.total_hours || 0 }));
+  };
+  const saveAssignments = async (e) => {
+    e.preventDefault();
+    if (!canCreate) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    const selected = employees.filter((emp) => (dialog.selected_employee_ids || []).includes(emp.id));
+    const rows = selected.map((emp) => ({
+      assignment_id: `${dialog.assignment_date}-${emp.id}-${dialog.shift_type_id}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      assignment_date: dialog.assignment_date,
+      branch: emp.branch,
+      employee_id: emp.id,
+      employee_name: emp.name,
+      employee_phone: emp.phone,
+      job: emp.job,
+      shift_type_id: dialog.shift_type_id,
+      shift_name: dialog.shift_name,
+      start_time: dialog.start_time,
+      end_time: dialog.end_time,
+      total_hours: calculateShiftHours(dialog.start_time, dialog.end_time),
+      status: "مجدول",
+      notes: dialog.notes || "",
+    }));
+    if (!rows.length) return alert("يرجى اختيار موظف واحد على الأقل.");
+    const warnings = [];
+    rows.forEach((row) => {
+      if (assignments.some((a) => a.assignment_date === row.assignment_date && a.employee_id === row.employee_id && shiftsOverlap(a, row))) warnings.push(`يوجد تعارض في جدول الموظف ${row.employee_name}`);
+      const employee = employees.find((emp) => emp.id === row.employee_id);
+      if (employee?.status === "إجازة" || employee?.status === "ط¥ط¬ط§ط²ط©") warnings.push(`الموظف ${row.employee_name} في إجازة`);
+      const used = usedShifts.find((u) => u.branch === row.branch && u.shift_type_id === row.shift_type_id && u.is_active);
+      if (used) {
+        const count = assignments.filter((a) => a.assignment_date === row.assignment_date && a.branch === row.branch && a.shift_type_id === row.shift_type_id).length + rows.filter((r) => r.branch === row.branch && r.shift_type_id === row.shift_type_id).length;
+        if (used.min_employees && count < used.min_employees) warnings.push(`لا توجد تغطية كافية لهذا الفرع: ${row.branch}`);
+        if (used.max_employees && count > used.max_employees) warnings.push(`عدد الموظفين أكبر من الحد الأقصى في ${row.branch}`);
+      }
+    });
+    if (warnings.length && !canOverrideShiftConflicts(role)) return alert(warnings.join("\n"));
+    if (warnings.length && !confirm(`${warnings.join("\n")}\nهل تريد المتابعة؟`)) return;
+    try {
+      const saved = await shiftAssignmentsService.save(rows);
+      setAssignments((list) => [...saved, ...list]);
+      setDialog(null);
+    } catch (err) { alert(err.message); }
+  };
+  const removeRecord = async (kind, id) => {
+    if (!canDelete) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!confirm("هل تريد حذف السجل؟")) return;
+    try {
+      if (kind === "type") { await shiftsService.removeType(id); setShiftTypes((list) => list.filter((x) => x.shift_type_id !== id)); }
+      else if (kind === "used") { await shiftsService.removeUsed(id); setUsedShifts((list) => list.filter((x) => x.used_shift_id !== id)); }
+      else if (kind === "scenario") { await shiftScenariosService.removeScenario(id); setScenarios((list) => list.filter((x) => x.scenario_id !== id)); setScenarioDetails((list) => list.filter((x) => x.scenario_id !== id)); }
+      else { await shiftAssignmentsService.remove(id); setAssignments((list) => list.filter((x) => x.assignment_id !== id)); }
+    } catch (err) { alert(err.message); }
+  };
+  const copyShiftSchedule = async (fromDate, toDate, targetBranch = "") => {
+    const source = assignments.filter((a) => a.assignment_date === fromDate && (!targetBranch || a.branch === targetBranch));
+    if (!source.length) return alert("لا توجد شفتات لنسخها من التاريخ المحدد.");
+    try {
+      const saved = await shiftAssignmentsService.save(source.map((a) => ({ ...a, assignment_id: `${toDate}-${a.employee_id}-${a.shift_type_id}-${Date.now()}-${Math.random().toString(16).slice(2)}`, assignment_date: toDate })));
+      setAssignments((list) => [...saved, ...list]);
+      alert("تم نسخ الجدول بنجاح");
+    } catch (e) { alert(e.message); }
+  };
+  const exportShiftReport = (title, rows) => {
+    const exportRows = reportRowsForExport(rows, shiftAssignmentColumns);
+    return { exportRows, print: () => printDocument(title, `<h1>${title}</h1><p>تاريخ التقرير: ${new Date().toLocaleDateString("ar-SA")}</p>${rowsToReportHtml("", rows, shiftAssignmentColumns)}<div style="margin-top:36px;display:flex;justify-content:space-between"><b>إعداد الموارد البشرية</b><b>اعتماد الإدارة</b></div>`) };
+  };
+  return (
+    <div className="space-y-5">
+      <PageHead title="شفتات الموظفين" desc="إدارة أنواع الشفتات والسيناريوهات وتوزيع الموظفين والتقارير" action={<button onClick={() => setTab("assignments")} className="btn-primary"><CalendarCheck size={18} /> توزيع شفت</button>} />
+      {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{cards.map(([label, value, I]) => <Mini key={label} label={label} value={value} I={I} />)}</div>
+      <div className="panel flex flex-wrap gap-2 p-2">{shiftTabs.map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === id ? "bg-brand-700 text-white" : "bg-slate-100 text-slate-600"}`}>{label}</button>)}</div>
+      {loading ? <div className="panel p-6 text-center text-sm text-slate-500">جاري تحميل بيانات الشفتات...</div> : (
+        <>
+          {tab === "types" && <ShiftTypesTab rows={shiftTypes} setDialog={setDialog} removeRecord={removeRecord} filters={filters} setFilters={setFilters} />}
+          {tab === "used" && <UsedShiftsTab rows={usedShifts} shiftTypes={shiftTypes} setDialog={setDialog} removeRecord={removeRecord} filters={filters} setFilters={setFilters} />}
+          {tab === "scenarios" && <ShiftScenariosTab rows={scenarios} details={scenarioDetails} shiftTypes={shiftTypes} setDialog={setDialog} removeRecord={removeRecord} filters={filters} setFilters={setFilters} />}
+          {tab === "assignments" && <ShiftAssignmentsTab rows={filteredAssignments} employees={employees} shiftTypes={shiftTypes} setDialog={setDialog} removeRecord={removeRecord} filters={filters} setFilters={setFilters} copyShiftSchedule={copyShiftSchedule} setEmployeeDialog={setEmployeeDialog} />}
+          {tab === "reports" && <ShiftReportsTab rows={filteredAssignments} employees={employees} assignments={assignments} shiftTypes={shiftTypes} filters={filters} setFilters={setFilters} canExport={canExport} exportShiftReport={exportShiftReport} />}
+        </>
+      )}
+      <ShiftCharts assignments={visibleAssignments} usedShifts={usedShifts} conflicts={conflictRows} />
+      {dialog?.kind === "type" && <ShiftTypeDialog dialog={dialog} setDialog={setDialog} save={saveType} />}
+      {dialog?.kind === "used" && <UsedShiftDialog dialog={dialog} setDialog={setDialog} save={saveUsed} shiftTypes={shiftTypes} selectShift={selectShiftForDialog} />}
+      {dialog?.kind === "scenario" && <ScenarioDialog dialog={dialog} setDialog={setDialog} save={saveScenario} shiftTypes={shiftTypes} />}
+      {dialog?.kind === "assignment" && <AssignmentDialog dialog={dialog} setDialog={setDialog} save={saveAssignments} employees={employees} shiftTypes={shiftTypes} selectShift={selectShiftForDialog} />}
+      {employeeDialog && <EmployeeModal editing={employeeDialog.editing} close={() => setEmployeeDialog(null)} setEmployees={setEmployees} />}
+    </div>
+  );
+}
+
 const pageLabels = {
   dashboard: "لوحة التحكم",
   employees: "الموظفون",
@@ -4384,12 +4634,82 @@ const pageLabels = {
   incentives: "الحوافز",
   guarantees: "ضمانات الموظفين",
   overtime: "العمل الإضافي",
+  shifts: "شفتات الموظفين",
   reports_center: "مركز التقارير",
   reports: "التقارير",
   settings: "الإعدادات",
   users_permissions: "المستخدمون والصلاحيات",
   audit_logs: "سجل العمليات",
 };
+
+function ShiftTypesTab({ rows, setDialog, removeRecord, filters, setFilters }) {
+  const filtered = rows.filter((r) => (!filters.q || r.shift_name.includes(filters.q)) && (filters.period === "all" || r.shift_period === filters.period));
+  return <div className="panel p-4"><div className="mb-4 flex flex-wrap gap-3"><input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="بحث باسم الشفت..." /><select value={filters.period} onChange={(e) => setFilters({ ...filters, period: e.target.value })} className="field max-w-[170px]"><option value="all">كل الفترات</option>{shiftPeriods.map((p) => <option key={p}>{p}</option>)}</select><button onClick={() => setDialog({ kind: "type", shift_type_id: `ST-${Date.now()}`, shift_name: "", start_time: "08:00", end_time: "15:00", total_hours: 7, break_minutes: 0, shift_period: "صباحي", is_active: true, notes: "" })} className="btn-primary"><Plus size={17} /> إضافة نوع</button></div><div className="table-wrap"><table><thead><tr><th>الشفت</th><th>الفترة</th><th>من</th><th>إلى</th><th>الساعات</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((r) => <tr key={r.shift_type_id}><td>{r.shift_name}</td><td>{r.shift_period}</td><td>{r.start_time}</td><td>{r.end_time}</td><td>{r.total_hours}</td><td><Status>{r.is_active ? "نشط" : "غير نشط"}</Status></td><td><button onClick={() => setDialog({ ...r, kind: "type" })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => removeRecord("type", r.shift_type_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div>;
+}
+
+function UsedShiftsTab({ rows, shiftTypes, setDialog, removeRecord, filters, setFilters }) {
+  const filtered = rows.filter((r) => (filters.branch === "all" || r.branch === filters.branch) && (filters.active === "all" || String(r.is_active) === filters.active));
+  return <div className="panel p-4"><div className="mb-4 flex flex-wrap gap-3"><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><select value={filters.active} onChange={(e) => setFilters({ ...filters, active: e.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option><option value="true">نشط</option><option value="false">غير نشط</option></select><button onClick={() => setDialog({ kind: "used", used_shift_id: `US-${Date.now()}`, branch: branches[0], shift_type_id: shiftTypes[0]?.shift_type_id || "", shift_name: shiftTypes[0]?.shift_name || "", start_time: shiftTypes[0]?.start_time || "08:00", end_time: shiftTypes[0]?.end_time || "15:00", required_employees: 1, min_employees: 1, max_employees: 3, active_from: new Date().toISOString().slice(0, 10), active_to: "", is_active: true, notes: "" })} className="btn-primary"><Plus size={17} /> إضافة شفت مستخدم</button></div><div className="table-wrap"><table><thead><tr><th>الفرع</th><th>الشفت</th><th>من</th><th>إلى</th><th>المطلوب</th><th>الأدنى/الأقصى</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((r) => <tr key={r.used_shift_id}><td>{r.branch}</td><td>{r.shift_name}</td><td>{r.start_time}</td><td>{r.end_time}</td><td>{r.required_employees}</td><td>{r.min_employees} / {r.max_employees}</td><td><Status>{r.is_active ? "نشط" : "غير نشط"}</Status></td><td><button onClick={() => setDialog({ ...r, kind: "used" })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => removeRecord("used", r.used_shift_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div>;
+}
+
+function ShiftScenariosTab({ rows, details, setDialog, removeRecord, filters, setFilters }) {
+  const filtered = rows.filter((r) => (filters.branch === "all" || r.branch === filters.branch || r.branch === "كل الفروع") && (filters.status === "all" || r.scenario_type === filters.status));
+  return <div className="panel p-4"><div className="mb-4 flex flex-wrap gap-3"><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option><option>كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[160px]"><option value="all">كل الأنواع</option>{scenarioTypes.map((s) => <option key={s}>{s}</option>)}</select><button onClick={() => setDialog({ kind: "scenario", scenario_id: `SC-${Date.now()}`, scenario_name: "", branch: "كل الفروع", scenario_type: "عادي", description: "", is_active: true, details: [] })} className="btn-primary"><Plus size={17} /> إضافة سيناريو</button></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((r) => <div key={r.scenario_id} className="rounded-2xl border p-4"><div className="flex"><b>{r.scenario_name}</b><Status>{r.is_active ? "نشط" : "غير نشط"}</Status></div><p className="mt-2 text-sm text-slate-500">{r.branch} • {r.scenario_type}</p><p className="mt-2 text-xs text-slate-400">عدد الشفتات: {details.filter((d) => d.scenario_id === r.scenario_id).length}</p><div className="mt-4 flex gap-2"><button onClick={() => setDialog({ ...r, kind: "scenario", details: details.filter((d) => d.scenario_id === r.scenario_id) })} className="btn-secondary"><Pencil size={15} /> تعديل</button><button onClick={() => removeRecord("scenario", r.scenario_id)} className="btn-secondary text-red-600"><Trash2 size={15} /></button></div></div>)}</div></div>;
+}
+
+function ShiftAssignmentsTab({ rows, employees, shiftTypes, setDialog, removeRecord, filters, setFilters, copyShiftSchedule, setEmployeeDialog }) {
+  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><input type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} className="field max-w-[170px]" /><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field min-w-[180px]" placeholder="بحث بالموظف..." /><select value={filters.shift} onChange={(e) => setFilters({ ...filters, shift: e.target.value })} className="field max-w-[180px]"><option value="all">كل الشفتات</option>{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option>{shiftAssignmentStatuses.map((s) => <option key={s}>{s}</option>)}</select><button onClick={() => setDialog({ kind: "assignment", assignment_date: new Date().toISOString().slice(0, 10), shift_type_id: shiftTypes[0]?.shift_type_id || "", shift_name: shiftTypes[0]?.shift_name || "", start_time: shiftTypes[0]?.start_time || "08:00", end_time: shiftTypes[0]?.end_time || "15:00", selected_employee_ids: [], notes: "" })} className="btn-primary"><Plus size={17} /> توزيع شفت</button><button onClick={() => setEmployeeDialog({ editing: null })} className="btn-secondary"><Users size={17} /> إضافة موظف</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr>{shiftAssignmentColumns.map((c) => <th key={c.key}>{c.label}</th>)}<th>واتساب</th><th></th></tr></thead><tbody>{rows.map((r) => <tr key={r.assignment_id}><td>{r.assignment_date}</td><td>{r.employee_name}</td><td>{r.branch}</td><td>{r.shift_name}</td><td>{r.start_time}</td><td>{r.end_time}</td><td>{r.total_hours}</td><td><Status>{r.status}</Status></td><td><button onClick={() => navigator.clipboard?.writeText(makeShiftMessage(r)).then(() => alert("تم نسخ الرسالة"))} className="btn-secondary !h-9 !px-3">نسخ الرسالة</button><button onClick={() => window.open(`https://wa.me/${normalizeWhatsAppPhone(r.employee_phone)}?text=${encodeURIComponent(makeShiftMessage(r))}`, "_blank")} className="btn-secondary !h-9 !px-3">فتح واتساب</button></td><td><button onClick={() => removeRecord("assignment", r.assignment_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div><CopyScheduleBox copyShiftSchedule={copyShiftSchedule} /></div>;
+}
+
+function CopyScheduleBox({ copyShiftSchedule }) {
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [branch, setBranch] = useState("");
+  return <div className="panel flex flex-wrap items-end gap-3 p-4"><Label t="نسخ من تاريخ"><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="field mt-2" /></Label><Label t="إلى تاريخ"><input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="field mt-2" /></Label><Label t="الفرع اختياري"><select value={branch} onChange={(e) => setBranch(e.target.value)} className="field mt-2"><option value="">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select></Label><button onClick={() => from && to ? copyShiftSchedule(from, to, branch) : alert("حدد تاريخ النسخ والتاريخ الجديد")} className="btn-secondary">نسخ الجدول</button></div>;
+}
+
+function ShiftReportsTab({ rows, employees, assignments, shiftTypes, filters, setFilters, canExport, exportShiftReport }) {
+  const unscheduled = employees.filter((e) => !assignments.some((a) => a.employee_id === e.id && (!filters.date || a.assignment_date === filters.date)));
+  const conflicts = assignments.filter((a, i, arr) => arr.some((b, j) => i !== j && a.assignment_date === b.assignment_date && a.employee_id === b.employee_id && shiftsOverlap(a, b)));
+  const reports = [["تقرير الشفتات اليومي", rows], ["تقرير الشفتات حسب الفرع", rows], ["تقرير الشفتات حسب الموظف", rows], ["تقرير الشفتات حسب الشهر", rows], ["تقرير نقص التغطية", rows.filter((r) => r.status === "غائب")], ["تقرير التعارضات", conflicts], ["تقرير إجمالي ساعات العمل", rows], ["مقارنة الشفتات بين الفروع", rows], ["مقارنة ساعات العمل بين الموظفين", rows], ["تقرير الموظفين غير المجدولين", unscheduled.map((e) => ({ employee_name: e.name, branch: e.branch, job: e.job, status: e.status }))]];
+  return <div className="space-y-4"><div className="panel grid gap-3 p-4 md:grid-cols-4 xl:grid-cols-6"><input type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} className="field" /><input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field" /><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field" placeholder="الموظف" /><select value={filters.shift} onChange={(e) => setFilters({ ...filters, shift: e.target.value })} className="field"><option value="all">كل الشفتات</option>{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field"><option value="all">كل الحالات</option>{shiftAssignmentStatuses.map((s) => <option key={s}>{s}</option>)}</select></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{reports.map(([title, reportRows]) => { const report = exportShiftReport(title, reportRows); return <div key={title} className="panel p-5"><FileBarChart className="text-brand-700" /><h3 className="mt-3 font-extrabold">{title}</h3><p className="mt-1 text-xs text-slate-500">عدد السجلات: {reportRows.length}</p><div className="mt-5 flex gap-2"><button disabled={!canExport} onClick={() => exportExcel(report.exportRows, title)} className="btn-secondary flex-1"><FileSpreadsheet size={15} /> Excel</button><button onClick={report.print} className="btn-secondary flex-1"><Printer size={15} /> PDF</button><button disabled={!canExport} onClick={() => exportDocx(title, report.exportRows)} className="btn-secondary flex-1"><Download size={15} /> Word</button></div></div>; })}</div></div>;
+}
+
+function ShiftCharts({ assignments, usedShifts, conflicts }) {
+  const byBranch = Object.entries(groupCount(assignments, "branch")).map(([name, value]) => ({ name, value }));
+  const byDay = Object.entries(groupCount(assignments, "assignment_date")).map(([name, value]) => ({ name, value }));
+  const byEmployeeHours = Object.entries(assignments.reduce((acc, a) => ({ ...acc, [a.employee_name]: (acc[a.employee_name] || 0) + Number(a.total_hours || 0) }), {})).slice(0, 10).map(([name, value]) => ({ name, value }));
+  const coverage = usedShifts.map((u) => ({ name: u.branch, value: assignments.filter((a) => a.branch === u.branch && a.shift_type_id === u.shift_type_id).length }));
+  const conflictByBranch = Object.entries(groupCount(conflicts, "branch")).map(([name, value]) => ({ name, value }));
+  if (!assignments.length && !usedShifts.length) return null;
+  return <div className="grid gap-5 xl:grid-cols-2"><Chart title="الشفتات حسب الفروع" sub="عدد التوزيعات"><ResponsiveContainer width="100%" height={220}><BarChart data={byBranch}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></Chart><Chart title="الشفتات حسب الأيام" sub="التوزيع اليومي"><ResponsiveContainer width="100%" height={220}><AreaChart data={byDay}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Area dataKey="value" stroke="#7f1d1d" fill="#fbe5e5" /></AreaChart></ResponsiveContainer></Chart><Chart title="ساعات العمل حسب الموظفين" sub="أعلى 10 موظفين"><ResponsiveContainer width="100%" height={220}><BarChart data={byEmployeeHours}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis /><Tooltip /><Bar dataKey="value" fill="#991b1b" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></Chart><Chart title="التغطية والتعارضات حسب الفرع" sub="مؤشرات رقابية"><ResponsiveContainer width="100%" height={220}><BarChart data={[...coverage, ...conflictByBranch]}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></Chart></div>;
+}
+
+function ShiftTypeDialog({ dialog, setDialog, save }) {
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel w-full max-w-3xl p-6"><DialogTitle title="بيانات نوع الشفت" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-2"><Label t="اسم الشفت"><input required value={dialog.shift_name} onChange={(e) => setDialog({ ...dialog, shift_name: e.target.value })} className="field mt-2" /></Label><Label t="الفترة"><select value={dialog.shift_period} onChange={(e) => setDialog({ ...dialog, shift_period: e.target.value })} className="field mt-2">{shiftPeriods.map((p) => <option key={p}>{p}</option>)}</select></Label><Label t="من الساعة"><input type="time" value={dialog.start_time} onChange={(e) => setDialog({ ...dialog, start_time: e.target.value, total_hours: calculateShiftHours(e.target.value, dialog.end_time) })} className="field mt-2" /></Label><Label t="إلى الساعة"><input type="time" value={dialog.end_time} onChange={(e) => setDialog({ ...dialog, end_time: e.target.value, total_hours: calculateShiftHours(dialog.start_time, e.target.value) })} className="field mt-2" /></Label><Label t="إجمالي الساعات"><input readOnly value={calculateShiftHours(dialog.start_time, dialog.end_time)} className="field mt-2 bg-slate-50" /></Label><Label t="دقائق الاستراحة"><input type="number" value={dialog.break_minutes} onChange={(e) => setDialog({ ...dialog, break_minutes: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">غير نشط</option></select></Label><Label t="ملاحظات"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>;
+}
+
+function UsedShiftDialog({ dialog, setDialog, save, shiftTypes, selectShift }) {
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel w-full max-w-4xl p-6"><DialogTitle title="الشفت المستخدم" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="الفرع"><select value={dialog.branch} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className="field mt-2">{branches.map((b) => <option key={b}>{b}</option>)}</select></Label><Label t="نوع الشفت"><select value={dialog.shift_type_id} onChange={(e) => selectShift(e.target.value)} className="field mt-2">{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select></Label><Label t="من الساعة"><input type="time" value={dialog.start_time} onChange={(e) => setDialog({ ...dialog, start_time: e.target.value })} className="field mt-2" /></Label><Label t="إلى الساعة"><input type="time" value={dialog.end_time} onChange={(e) => setDialog({ ...dialog, end_time: e.target.value })} className="field mt-2" /></Label><Label t="المطلوب"><input type="number" value={dialog.required_employees} onChange={(e) => setDialog({ ...dialog, required_employees: e.target.value })} className="field mt-2" /></Label><Label t="الحد الأدنى"><input type="number" value={dialog.min_employees} onChange={(e) => setDialog({ ...dialog, min_employees: e.target.value })} className="field mt-2" /></Label><Label t="الحد الأقصى"><input type="number" value={dialog.max_employees} onChange={(e) => setDialog({ ...dialog, max_employees: e.target.value })} className="field mt-2" /></Label><Label t="من تاريخ"><input type="date" value={dialog.active_from} onChange={(e) => setDialog({ ...dialog, active_from: e.target.value })} className="field mt-2" /></Label><Label t="إلى تاريخ"><input type="date" value={dialog.active_to || ""} onChange={(e) => setDialog({ ...dialog, active_to: e.target.value })} className="field mt-2" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>;
+}
+
+function ScenarioDialog({ dialog, setDialog, save, shiftTypes }) {
+  const addDetail = () => { const s = shiftTypes[0] || {}; setDialog({ ...dialog, details: [...(dialog.details || []), { scenario_detail_id: `SCD-${Date.now()}`, shift_type_id: s.shift_type_id || "", shift_name: s.shift_name || "", start_time: s.start_time || "08:00", end_time: s.end_time || "15:00", required_employees: 1, notes: "" }] }); };
+  const updateDetail = (i, patch) => setDialog({ ...dialog, details: (dialog.details || []).map((d, idx) => idx === i ? { ...d, ...patch } : d) });
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="سيناريو الشفتات" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="اسم السيناريو"><input required value={dialog.scenario_name} onChange={(e) => setDialog({ ...dialog, scenario_name: e.target.value })} className="field mt-2" /></Label><Label t="الفرع"><select value={dialog.branch} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className="field mt-2"><option>كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select></Label><Label t="النوع"><select value={dialog.scenario_type} onChange={(e) => setDialog({ ...dialog, scenario_type: e.target.value })} className="field mt-2">{scenarioTypes.map((s) => <option key={s}>{s}</option>)}</select></Label><Label t="الوصف"><textarea value={dialog.description} onChange={(e) => setDialog({ ...dialog, description: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><div className="mt-5 flex"><h4 className="font-extrabold">الشفتات داخل السيناريو</h4><button type="button" onClick={addDetail} className="btn-secondary mr-auto"><Plus size={15} /> إضافة شفت</button></div><div className="mt-3 space-y-2">{(dialog.details || []).map((d, i) => <div key={d.scenario_detail_id} className="grid gap-2 rounded-xl bg-slate-50 p-3 md:grid-cols-5"><select value={d.shift_type_id} onChange={(e) => { const s = shiftTypes.find((x) => x.shift_type_id === e.target.value); updateDetail(i, { shift_type_id: e.target.value, shift_name: s?.shift_name || "", start_time: s?.start_time || "", end_time: s?.end_time || "" }); }} className="field">{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select><input type="time" value={d.start_time} onChange={(e) => updateDetail(i, { start_time: e.target.value })} className="field" /><input type="time" value={d.end_time} onChange={(e) => updateDetail(i, { end_time: e.target.value })} className="field" /><input type="number" value={d.required_employees} onChange={(e) => updateDetail(i, { required_employees: e.target.value })} className="field" /><button type="button" onClick={() => setDialog({ ...dialog, details: dialog.details.filter((_, idx) => idx !== i) })} className="btn-secondary text-red-600">حذف</button></div>)}</div><DialogActions close={() => setDialog(null)} /></form></div>;
+}
+
+function AssignmentDialog({ dialog, setDialog, save, employees, shiftTypes, selectShift }) {
+  const selectEmployees = (ids) => setDialog({ ...dialog, selected_employee_ids: ids });
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="توزيع الموظفين على الشفتات" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="التاريخ"><input type="date" value={dialog.assignment_date} onChange={(e) => setDialog({ ...dialog, assignment_date: e.target.value })} className="field mt-2" /></Label><Label t="الشفت"><select value={dialog.shift_type_id} onChange={(e) => selectShift(e.target.value)} className="field mt-2">{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select></Label><Label t="الساعات"><input readOnly value={calculateShiftHours(dialog.start_time, dialog.end_time)} className="field mt-2 bg-slate-50" /></Label><Label t="من"><input type="time" value={dialog.start_time} onChange={(e) => setDialog({ ...dialog, start_time: e.target.value })} className="field mt-2" /></Label><Label t="إلى"><input type="time" value={dialog.end_time} onChange={(e) => setDialog({ ...dialog, end_time: e.target.value })} className="field mt-2" /></Label><Label t="ملاحظات"><input value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2" /></Label></div><div className="mt-5 flex flex-wrap gap-2"><button type="button" onClick={() => selectEmployees(employees.map((e) => e.id))} className="btn-secondary">اختيار كل الموظفين</button>{branches.map((b) => <button type="button" key={b} onClick={() => selectEmployees(employees.filter((e) => e.branch === b).map((e) => e.id))} className="btn-secondary">{b}</button>)}</div><div className="mt-4 grid max-h-72 gap-2 overflow-y-auto rounded-2xl border p-3 md:grid-cols-2">{employees.map((e) => <label key={e.id} className="flex items-center gap-2 rounded-xl bg-slate-50 p-2 text-sm"><input type="checkbox" checked={(dialog.selected_employee_ids || []).includes(e.id)} onChange={(ev) => setDialog({ ...dialog, selected_employee_ids: ev.target.checked ? [...(dialog.selected_employee_ids || []), e.id] : (dialog.selected_employee_ids || []).filter((id) => id !== e.id) })} />{e.name} - {e.branch} - {e.job}</label>)}</div><p className="mt-3 rounded-xl bg-blue-50 p-3 text-sm font-bold text-blue-700">عدد الموظفين المختارين: {(dialog.selected_employee_ids || []).length}</p><DialogActions close={() => setDialog(null)} /></form></div>;
+}
+
+function DialogTitle({ title, close }) {
+  return <div className="mb-5 flex"><h3 className="text-xl font-extrabold">{title}</h3><button type="button" onClick={close} className="mr-auto"><X /></button></div>;
+}
+function DialogActions({ close }) {
+  return <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={close} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ البيانات</button></div>;
+}
 
 function UsersPermissionsPage({ employees, can }) {
   const [users, setUsers] = useState([]);

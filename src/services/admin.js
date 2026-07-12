@@ -7,6 +7,7 @@ export const permissionPages = [
   "incentives",
   "guarantees",
   "overtime",
+  "shifts",
   "reports_center",
   "reports",
   "settings",
