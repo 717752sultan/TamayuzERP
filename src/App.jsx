@@ -90,6 +90,7 @@ import { dailyOperationsService, operationTypes, serviceChannels, operationStatu
 import { performanceCriteriaService, scoringTypes, defaultJobKpis } from "./services/performanceCriteria";
 import { kpiCalculationService } from "./services/kpiCalculation";
 import { aiAssistantService } from "./services/aiAssistant";
+import { treePermissionsService, permissionActions, dataScopes, departmentOptions, flattenPermissionTree, normalizeTreePermission } from "./services/treePermissions";
 const icons = {
   dashboard: LayoutDashboard,
   employees: Users,
@@ -5197,14 +5198,158 @@ function UserEditorModal({ dialog, setDialog, saveUser, employeeOptions, selectE
   );
 }
 
+function TreePermissionsPanel({ selectedRole, setSelectedRole, treeNodes, treePermissions, setTreePermissions, roles, users, branchOptions, canEdit, loading, onSave, onReset, onCopy }) {
+  const [search, setSearch] = useState("");
+  const [selectedNodeKey, setSelectedNodeKey] = useState("");
+  const [expanded, setExpanded] = useState([]);
+  const [copyFromRole, setCopyFromRole] = useState("");
+  const flatNodes = useMemo(() => flattenPermissionTree(treeNodes || []), [treeNodes]);
+  useEffect(() => {
+    if (!selectedNodeKey && flatNodes[0]?.node_key) setSelectedNodeKey(flatNodes[0].node_key);
+    if (!expanded.length && flatNodes.length) setExpanded(flatNodes.filter((n) => !n.parent_id).map((n) => n.node_key));
+  }, [flatNodes, selectedNodeKey, expanded.length]);
+  const selectedNode = flatNodes.find((n) => n.node_key === selectedNodeKey) || flatNodes[0];
+  const getPerm = (nodeKey) => treePermissionsService.getNodePermission(treePermissions, selectedRole, nodeKey);
+  const selectedPerm = selectedNode ? getPerm(selectedNode.node_key) : null;
+  const childrenOf = (node) => flattenPermissionTree(node?.children || []);
+  const updatePermission = (nodeKey, patch) => {
+    setTreePermissions((list) => {
+      const base = getPerm(nodeKey);
+      const next = normalizeTreePermission({ ...base, ...patch, role_name: selectedRole, node_key: nodeKey, permission_id: `${selectedRole}-${nodeKey}` });
+      const exists = list.some((p) => p.role_name === selectedRole && p.node_key === nodeKey);
+      return exists ? list.map((p) => (p.role_name === selectedRole && p.node_key === nodeKey ? next : p)) : [...list, next];
+    });
+  };
+  const setNodeViewRecursive = (node, value) => {
+    const keys = [node.node_key, ...childrenOf(node).map((n) => n.node_key)];
+    setTreePermissions((list) => {
+      const without = list.filter((p) => !(p.role_name === selectedRole && keys.includes(p.node_key)));
+      const rows = keys.map((key) => normalizeTreePermission({ ...treePermissionsService.getNodePermission(list, selectedRole, key), role_name: selectedRole, node_key: key, permission_id: `${selectedRole}-${key}`, can_view: value }));
+      return [...without, ...rows];
+    });
+  };
+  const applySelectedToChildren = () => {
+    if (!selectedNode || !selectedPerm) return;
+    const childKeys = childrenOf(selectedNode).map((n) => n.node_key);
+    setTreePermissions((list) => {
+      const without = list.filter((p) => !(p.role_name === selectedRole && childKeys.includes(p.node_key)));
+      return [
+        ...without,
+        ...childKeys.map((key) => normalizeTreePermission({ ...selectedPerm, role_name: selectedRole, node_key: key, permission_id: `${selectedRole}-${key}` })),
+      ];
+    });
+  };
+  const setAll = (value) => {
+    setTreePermissions((list) => {
+      const others = list.filter((p) => p.role_name !== selectedRole);
+      const rows = flatNodes.map((n) => {
+        const row = permissionActions.reduce((acc, [key]) => ({ ...acc, [key]: value }), {});
+        return normalizeTreePermission({ ...row, role_name: selectedRole, node_key: n.node_key, permission_id: `${selectedRole}-${n.node_key}`, data_scope: value ? "all" : "own" });
+      });
+      return [...others, ...rows];
+    });
+  };
+  const clearNode = () => selectedNode && updatePermission(selectedNode.node_key, permissionActions.reduce((acc, [key]) => ({ ...acc, [key]: false }), {}));
+  const toggleExpand = (nodeKey) => setExpanded((list) => list.includes(nodeKey) ? list.filter((x) => x !== nodeKey) : [...list, nodeKey]);
+  const filterTree = (nodes) => nodes.map((n) => ({ ...n, children: filterTree(n.children || []) })).filter((n) => !search || `${n.node_name} ${n.node_key} ${n.page_key || ""}`.toLowerCase().includes(search.toLowerCase()) || n.children.length);
+  const visibleTree = filterTree(treeNodes || []);
+  const nodeState = (node) => {
+    const keys = [node.node_key, ...childrenOf(node).map((n) => n.node_key)];
+    const count = keys.filter((key) => getPerm(key).can_view).length;
+    return count === 0 ? "none" : count === keys.length ? "checked" : "partial";
+  };
+  const renderNode = (node, level = 0) => {
+    const hasChildren = (node.children || []).length > 0;
+    const isOpen = expanded.includes(node.node_key);
+    const state = nodeState(node);
+    return (
+      <div key={node.node_key}>
+        <div className={`flex items-center gap-2 rounded-xl px-2 py-2 text-sm ${selectedNode?.node_key === node.node_key ? "bg-brand-50 text-brand-800" : "hover:bg-slate-50"}`} style={{ paddingRight: 8 + level * 18 }}>
+          <button type="button" onClick={() => hasChildren && toggleExpand(node.node_key)} className="grid h-6 w-6 place-items-center rounded-lg bg-slate-100 text-slate-600">{hasChildren ? (isOpen ? "−" : "+") : "•"}</button>
+          <input type="checkbox" disabled={!canEdit} checked={state === "checked"} ref={(el) => { if (el) el.indeterminate = state === "partial"; }} onChange={(e) => setNodeViewRecursive(node, e.target.checked)} />
+          <button type="button" onClick={() => setSelectedNodeKey(node.node_key)} className="flex-1 text-right">
+            <b>{node.node_name}</b>
+            <p className="text-[11px] text-slate-400">{node.node_type} · {node.node_key}</p>
+          </button>
+        </div>
+        {hasChildren && isOpen && <div>{node.children.map((child) => renderNode(child, level + 1))}</div>}
+      </div>
+    );
+  };
+  const selectedUserOptions = users.filter((u) => !selectedRole || u.role === selectedRole);
+  return (
+    <div className="panel p-4 xl:col-span-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <h3 className="text-lg font-extrabold">شجرة الصلاحيات التفصيلية</h3>
+        <select value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)} className="field mr-auto max-w-[220px]">{roles.map((r) => <option key={r}>{r}</option>)}</select>
+        <select className="field max-w-[220px]"><option>كل مستخدمي الدور</option>{selectedUserOptions.map((u) => <option key={u.user_id}>{u.employee_name || u.username}</option>)}</select>
+        <input value={search} onChange={(e) => setSearch(e.target.value)} className="field max-w-[240px]" placeholder="بحث داخل الشجرة..." />
+      </div>
+      <div className="mb-4 flex flex-wrap gap-2">
+        <button disabled={!canEdit} onClick={() => setAll(true)} className="btn-secondary">تحديد الكل</button>
+        <button disabled={!canEdit} onClick={() => setAll(false)} className="btn-secondary">مسح الكل</button>
+        <button onClick={() => setExpanded(flatNodes.map((n) => n.node_key))} className="btn-secondary">توسيع الكل</button>
+        <button onClick={() => setExpanded([])} className="btn-secondary">طي الكل</button>
+        <select value={copyFromRole} onChange={(e) => setCopyFromRole(e.target.value)} className="field max-w-[200px]"><option value="">نسخ من دور...</option>{roles.filter((r) => r !== selectedRole).map((r) => <option key={r}>{r}</option>)}</select>
+        <button disabled={!canEdit || !copyFromRole} onClick={() => onCopy(copyFromRole)} className="btn-secondary">نسخ الصلاحيات</button>
+        <button disabled={!canEdit} onClick={onReset} className="btn-secondary">إعادة ضبط الدور</button>
+        <button disabled={!canEdit || loading} onClick={onSave} className="btn-primary"><Save size={17} /> حفظ الصلاحيات</button>
+      </div>
+      {loading ? <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">جاري تحميل شجرة الصلاحيات...</p> : (
+        <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
+          <div className="max-h-[620px] overflow-y-auto rounded-2xl border border-slate-100 bg-white p-3">{visibleTree.map((node) => renderNode(node))}</div>
+          <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            {!selectedNode || !selectedPerm ? <p className="text-sm text-slate-500">اختر بندًا من الشجرة لتعديل صلاحياته.</p> : (
+              <div className="space-y-4">
+                <div className="rounded-2xl bg-white p-4">
+                  <p className="text-xs text-slate-400">البند المحدد</p>
+                  <h4 className="text-xl font-extrabold text-brand-800">{selectedNode.node_name}</h4>
+                  <p className="mt-1 text-xs text-slate-500">المفتاح: {selectedNode.node_key} · النوع: {selectedNode.node_type} · الصفحة: {selectedNode.page_key || "—"}</p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  {permissionActions.map(([key, label]) => (
+                    <label key={key} className="flex items-center gap-3 rounded-xl bg-white p-3 text-sm font-bold">
+                      <input disabled={!canEdit} type="checkbox" checked={!!selectedPerm[key]} onChange={(e) => updatePermission(selectedNode.node_key, { [key]: e.target.checked })} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <div className="grid gap-4 md:grid-cols-3">
+                  <Label t="نطاق البيانات">
+                    <select disabled={!canEdit} value={selectedPerm.data_scope || "own"} onChange={(e) => updatePermission(selectedNode.node_key, { data_scope: e.target.value })} className="field mt-2">{dataScopes.map(([k, label]) => <option key={k} value={k}>{label}</option>)}</select>
+                  </Label>
+                  <Label t="الفروع المسموحة">
+                    <select multiple disabled={!canEdit} value={selectedPerm.allowed_branches || []} onChange={(e) => updatePermission(selectedNode.node_key, { allowed_branches: Array.from(e.target.selectedOptions).map((o) => o.value) })} className="field mt-2 !h-32">{branchOptions.map((b) => <option key={b}>{b}</option>)}</select>
+                  </Label>
+                  <Label t="الأقسام المسموحة">
+                    <select multiple disabled={!canEdit} value={selectedPerm.allowed_departments || []} onChange={(e) => updatePermission(selectedNode.node_key, { allowed_departments: Array.from(e.target.selectedOptions).map((o) => o.value) })} className="field mt-2 !h-32">{departmentOptions.map((d) => <option key={d}>{d}</option>)}</select>
+                  </Label>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button disabled={!canEdit} onClick={onSave} className="btn-primary"><Save size={17} /> حفظ المحدد</button>
+                  <button disabled={!canEdit} onClick={applySelectedToChildren} className="btn-secondary">تطبيق على الفروع التابعة</button>
+                  <button disabled={!canEdit} onClick={clearNode} className="btn-secondary">مسح صلاحيات البند</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function UsersPermissionsPage({ employees, can }) {
   const [users, setUsers] = useState([]);
   const [employeeOptions, setEmployeeOptions] = useState([]);
   const [permissions, setPermissions] = useState([]);
+  const [treeNodes, setTreeNodes] = useState([]);
+  const [treePermissions, setTreePermissions] = useState([]);
   const [filters, setFilters] = useState({ q: "", role: "all", branch: "all", status: "all" });
   const [dialog, setDialog] = useState(null);
   const [selectedRole, setSelectedRole] = useState(systemRoles[0]);
   const [loading, setLoading] = useState(true);
+  const [treeLoading, setTreeLoading] = useState(false);
   const [error, setError] = useState("");
   const canEdit = can?.("users_permissions", "can_edit") !== false;
   const load = async () => {
@@ -5231,6 +5376,23 @@ function UsersPermissionsPage({ employees, can }) {
     const u2 = adminService.subscribePermissions(load);
     return () => { u1?.(); u2?.(); };
   }, []);
+  useEffect(() => {
+    let active = true;
+    setTreeLoading(true);
+    Promise.all([
+      treePermissionsService.loadPermissionTree(),
+      treePermissionsService.loadRoleNodePermissions(selectedRole),
+    ]).then(([nodes, roleRows]) => {
+      if (!active) return;
+      setTreeNodes(nodes);
+      setTreePermissions(roleRows);
+    }).catch((e) => {
+      if (active) setError(e.message);
+    }).finally(() => {
+      if (active) setTreeLoading(false);
+    });
+    return () => { active = false; };
+  }, [selectedRole]);
   const branchOptions = [...new Set([...(employeeOptions || []).map((e) => e.branch), ...users.map((u) => u.branch), ...branches].filter(Boolean))];
   const filtered = users.filter((u) =>
     (!filters.q || (u.name || u.employee_name || u.username || "").includes(filters.q) || u.username.includes(filters.q) || u.employee_id.includes(filters.q) || u.branch.includes(filters.q) || u.role.includes(filters.q)) &&
@@ -5313,6 +5475,68 @@ function UsersPermissionsPage({ employees, can }) {
       alert(e.message);
     }
   };
+  const syncLegacyPermissions = async (roleRows) => {
+    const flat = flattenPermissionTree(treeNodes);
+    const byPage = new Map();
+    flat.forEach((node) => {
+      const pageKey = node.page_key;
+      if (!pageKey || !permissionPages.includes(pageKey)) return;
+      const row = treePermissionsService.getNodePermission(roleRows, selectedRole, node.node_key);
+      const current = byPage.get(pageKey) || { id: `${selectedRole}-${pageKey}`, role: selectedRole, page_key: pageKey, can_view: false, can_create: false, can_edit: false, can_delete: false, can_export: false, can_approve: false, can_post: false, can_print: false, can_override_stock: false };
+      byPage.set(pageKey, { ...current, can_view: current.can_view || row.can_view, can_create: current.can_create || row.can_create, can_edit: current.can_edit || row.can_edit, can_delete: current.can_delete || row.can_delete, can_export: current.can_export || row.can_export, can_approve: current.can_approve || row.can_approve, can_post: current.can_post || row.can_post, can_print: current.can_print || row.can_print, can_override_stock: current.can_override_stock || row.can_override });
+    });
+    const legacyRows = Array.from(byPage.values());
+    if (!legacyRows.length) return;
+    const savedLegacy = await adminService.savePermissions(legacyRows);
+    setPermissions((list) => [...list.filter((p) => p.role !== selectedRole), ...savedLegacy]);
+  };
+  const saveTreePermissions = async () => {
+    if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    try {
+      setTreeLoading(true);
+      const flat = flattenPermissionTree(treeNodes);
+      const roleRows = flat.map((node) => treePermissionsService.getNodePermission(treePermissions, selectedRole, node.node_key));
+      const saved = await treePermissionsService.saveBulkNodePermissions(selectedRole, roleRows);
+      setTreePermissions(saved);
+      await syncLegacyPermissions(saved);
+      alert("تم حفظ صلاحيات الشجرة بنجاح");
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setTreeLoading(false);
+    }
+  };
+  const resetTreePermissions = async () => {
+    if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!confirm("هل تريد إعادة ضبط صلاحيات هذا الدور؟")) return;
+    try {
+      setTreeLoading(true);
+      const saved = await treePermissionsService.resetRolePermissions(selectedRole);
+      setTreePermissions(saved);
+      await syncLegacyPermissions(saved);
+      alert("تمت إعادة ضبط صلاحيات الدور");
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setTreeLoading(false);
+    }
+  };
+  const copyTreePermissions = async (sourceRole) => {
+    if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!sourceRole) return;
+    try {
+      setTreeLoading(true);
+      const saved = await treePermissionsService.copyRolePermissions(sourceRole, selectedRole);
+      setTreePermissions(saved);
+      await syncLegacyPermissions(saved);
+      alert("تم نسخ الصلاحيات إلى الدور المحدد");
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setTreeLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-5">
       <PageHead title="المستخدمون والصلاحيات" desc="إدارة مستخدمي النظام ومصفوفة صلاحيات الأدوار" action={<button disabled={!canEdit} onClick={() => setDialog({ user_id: `USR-${Date.now()}`, employee_id: "", employee_name: "", username: "", password: "", role: "الموظف", branch: "", job: "", email: "", phone: "", is_active: true })} className="btn-primary"><Plus size={18} /> إضافة مستخدم</button>} />
@@ -5328,11 +5552,21 @@ function UsersPermissionsPage({ employees, can }) {
           <h3 className="mb-3 font-extrabold">المستخدمون</h3>
           {loading ? <p className="text-sm text-slate-400">جاري التحميل...</p> : <div className="table-wrap"><table><thead><tr><th>المستخدم</th><th>الموظف</th><th>الدور</th><th>الفرع</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((u) => <tr key={u.user_id}><td>{u.username}</td><td>{u.employee_name}<p className="text-xs text-slate-400">{u.employee_id}</p></td><td>{u.role}</td><td>{u.branch}</td><td><Status>{u.is_active ? "نشط" : "معطل"}</Status></td><td><button disabled={!canEdit} onClick={() => setDialog(u)} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canEdit} onClick={() => adminService.saveUser({ ...u, is_active: !u.is_active }).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600">{u.is_active ? "تعطيل" : "تفعيل"}</button></td></tr>)}</tbody></table></div>}
         </div>
-        <div className="panel p-4">
-          <div className="mb-3 flex flex-wrap items-center gap-2"><h3 className="font-extrabold">مصفوفة الصلاحيات</h3><select value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)} className="field mr-auto max-w-[220px]">{systemRoles.map((r) => <option key={r}>{r}</option>)}</select></div>
-          <div className="mb-3 flex gap-2"><button onClick={() => selectAll(true)} className="btn-secondary">تحديد الكل</button><button onClick={() => selectAll(false)} className="btn-secondary">إلغاء الكل</button><button onClick={savePermissions} className="btn-primary"><Save size={17} /> حفظ الصلاحيات</button></div>
-          <div className="table-wrap"><table><thead><tr><th>القائمة</th>{["عرض", "إضافة", "تعديل", "حذف", "تصدير", "اعتماد"].map((x) => <th key={x}>{x}</th>)}</tr></thead><tbody>{permissionRows.map((p) => <tr key={p.page_key}><td>{pageLabels[p.page_key] || p.page_key}</td>{["can_view", "can_create", "can_edit", "can_delete", "can_export", "can_approve"].map((k) => <td key={k}><input type="checkbox" checked={p[k]} onChange={(e) => updatePermission(p.page_key, k, e.target.checked)} /></td>)}</tr>)}</tbody></table></div>
-        </div>
+        <TreePermissionsPanel
+          selectedRole={selectedRole}
+          setSelectedRole={setSelectedRole}
+          treeNodes={treeNodes}
+          treePermissions={treePermissions}
+          setTreePermissions={setTreePermissions}
+          roles={systemRoles}
+          users={users}
+          branchOptions={branchOptions}
+          canEdit={canEdit}
+          loading={treeLoading}
+          onSave={saveTreePermissions}
+          onReset={resetTreePermissions}
+          onCopy={copyTreePermissions}
+        />
       </div>
       {dialog && <UserEditorModal dialog={dialog} setDialog={setDialog} saveUser={saveUser} employeeOptions={employeeOptions} selectEmployee={selectEmployee} />}
       {false && dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={saveUser} className="panel w-full max-w-3xl p-6"><div className="mb-5 flex"><h3 className="text-xl font-extrabold">بيانات المستخدم</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div><div className="grid gap-4 md:grid-cols-2"><Label t="ربط الموظف"><select value={dialog.employee_id} onChange={(e) => selectEmployee(e.target.value)} className="field mt-2"><option value="">بدون ربط</option>{employeeOptions.map((e) => <option key={e.id} value={e.id}>{e.name} - {e.id} - {e.branch} - {e.job}</option>)}</select></Label><Label t="اسم الموظف"><input readOnly value={dialog.employee_name || dialog.name || ""} className="field mt-2 bg-slate-50" /></Label><Label t="اسم المستخدم"><input required value={dialog.username} onChange={(e) => setDialog({ ...dialog, username: e.target.value })} className="field mt-2" /></Label><Label t="كلمة المرور"><input required type="password" value={dialog.password || ""} onChange={(e) => setDialog({ ...dialog, password: e.target.value })} className="field mt-2" /></Label><Label t="الدور"><select value={dialog.role} onChange={(e) => setDialog({ ...dialog, role: e.target.value })} className="field mt-2">{systemRoles.map((r) => <option key={r}>{r}</option>)}</select></Label><Label t="الفرع"><input readOnly value={dialog.branch || ""} className="field mt-2 bg-slate-50" /></Label><Label t="الوظيفة"><input readOnly value={dialog.job || ""} className="field mt-2 bg-slate-50" /></Label><Label t="البريد الإلكتروني"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label><Label t="الهاتف"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label></div><div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ البيانات</button></div></form></div>}
