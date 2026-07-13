@@ -42,11 +42,25 @@ const node = (node_key, node_name, parent_id = "", node_type = "page", sort_orde
 });
 
 export const defaultPermissionTreeNodes = [
+  node("dashboard", "لوحة التحكم", "", "module", 0, { page_key: "dashboard" }),
+  node("dashboard_main", "لوحة التحكم الرئيسية", "dashboard", "tab", 1, { page_key: "dashboard" }),
+  node("dashboard_hr", "لوحة الموارد البشرية", "dashboard", "tab", 2, { page_key: "dashboard" }),
+  node("dashboard_inventory", "لوحة المخزون", "dashboard", "tab", 3, { page_key: "dashboard" }),
+  node("dashboard_performance", "لوحة الأداء", "dashboard", "tab", 4, { page_key: "dashboard" }),
+  node("dashboard_daily_operations", "لوحة العمليات اليومية", "dashboard", "tab", 5, { page_key: "dashboard" }),
+  node("dashboard_branches", "لوحة الفروع", "dashboard", "tab", 6, { page_key: "dashboard" }),
+  node("dashboard_financial", "لوحة مالية", "dashboard", "tab", 7, { page_key: "dashboard" }),
   node("system", "النظام", "", "module", 1),
   node("system_users", "المستخدمون", "system", "page", 1, { page_key: "users_permissions" }),
   node("system_roles", "الأدوار", "system", "page", 2, { page_key: "users_permissions" }),
   node("system_permissions", "الصلاحيات", "system", "page", 3, { page_key: "users_permissions" }),
-  node("audit_logs", "سجل العمليات", "system", "page", 4),
+
+  node("users_list", "قائمة المستخدمين", "system", "tab", 6, { page_key: "users_permissions" }),
+  node("roles", "إدارة الأدوار", "system", "tab", 7, { page_key: "users_permissions" }),
+  node("permissions_matrix", "مصفوفة الصلاحيات", "system", "tab", 8, { page_key: "users_permissions" }),
+  node("permission_templates", "قوالب الصلاحيات", "system", "tab", 9, { page_key: "users_permissions" }),
+  node("user_activity", "نشاط المستخدمين", "system", "tab", 10, { page_key: "users_permissions" }),
+  node("system_backup", "النسخ الاحتياطي", "system", "page", 11, { page_key: "settings" }),  node("audit_logs", "سجل العمليات", "system", "page", 4),
   node("notifications", "الإشعارات", "system", "page", 5),
   node("settings", "الإعدادات", "", "module", 2),
   node("settings_branches", "الفروع", "settings", "tab", 1, { page_key: "settings" }),
@@ -98,6 +112,20 @@ export const defaultPermissionTreeNodes = [
   node("ai_assistant", "المساعد الذكي", "", "module", 10),
   node("ai_chat", "المحادثة", "ai_assistant", "page", 1, { page_key: "ai_assistant" }),
   node("ai_reports_analysis", "تحليل التقارير", "ai_assistant", "page", 2, { page_key: "ai_assistant" }),
+
+  node("recruitment", "طلبات التوظيف", "", "module", 11),
+  node("recruitment_job_postings", "قائمة الوظائف", "recruitment", "tab", 1, { page_key: "recruitment" }),
+  node("recruitment_applications", "طلبات التوظيف", "recruitment", "tab", 2, { page_key: "recruitment" }),
+  node("recruitment_candidate_evaluations", "تقييم المرشحين", "recruitment", "tab", 3, { page_key: "recruitment" }),
+  node("recruitment_offer_templates", "خطاب عرض العمل", "recruitment", "tab", 4, { page_key: "recruitment" }),
+  node("recruitment_job_offers", "عروض العمل", "recruitment", "tab", 5, { page_key: "recruitment" }),
+  node("recruitment_contracts", "عقود العمل", "recruitment", "tab", 6, { page_key: "recruitment" }),
+  node("recruitment_manpower_plans", "خطة الاحتياجات الوظيفية", "recruitment", "tab", 7, { page_key: "recruitment" }),
+  node("recruitment_tests", "اختبارات التوظيف", "recruitment", "tab", 8, { page_key: "recruitment" }),
+  node("recruitment_probation_employees", "الموظفون تحت التجربة", "recruitment", "tab", 9, { page_key: "recruitment" }),
+  node("recruitment_welcome_messages", "رسائل الترحيب", "recruitment", "tab", 10, { page_key: "recruitment" }),
+  node("recruitment_reports", "تقارير التوظيف", "recruitment", "tab", 11, { page_key: "recruitment" }),
+  node("recruitment_settings", "إعدادات التوظيف", "recruitment", "tab", 12, { page_key: "recruitment" }),
 ];
 
 const blankPermission = (roleName, nodeKey) => ({

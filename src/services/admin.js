@@ -35,6 +35,7 @@ export const permissionPages = [
   "reports",
   "settings",
   "users_permissions",
+  "recruitment",
   "audit_logs",
 ];
 
@@ -151,6 +152,26 @@ const permissionToDb = (item = {}) => ({
   can_override_stock: item.can_override_stock === true,
 });
 
+const roleFromDb = (row = {}) => ({
+  role_id: row.role_id || `ROLE-${row.role_name || row.name || Date.now()}`,
+  role_name: row.role_name || row.name || "",
+  role_description: row.role_description || row.description || "",
+  is_system_role: row.is_system_role === true,
+  is_active: row.is_active !== false,
+  created_at: row.created_at || "",
+  updated_at: row.updated_at || "",
+});
+
+const roleToDb = (role = {}) => ({
+  role_id: String(role.role_id || `ROLE-${Date.now()}`).trim(),
+  role_name: String(role.role_name || role.name || "").trim(),
+  role_description: String(role.role_description || role.description || ""),
+  is_system_role: role.is_system_role === true,
+  is_active: role.is_active !== false,
+  created_at: role.created_at || new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+});
+
 const inventoryDefaults = {
   inventory_dashboard: ["can_view"],
   inventory_items: ["can_view", "can_create", "can_edit", "can_delete", "can_export", "can_print"],
@@ -190,6 +211,47 @@ export const defaultInventoryPermissions = () =>
   });
 
 export const adminService = {
+  async listRoles() {
+    try {
+      const rows = await supabase.select("app_roles", "select=*&order=role_name.asc");
+      const loaded = (rows || []).map(roleFromDb);
+      const missing = systemRoles.filter((name) => !loaded.some((role) => role.role_name === name)).map((name) => ({ role_id: `ROLE-${name}`, role_name: name, role_description: "", is_system_role: true, is_active: true }));
+      return [...loaded, ...missing];
+    } catch (error) {
+      console.error("App roles load/save error:", error);
+      return systemRoles.map((name) => ({ role_id: `ROLE-${name}`, role_name: name, role_description: "", is_system_role: true, is_active: true }));
+    }
+  },
+  async saveRole(role) {
+    try {
+      const payload = roleToDb(role);
+      if (!payload.role_name) throw new Error("يجب إدخال اسم الدور");
+      const { data, error } = await supabase.from("app_roles").upsert(payload, { onConflict: "role_id" }).select().single();
+      if (error) throw error;
+      return roleFromDb(data);
+    } catch (error) {
+      console.error("App roles load/save error:", error);
+      throw new Error("فشل حفظ الدور: " + error.message);
+    }
+  },
+  async deleteRole(role, users = []) {
+    try {
+      const row = roleFromDb(role);
+      if (row.is_system_role) throw new Error("لا يمكن حذف دور نظامي");
+      if (users.some((user) => user.role === row.role_name)) {
+        return this.saveRole({ ...row, is_active: false });
+      }
+      await supabase.request(`/rest/v1/app_roles?role_id=eq.${encodeURIComponent(row.role_id)}`, { method: "DELETE", prefer: "return=minimal" });
+      return null;
+    } catch (error) {
+      console.error("App roles load/save error:", error);
+      throw new Error("فشل حذف/تعطيل الدور: " + error.message);
+    }
+  },
+  async loadUsersByRole(roleName) {
+    const rows = await this.listUsers();
+    return rows.filter((user) => user.role === roleName);
+  },
   async loadEmployeesForUserDropdown() {
     try {
       const rows = await supabase.select("employees", "select=*&order=name.asc");

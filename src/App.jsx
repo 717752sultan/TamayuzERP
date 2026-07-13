@@ -42,6 +42,7 @@ import {
   Banknote,
   CircleDollarSign,
   UserRoundCog,
+  UserPlus,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -91,6 +92,9 @@ import { performanceCriteriaService, scoringTypes, defaultJobKpis } from "./serv
 import { kpiCalculationService } from "./services/kpiCalculation";
 import { aiAssistantService } from "./services/aiAssistant";
 import { treePermissionsService, permissionActions, dataScopes, departmentOptions, flattenPermissionTree, normalizeTreePermission } from "./services/treePermissions";
+import { recruitmentService, recruitmentTabs, generateWelcomeMessage } from "./services/recruitment";
+import { generateRecruitmentReports } from "./services/recruitmentReports";
+import { backupService } from "./services/backup";
 const icons = {
   dashboard: LayoutDashboard,
   employees: Users,
@@ -111,6 +115,7 @@ const icons = {
   performance_criteria: ClipboardList,
   performance_kpi_scores: Star,
   users_permissions: UserRoundCog,
+  recruitment: UserPlus,
   reports_center: FileBarChart,
   audit_logs: ClipboardList,
 };
@@ -124,6 +129,7 @@ const navItems = [
   ["performance_criteria", "معايير الأداء"],
   ["performance_kpi_scores", "درجات KPI"],
   ["users_permissions", "المستخدمون والصلاحيات"],
+  ["recruitment", "طلبات التوظيف"],
   ["reports_center", "مركز التقارير"],
   ["audit_logs", "سجل العمليات"],
   ...baseNavItems.slice(-2),
@@ -489,14 +495,52 @@ function LoadingScreen({ message = "جاري تحميل البيانات..." }) 
   );
 }
 const isAdminLikeRole = (role = "") =>
-  ["مدير النظام", "الإدارة العليا", "ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…", "ط§ظ„ط¥ط¯ط§ط±ط© ط§ظ„ط¹ظ„ظٹط§"].some((x) =>
+  ["مدير النظام", "الإدارة العليا", "ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…", "ط§ظ„ط¥ط¯ط§ط±ط© ط§ظ„ط¹ظ„ظٹط§", "ط¸â€¦ط·آ¯ط¸ظ¹ط·آ± ط·آ§ط¸â€‍ط¸â€ ط·آ¸ط·آ§ط¸â€¦", "ط·آ§ط¸â€‍ط·آ¥ط·آ¯ط·آ§ط·آ±ط·آ© ط·آ§ط¸â€‍ط·آ¹ط¸â€‍ط¸ظ¹ط·آ§"].some((x) =>
     String(role).includes(x),
   );
 const canByPermission = (permissions, role, pageKey, action = "can_view") => {
-  if (!permissions?.length) return true;
   if (isAdminLikeRole(role)) return true;
+  if (!permissions?.length) return action === "can_view" ? false : true;
   const row = permissions.find((p) => p.role === role && p.page_key === pageKey);
   return row ? row[action] === true : action === "can_view" ? false : true;
+};
+const dashboardPermissionNodes = ["dashboard_main", "dashboard_hr", "dashboard_inventory", "dashboard_performance", "dashboard_daily_operations", "dashboard_branches", "dashboard_financial"];
+const permissionNodeGroups = {
+  dashboard: dashboardPermissionNodes,
+  inventory: ["inventory_dashboard", "inventory_items", "inventory_suppliers", "inventory_purchase_requests", "inventory_purchase_orders", "inventory_receipts", "inventory_invoices", "inventory_issue_vouchers", "inventory_returns", "inventory_transfers", "inventory_adjustments", "inventory_stocktakes", "inventory_balances", "inventory_movements", "inventory_forecast", "inventory_reports", "inventory_settings"],
+  users_permissions: ["users_list", "roles", "permissions_matrix", "permission_templates", "user_activity", "system_users", "system_roles", "system_permissions"],
+  recruitment: ["recruitment_job_postings", "recruitment_applications", "recruitment_candidate_evaluations", "recruitment_offer_templates", "recruitment_job_offers", "recruitment_contracts", "recruitment_manpower_plans", "recruitment_tests", "recruitment_probation_employees", "recruitment_welcome_messages", "recruitment_reports", "recruitment_settings"],
+  settings: ["settings_branches", "settings_currencies", "settings_jobs", "settings_evaluations", "settings_incentives", "system_backup"],
+  employees: ["employees_list", "employee_profile", "guarantees"],
+  reports: ["reports_center", "reports_financial"],
+  reports_center: ["reports_center"],
+  shifts: ["shift_types", "shift_assignments", "shift_conflicts"],
+  daily_operations: ["daily_operations_entry", "daily_operations_approval", "daily_operations_reports"],
+  performance_criteria: ["performance_criteria"],
+  evaluations: ["evaluations"],
+  templates: ["templates"],
+  incentives: ["incentives_calculation", "incentives_approval"],
+  audit_logs: ["audit_logs"],
+  ai_assistant: ["ai_chat", "ai_reports_analysis"],
+};
+const hasTreePermission = (rows, role, nodeKey, action = "can_view") => {
+  if (isAdminLikeRole(role)) return true;
+  const row = rows?.find((p) => p.role_name === role && p.node_key === nodeKey);
+  return row ? row[action] === true : false;
+};
+const hasAnyPermission = (rows, role, nodeKeys = [], action = "can_view") =>
+  isAdminLikeRole(role) || nodeKeys.some((key) => hasTreePermission(rows, role, key, action));
+const pageAllowedByTree = (rows, role, pageKey, action = "can_view") => {
+  const nodes = permissionNodeGroups[pageKey] || [pageKey];
+  return hasAnyPermission(rows, role, nodes, action);
+};
+const getFirstAllowedPageForUser = (currentUser, treeRows = [], legacyRows = [], items = navItems) => {
+  const roleName = currentUser?.role || "";
+  const order = ["dashboard", "inventory", "users_permissions", "employees", "recruitment", "reports_center", ...items.map(([id]) => id)];
+  const allowed = [...new Set(order)].find((id) =>
+    pageAllowedByTree(treeRows, roleName, id, "can_view") || canByPermission(legacyRows, roleName, id === "reports_center" ? "reports_center" : id, "can_view")
+  );
+  return allowed || "";
 };
 export default function App() {
   const [logged, setLogged] = useState(
@@ -513,6 +557,8 @@ export default function App() {
 	    [dataLoading, setDataLoading] = useState(false),
 	    [dataError, setDataError] = useState(""),
 	    [appPermissions, setAppPermissions] = useState([]),
+	    [treeRolePermissions, setTreeRolePermissions] = useState([]),
+	    [permissionsLoading, setPermissionsLoading] = useState(false),
 	    [notifications, setNotifications] = useState([]),
 	    [notificationsOpen, setNotificationsOpen] = useState(false);
   const setEmployees = (updater) =>
@@ -595,6 +641,7 @@ export default function App() {
     const currentUser = JSON.parse(localStorage.getItem("ep_current_user") || "{}");
     const loadAdminData = async () => {
       try {
+        setPermissionsLoading(true);
         const [permissionsRows, notificationRows] = await Promise.all([
           adminService.listPermissions().catch((e) => {
             console.error("Supabase app_permissions load/save error:", e);
@@ -605,22 +652,31 @@ export default function App() {
             return [];
           }),
         ]);
+        const treeRows = await treePermissionsService.loadRoleNodePermissions(role).catch((e) => {
+          console.error("Supabase app_role_node_permissions load/save error:", e);
+          return [];
+        });
         if (!alive) return;
         setAppPermissions(permissionsRows);
+        setTreeRolePermissions(treeRows);
         setNotifications(notificationRows);
       } catch (e) {
         console.error("Supabase enterprise data load error:", e);
+      } finally {
+        if (alive) setPermissionsLoading(false);
       }
     };
     loadAdminData();
     const unsubPermissions = adminService.subscribePermissions(loadAdminData);
+    const unsubTreePermissions = supabase.subscribeToTable("app_role_node_permissions", loadAdminData);
     const unsubNotifications = notificationsService.subscribe(loadAdminData);
     return () => {
       alive = false;
       unsubPermissions?.();
+      unsubTreePermissions?.();
       unsubNotifications?.();
     };
-  }, [logged]);
+  }, [logged, role]);
   if (!logged)
     return (
       <Login
@@ -663,14 +719,20 @@ export default function App() {
         }}
       />
     );
-	  const roleMatrix = settings.rolePermissions?.[role] || {},
+	  const currentUser = JSON.parse(localStorage.getItem("ep_current_user") || "{}"),
+	    roleMatrix = settings.rolePermissions?.[role] || {},
 	    hasRoleMatrix = Object.keys(roleMatrix).length > 0,
-	    visibleNavItems = appPermissions.length
-	      ? navItems.filter(([id]) => canByPermission(appPermissions, role, id === "reports" ? "reports" : id, "can_view"))
-	      : hasRoleMatrix
-	        ? navItems.filter(([id]) => roleMatrix[id]?.view)
-	        : navItems,
-    title = navItems.find((x) => x[0] === page)?.[1],
+	    canNode = (nodeKey, action = "can_view") => hasTreePermission(treeRolePermissions, role, nodeKey, action),
+	    canPage = (pageKey, action = "can_view") => pageAllowedByTree(treeRolePermissions, role, pageKey, action) || canByPermission(appPermissions, role, pageKey, action),
+	    visibleNavItems = navItems.filter(([id]) => {
+	      if (id === "dashboard") return hasAnyPermission(treeRolePermissions, role, dashboardPermissionNodes, "can_view");
+	      if (treeRolePermissions.length) return pageAllowedByTree(treeRolePermissions, role, id, "can_view");
+	      if (appPermissions.length) return canByPermission(appPermissions, role, id === "reports" ? "reports" : id, "can_view");
+	      return hasRoleMatrix ? roleMatrix[id]?.view : isAdminLikeRole(role);
+	    }),
+	    firstAllowedPage = getFirstAllowedPageForUser({ ...currentUser, role }, treeRolePermissions, appPermissions, visibleNavItems),
+	    activePage = visibleNavItems.some(([id]) => id === page) ? page : firstAllowedPage,
+    title = navItems.find((x) => x[0] === activePage)?.[1],
     manager = settings.manager || defaultSettings.manager,
     initials = manager.name
       .split(" ")
@@ -686,9 +748,17 @@ export default function App() {
 	      settings,
 	      setSettings,
 	      role,
-	      currentUser: JSON.parse(localStorage.getItem("ep_current_user") || "{}"),
-	      can: (pageKey, action = "can_view") => canByPermission(appPermissions, role, pageKey, action),
+	      currentUser,
+	      can: (pageKey, action = "can_view") => canPage(pageKey, action),
+	      canNode,
 	    };
+  if (visibleNavItems.length && activePage && activePage !== page) {
+    setTimeout(() => setPage(activePage), 0);
+  }
+  if (permissionsLoading) return <LoadingScreen message="جاري تحميل الصلاحيات..." />;
+  if (!visibleNavItems.length) {
+    return <div className="grid min-h-screen place-items-center bg-slate-50 p-5" dir="rtl"><div className="panel max-w-xl p-6 text-center"><ShieldCheck className="mx-auto mb-3 text-brand-700" /><h2 className="text-xl font-extrabold">لا توجد صلاحيات مفعلة لهذا المستخدم</h2><button onClick={() => { localStorage.removeItem("ep_logged"); localStorage.removeItem("ep_role"); localStorage.removeItem("ep_current_user"); setLogged(false); }} className="btn-primary mt-5">تسجيل الخروج</button></div></div>;
+  }
   return (
     <div className="min-h-screen" dir="rtl">
       {sidebar && (
@@ -727,11 +797,11 @@ export default function App() {
                   setPage(id);
                   setSidebar(false);
                 }}
-                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold ${page === id ? "bg-brand-700 text-white" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}
+                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold ${activePage === id ? "bg-brand-700 text-white" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}
               >
                 <I size={19} />
                 {label}
-                {page === id && <ChevronLeft className="mr-auto" size={16} />}
+                {activePage === id && <ChevronLeft className="mr-auto" size={16} />}
               </button>
             );
           })}
@@ -828,29 +898,30 @@ export default function App() {
           </div>
         </header>
         <main className="p-4 md:p-7">
-          {page === "dashboard" && <Dashboard {...p} />}{" "}
-          {page === "employees" && <EnhancedEmployees {...p} />}{" "}
-          {page === "templates" && <EnhancedTemplates {...p} />}{" "}
-          {page === "evaluations" && <EnhancedEvaluations {...p} />}{" "}
-          {page === "productivity" && <EnhancedProductivity {...p} />}{" "}
-          {page === "discipline" && <EnhancedDiscipline {...p} />}{" "}
-          {page === "incentives" && <EnhancedIncentives {...p} />}{" "}
-	          {page === "top" && <EnhancedTopEmployees {...p} />}{" "}
-	          {page === "plans" && <EnhancedPlans {...p} />}{" "}
-	          {page === "guarantees" && <EmployeeGuaranteesPage {...p} />}{" "}
-	          {page === "overtime" && <OvertimePage {...p} />}{" "}
-	          {page === "shifts" && <EmployeeShiftsPage {...p} />}{" "}
-	          {page === "inventory" && <InventoryManagementPage {...p} />}{" "}
-	          {page === "daily_operations" && <DailyOperationsPage {...p} />}{" "}
-	          {page === "performance_criteria" && <PerformanceCriteriaPage {...p} />}{" "}
-	          {page === "performance_kpi_scores" && <KpiScoresPage {...p} />}{" "}
-	          {page === "users_permissions" && <UsersPermissionsPage {...p} />}{" "}
-	          {page === "reports_center" && <EnterpriseReportsCenter {...p} />}{" "}
-	          {page === "audit_logs" && <AuditLogsPage {...p} />}{" "}
-	          {page === "reports" && <EnhancedReports {...p} />}{" "}
-	          {page === "settings" && <SettingsPage {...p} />}
+          {activePage === "dashboard" && <Dashboard {...p} />}{" "}
+          {activePage === "employees" && <EnhancedEmployees {...p} />}{" "}
+          {activePage === "templates" && <EnhancedTemplates {...p} />}{" "}
+          {activePage === "evaluations" && <EnhancedEvaluations {...p} />}{" "}
+          {activePage === "productivity" && <EnhancedProductivity {...p} />}{" "}
+          {activePage === "discipline" && <EnhancedDiscipline {...p} />}{" "}
+          {activePage === "incentives" && <EnhancedIncentives {...p} />}{" "}
+	          {activePage === "top" && <EnhancedTopEmployees {...p} />}{" "}
+	          {activePage === "plans" && <EnhancedPlans {...p} />}{" "}
+	          {activePage === "guarantees" && <EmployeeGuaranteesPage {...p} />}{" "}
+	          {activePage === "overtime" && <OvertimePage {...p} />}{" "}
+	          {activePage === "shifts" && <EmployeeShiftsPage {...p} />}{" "}
+	          {activePage === "inventory" && <InventoryManagementPage {...p} />}{" "}
+	          {activePage === "daily_operations" && <DailyOperationsPage {...p} />}{" "}
+	          {activePage === "performance_criteria" && <PerformanceCriteriaPage {...p} />}{" "}
+	          {activePage === "performance_kpi_scores" && <KpiScoresPage {...p} />}{" "}
+	          {activePage === "users_permissions" && <UsersPermissionsPage {...p} />}{" "}
+	          {activePage === "recruitment" && <RecruitmentPage {...p} />}{" "}
+	          {activePage === "reports_center" && <EnterpriseReportsCenter {...p} />}{" "}
+	          {activePage === "audit_logs" && <AuditLogsPage {...p} />}{" "}
+	          {activePage === "reports" && <EnhancedReports {...p} />}{" "}
+	          {activePage === "settings" && <SettingsPage {...p} />}
         </main>
-        <AIAssistantWidget currentUser={p.currentUser} page={page} />
+        <AIAssistantWidget currentUser={p.currentUser} page={activePage} />
       </div>
     </div>
   );
@@ -2619,6 +2690,8 @@ function SettingsPage({
   employees,
   setEmployees,
   setEvaluations,
+  currentUser,
+  canNode,
 }) {
   const tabs = [
     ["مدير النظام", UserRoundCog],
@@ -2753,24 +2826,15 @@ function SettingsPage({
         : tab === "الوظائف"
           ? "اسم الوظيفة"
           : "اسم معيار التقييم";
-  const exportBackup = () => {
-    const backup = {
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      settings,
-      employees,
-      evaluations,
-      objections: settings.objections || [],
-    };
-    const blob = new Blob([JSON.stringify(backup, null, 2)], {
-      type: "application/json;charset=utf-8",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `نسخة-احتياطية-${new Date().toISOString().slice(0, 10)}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
+  const exportBackup = async (type = "full") => {
+    if (canNode?.("system_backup", "can_export") === false) return alert("لا تملك صلاحية تصدير النسخ الاحتياطية");
+    try {
+      const backup = await backupService.createBackup({ type, createdBy: currentUser?.username || "" });
+      const emailResult = await backupService.sendBackupToEmail(backup);
+      alert(emailResult.sent ? "تم إنشاء النسخة الاحتياطية وإرسالها للبريد." : emailResult.message);
+    } catch (error) {
+      alert(error.message);
+    }
   };
   const importBackup = (event) => {
     const file = event.target.files?.[0];
@@ -5161,7 +5225,67 @@ function AIAssistantWidget({ currentUser, page }) {
   return <div className="fixed bottom-5 left-5 z-40 no-print"><button onClick={() => setOpen(!open)} className="grid h-14 w-14 place-items-center rounded-full bg-brand-700 text-white shadow-xl"><MessageSquareWarning /></button>{open && <div className="absolute bottom-16 left-0 w-[360px] overflow-hidden rounded-2xl border bg-white shadow-2xl"><div className="bg-brand-700 p-4 text-white"><div className="flex"><b>المساعد الذكي</b><button onClick={() => setMessages([])} className="mr-auto text-xs">مسح</button></div><p className="mt-1 text-xs opacity-80">يعمل حاليًا بوضع التحليل الداخلي بدون اتصال خارجي.</p></div><div className="h-80 space-y-2 overflow-y-auto p-3">{!messages.length && <div className="space-y-2">{suggestions.map((s) => <button key={s} onClick={() => send(s)} className="w-full rounded-xl bg-slate-50 p-2 text-right text-xs">{s}</button>)}</div>}{messages.map((m, i) => <div key={i} className={`rounded-xl p-3 text-sm ${m.role === "user" ? "bg-brand-50 text-brand-900" : "bg-slate-50"}`}>{m.message}</div>)}{loading && <p className="text-xs text-slate-400">المساعد يكتب...</p>}</div><div className="flex gap-2 border-t p-3"><input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} className="field" placeholder="اكتب سؤالك..." /><button onClick={() => send()} className="btn-primary">إرسال</button></div></div>}</div>;
 }
 
-function UserEditorModal({ dialog, setDialog, saveUser, employeeOptions, selectEmployee }) {
+﻿const recruitmentFieldSets = {
+  job_postings: ["job_title", "department", "branch", "job_type", "vacancies_count", "salary_range_from", "salary_range_to", "requirements", "responsibilities", "status", "opened_at", "closed_at", "notes"],
+  applications: ["application_number", "job_posting_id", "job_title", "applicant_name", "phone", "email", "address", "qualification", "specialization", "experience_years", "previous_employer", "expected_salary", "application_source", "cv_url", "status", "notes"],
+  candidate_evaluations: ["application_id", "applicant_name", "job_title", "evaluator_name", "evaluation_date", "appearance_score", "communication_score", "technical_score", "experience_score", "culture_fit_score", "honesty_score", "pressure_handling_score", "computer_skills_score", "customer_service_score", "recommendation", "strengths", "weaknesses", "notes"],
+  offer_templates: ["template_name", "job_title", "branch", "salary", "allowances", "probation_period", "working_hours", "start_date", "offer_valid_until", "terms", "template_body", "is_active"],
+  job_offers: ["offer_number", "application_id", "applicant_name", "job_title", "branch", "salary", "allowances", "start_date", "probation_period", "status", "sent_at", "accepted_at", "rejected_at", "notes"],
+  contracts: ["contract_number", "offer_id", "application_id", "applicant_name", "employee_name", "job_title", "branch", "salary", "contract_start_date", "contract_end_date", "probation_period", "status", "contract_body"],
+  manpower_plans: ["year", "month", "branch", "department", "job_title", "required_count", "current_count", "priority", "reason", "status", "approved_by", "notes"],
+  tests: ["test_name", "job_title", "test_type", "max_score", "pass_score", "instructions", "is_active"],
+  welcome_messages: ["employee_id", "employee_name", "job", "branch", "start_date", "message_template", "whatsapp_message", "status"],
+};
+const recruitmentLabels = { job_title: "الوظيفة", department: "القسم", branch: "الفرع", job_type: "نوع الوظيفة", vacancies_count: "عدد الشواغر", salary_range_from: "الراتب من", salary_range_to: "الراتب إلى", requirements: "المتطلبات", responsibilities: "المسؤوليات", status: "الحالة", opened_at: "تاريخ الفتح", closed_at: "تاريخ الإغلاق", notes: "ملاحظات", application_number: "رقم الطلب", job_posting_id: "الوظيفة", applicant_name: "اسم المرشح", phone: "الهاتف", email: "البريد", address: "العنوان", qualification: "المؤهل", specialization: "التخصص", experience_years: "سنوات الخبرة", previous_employer: "جهة العمل السابقة", expected_salary: "الراتب المتوقع", application_source: "مصدر الطلب", cv_url: "رابط CV", evaluator_name: "المقيّم", evaluation_date: "تاريخ التقييم", appearance_score: "المظهر", communication_score: "التواصل", technical_score: "الفني", experience_score: "الخبرة", culture_fit_score: "ملاءمة الثقافة", honesty_score: "الأمانة", pressure_handling_score: "تحمل الضغط", computer_skills_score: "الحاسب", customer_service_score: "خدمة العملاء", recommendation: "التوصية", strengths: "نقاط القوة", weaknesses: "نقاط الضعف", template_name: "اسم القالب", salary: "الراتب", allowances: "البدلات", probation_period: "فترة التجربة", working_hours: "ساعات العمل", start_date: "تاريخ المباشرة", offer_valid_until: "صلاحية العرض", terms: "الشروط", template_body: "نص الخطاب", is_active: "نشط", offer_number: "رقم العرض", sent_at: "تاريخ الإرسال", accepted_at: "تاريخ القبول", rejected_at: "تاريخ الرفض", contract_number: "رقم العقد", offer_id: "العرض", employee_name: "اسم الموظف", contract_start_date: "بداية العقد", contract_end_date: "نهاية العقد", contract_body: "نص العقد", year: "السنة", month: "الشهر", required_count: "العدد المطلوب", current_count: "العدد الحالي", priority: "الأولوية", reason: "السبب", approved_by: "اعتمد بواسطة", test_name: "اسم الاختبار", test_type: "نوع الاختبار", max_score: "الدرجة القصوى", pass_score: "درجة النجاح", instructions: "التعليمات", employee_id: "رقم الموظف", job: "الوظيفة", message_template: "قالب الرسالة", whatsapp_message: "رسالة واتساب" };
+const recruitmentPrimary = { job_postings: "job_posting_id", applications: "application_id", candidate_evaluations: "evaluation_id", offer_templates: "template_id", job_offers: "offer_id", contracts: "contract_id", manpower_plans: "manpower_plan_id", tests: "test_id", welcome_messages: "welcome_message_id" };
+
+function RecruitmentPage({ employees, currentUser, canNode }) {
+  const visibleTabs = recruitmentTabs.filter(([, , nodeKey]) => canNode?.(nodeKey, "can_view") !== false);
+  const [tab, setTab] = useState(visibleTabs[0]?.[0] || "job_postings");
+  const [rows, setRows] = useState({});
+  const [probation, setProbation] = useState([]);
+  const [dialog, setDialog] = useState(null);
+  const [filters, setFilters] = useState({ q: "", status: "all", branch: "all" });
+  const load = async () => {
+    const entries = await Promise.all(["job_postings", "applications", "candidate_evaluations", "offer_templates", "job_offers", "contracts", "manpower_plans", "tests", "welcome_messages"].map((type) => recruitmentService.list(type).then((data) => [type, data]).catch(() => [type, []])));
+    setRows(Object.fromEntries(entries));
+    setProbation(await recruitmentService.loadProbationEmployees().catch(() => employees.filter((e) => e.status === "تحت التجربة")));
+  };
+  useEffect(() => { load(); }, []);
+  useEffect(() => { if (visibleTabs.length && !visibleTabs.some(([id]) => id === tab)) setTab(visibleTabs[0][0]); }, [visibleTabs.map((x) => x[0]).join(","), tab]);
+  if (!visibleTabs.length) return <div className="panel p-6 text-center font-bold text-slate-500">لا توجد صلاحيات مفعلة لوحدة التوظيف.</div>;
+  const nodeKey = visibleTabs.find(([id]) => id === tab)?.[2] || "";
+  const canCreate = canNode?.(nodeKey, "can_create") !== false;
+  const canEdit = canNode?.(nodeKey, "can_edit") !== false;
+  const canDelete = canNode?.(nodeKey, "can_delete") !== false;
+  const tableRows = tab === "probation_employees" ? probation : rows[tab] || [];
+  const filtered = tableRows.filter((row) => (!filters.q || JSON.stringify(row).includes(filters.q)) && (filters.status === "all" || row.status === filters.status) && (filters.branch === "all" || row.branch === filters.branch));
+  const openAdd = () => {
+    if (tab === "reports" || tab === "settings" || tab === "probation_employees") return;
+    const fields = recruitmentFieldSets[tab] || [];
+    setDialog({ type: tab, created_by: currentUser?.username || "", ...Object.fromEntries(fields.map((key) => [key, ""])) });
+  };
+  const save = async (e) => {
+    e.preventDefault();
+    try {
+      const saved = await recruitmentService.save(dialog.type, dialog);
+      setRows((all) => ({ ...all, [dialog.type]: (all[dialog.type] || []).some((r) => r[recruitmentPrimary[dialog.type]] === saved[recruitmentPrimary[dialog.type]]) ? all[dialog.type].map((r) => r[recruitmentPrimary[dialog.type]] === saved[recruitmentPrimary[dialog.type]] ? saved : r) : [saved, ...(all[dialog.type] || [])] }));
+      setDialog(null);
+    } catch (error) { alert(error.message); }
+  };
+  const remove = async (row) => {
+    if (!confirm("هل تريد حذف السجل؟")) return;
+    try {
+      await recruitmentService.remove(tab, row[recruitmentPrimary[tab]]);
+      setRows((all) => ({ ...all, [tab]: (all[tab] || []).filter((r) => r[recruitmentPrimary[tab]] !== row[recruitmentPrimary[tab]]) }));
+    } catch (error) { alert(error.message); }
+  };
+  const reports = generateRecruitmentReports({ jobPostings: rows.job_postings || [], applications: rows.applications || [], evaluations: rows.candidate_evaluations || [], offers: rows.job_offers || [], contracts: rows.contracts || [], plans: rows.manpower_plans || [], probationEmployees: probation });
+  const cols = tab === "probation_employees" ? ["id", "name", "job", "branch", "hireDate", "manager"] : (recruitmentFieldSets[tab] || ["job_title", "applicant_name", "branch", "status"]).slice(0, 7);
+  return <div className="space-y-5"><PageHead title="طلبات التوظيف" desc="إدارة دورة التوظيف من الاحتياج حتى التعيين ورسائل الترحيب" action={<button disabled={!canCreate} onClick={openAdd} className="btn-primary"><Plus size={18} /> إضافة</button>} /><div className="panel flex flex-wrap gap-2 p-3">{visibleTabs.map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === id ? "bg-brand-700 text-white" : "bg-slate-50 text-slate-600"}`}>{label}</button>)}</div>{tab === "reports" ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{Object.entries(reports).map(([key, report]) => <div key={key} className="panel p-4"><h3 className="font-extrabold">{report.title}</h3><p className="mt-2 text-sm text-slate-500">عدد السجلات: {report.rows.length}</p><div className="mt-4 flex gap-2"><button onClick={() => exportExcel(report.rows, report.title)} className="btn-secondary">Excel</button><button onClick={() => printDocument(report.title, rowsToReportHtml(report.title, report.rows, []))} className="btn-primary">طباعة</button></div></div>)}</div> : <><div className="panel flex flex-wrap gap-3 p-4"><input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="بحث..." /><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[180px]"><option value="all">كل الحالات</option>{[...new Set(tableRows.map((r) => r.status).filter(Boolean))].map((s) => <option key={s}>{s}</option>)}</select><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[180px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><button onClick={() => exportExcel(filtered, "طلبات التوظيف")} className="btn-secondary">Excel</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr>{cols.map((c) => <th key={c}>{recruitmentLabels[c] || c}</th>)}<th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((row, i) => <tr key={row[recruitmentPrimary[tab]] || row.id || i}>{cols.map((c) => <td key={c}>{String(row[c] ?? "")}</td>)}<td><Status>{row.status || row.evaluation_status || row.recommendation || "—"}</Status></td><td><button disabled={!canEdit || tab === "probation_employees"} onClick={() => setDialog({ type: tab, ...row })} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canDelete || tab === "probation_employees"} onClick={() => remove(row)} className="p-2 text-red-600"><Trash2 size={16} /></button>{tab === "contracts" && <button onClick={() => recruitmentService.convertContractToEmployee(row).then(() => alert("تم تحويل المرشح إلى موظف")).catch((e) => alert(e.message))} className="p-2 text-green-700">تعيين</button>}{tab === "welcome_messages" && <button onClick={() => navigator.clipboard?.writeText(row.whatsapp_message || row.message_template || "")} className="p-2 text-slate-600">نسخ</button>}</td></tr>)}</tbody></table></div></div></>}{dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="بيانات التوظيف" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3">{(recruitmentFieldSets[dialog.type] || []).map((key) => <Label key={key} t={recruitmentLabels[key] || key}>{key.includes("body") || key.includes("notes") || key.includes("requirements") || key.includes("responsibilities") || key.includes("message") || key.includes("terms") || key.includes("instructions") ? <textarea value={dialog[key] || ""} onChange={(e) => setDialog({ ...dialog, [key]: e.target.value })} className="field mt-2 !h-auto py-3" /> : key === "is_active" ? <select value={String(dialog[key] !== false)} onChange={(e) => setDialog({ ...dialog, [key]: e.target.value === "true" })} className="field mt-2"><option value="true">نعم</option><option value="false">لا</option></select> : <input type={key.includes("date") || key.endsWith("_at") ? "date" : key.includes("score") || key.includes("salary") || key.includes("count") || key.includes("year") || key.includes("month") ? "number" : "text"} value={dialog[key] || ""} onChange={(e) => setDialog({ ...dialog, [key]: e.target.value })} onBlur={() => dialog.type === "welcome_messages" && setDialog((d) => ({ ...d, whatsapp_message: d.whatsapp_message || generateWelcomeMessage(d) }))} className="field mt-2" />}</Label>)}</div><DialogActions close={() => setDialog(null)} /></form></div>}</div>;
+}
+
+function UserEditorModal({ dialog, setDialog, saveUser, employeeOptions, selectEmployee, roles = systemRoles }) {
   const isAdmin = String(dialog.role || "").includes("مدير النظام") || String(dialog.role || "").includes("ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…");
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
@@ -5185,7 +5309,7 @@ function UserEditorModal({ dialog, setDialog, saveUser, employeeOptions, selectE
           <Label t="الرقم الوظيفي"><input readOnly value={dialog.employee_id || ""} className="field mt-2 bg-slate-50" /></Label>
           <Label t="اسم المستخدم"><input required value={dialog.username || ""} onChange={(e) => setDialog({ ...dialog, username: e.target.value })} className="field mt-2" /></Label>
           <Label t="كلمة المرور"><input required type="password" value={dialog.password || ""} onChange={(e) => setDialog({ ...dialog, password: e.target.value })} className="field mt-2" /></Label>
-          <Label t="الدور"><select value={dialog.role || "الموظف"} onChange={(e) => setDialog({ ...dialog, role: e.target.value })} className="field mt-2">{systemRoles.map((role) => <option key={role}>{role}</option>)}</select></Label>
+          <Label t="الدور"><select value={dialog.role || "الموظف"} onChange={(e) => setDialog({ ...dialog, role: e.target.value })} className="field mt-2">{roles.map((role) => <option key={role}>{role}</option>)}</select></Label>
           <Label t="الفرع"><input readOnly={!isAdmin} value={dialog.branch || ""} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className={`field mt-2 ${isAdmin ? "" : "bg-slate-50"}`} /></Label>
           <Label t="الوظيفة"><input readOnly={!isAdmin} value={dialog.job || ""} onChange={(e) => setDialog({ ...dialog, job: e.target.value })} className={`field mt-2 ${isAdmin ? "" : "bg-slate-50"}`} /></Label>
           <Label t="البريد الإلكتروني"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label>
@@ -5339,8 +5463,35 @@ function TreePermissionsPanel({ selectedRole, setSelectedRole, treeNodes, treePe
   );
 }
 
+function RoleManagementPanel({ roles, users, canEdit, onSaveRole, onDeleteRole, onCopyPermissions }) {
+  const [q, setQ] = useState("");
+  const [dialog, setDialog] = useState(null);
+  const [copySource, setCopySource] = useState("");
+  const filtered = roles.filter((role) => !q || role.role_name.includes(q) || role.role_description.includes(q));
+  return (
+    <div className="panel p-4 xl:col-span-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <h3 className="text-lg font-extrabold">إدارة الأدوار</h3>
+        <input value={q} onChange={(e) => setQ(e.target.value)} className="field mr-auto max-w-[260px]" placeholder="بحث في الأدوار..." />
+        <button disabled={!canEdit} onClick={() => setDialog({ role_id: `ROLE-${Date.now()}`, role_name: "", role_description: "", is_system_role: false, is_active: true })} className="btn-primary"><Plus size={17} /> إضافة دور</button>
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead><tr><th>الدور</th><th>الوصف</th><th>عدد المستخدمين</th><th>الحالة</th><th>نوع الدور</th><th></th></tr></thead>
+          <tbody>{filtered.map((role) => {
+            const count = users.filter((u) => u.role === role.role_name).length;
+            return <tr key={role.role_id}><td>{role.role_name}</td><td>{role.role_description}</td><td>{count}</td><td><Status>{role.is_active ? "نشط" : "معطل"}</Status></td><td>{role.is_system_role ? "نظامي" : "مخصص"}</td><td><button disabled={!canEdit} onClick={() => setDialog(role)} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canEdit} onClick={() => onDeleteRole(role)} className="p-2 text-red-600">{count ? "تعطيل" : "حذف"}</button><select value={copySource} onChange={(e) => setCopySource(e.target.value)} className="field mx-1 max-w-[160px]"><option value="">نسخ من...</option>{roles.filter((r) => r.role_name !== role.role_name).map((r) => <option key={r.role_id}>{r.role_name}</option>)}</select><button disabled={!copySource} onClick={() => onCopyPermissions(copySource, role.role_name)} className="btn-secondary">نسخ</button></td></tr>;
+          })}</tbody>
+        </table>
+      </div>
+      {dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={(e) => { e.preventDefault(); onSaveRole(dialog).then(() => setDialog(null)); }} className="panel w-full max-w-2xl p-6"><DialogTitle title="بيانات الدور" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-2"><Label t="اسم الدور"><input required disabled={dialog.is_system_role} value={dialog.role_name} onChange={(e) => setDialog({ ...dialog, role_name: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label><Label t="الوصف"><textarea value={dialog.role_description || ""} onChange={(e) => setDialog({ ...dialog, role_description: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}
+    </div>
+  );
+}
+
 function UsersPermissionsPage({ employees, can }) {
   const [users, setUsers] = useState([]);
+  const [roleRows, setRoleRows] = useState([]);
   const [employeeOptions, setEmployeeOptions] = useState([]);
   const [permissions, setPermissions] = useState([]);
   const [treeNodes, setTreeNodes] = useState([]);
@@ -5356,14 +5507,16 @@ function UsersPermissionsPage({ employees, can }) {
     setLoading(true);
     setError("");
     try {
-      const [u, p, employeeRows] = await Promise.all([
+      const [u, p, employeeRows, roleList] = await Promise.all([
         adminService.listUsers(),
         adminService.listPermissions(),
         adminService.loadEmployeesForUserDropdown().catch(() => employees || []),
+        adminService.listRoles(),
       ]);
       setUsers(u);
       setPermissions(p);
       setEmployeeOptions(employeeRows);
+      setRoleRows(roleList);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -5394,6 +5547,7 @@ function UsersPermissionsPage({ employees, can }) {
     return () => { active = false; };
   }, [selectedRole]);
   const branchOptions = [...new Set([...(employeeOptions || []).map((e) => e.branch), ...users.map((u) => u.branch), ...branches].filter(Boolean))];
+  const roleOptions = [...new Set([...(roleRows || []).filter((r) => r.is_active !== false).map((r) => r.role_name), ...systemRoles])];
   const filtered = users.filter((u) =>
     (!filters.q || (u.name || u.employee_name || u.username || "").includes(filters.q) || u.username.includes(filters.q) || u.employee_id.includes(filters.q) || u.branch.includes(filters.q) || u.role.includes(filters.q)) &&
     (filters.role === "all" || u.role === filters.role) &&
@@ -5543,7 +5697,7 @@ function UsersPermissionsPage({ employees, can }) {
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
       <div className="panel flex flex-wrap gap-3 p-4">
         <input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="بحث بالاسم أو اسم المستخدم أو الرقم..." />
-        <select value={filters.role} onChange={(e) => setFilters({ ...filters, role: e.target.value })} className="field max-w-[190px]"><option value="all">كل الأدوار</option>{systemRoles.map((r) => <option key={r}>{r}</option>)}</select>
+        <select value={filters.role} onChange={(e) => setFilters({ ...filters, role: e.target.value })} className="field max-w-[190px]"><option value="all">كل الأدوار</option>{roleOptions.map((r) => <option key={r}>{r}</option>)}</select>
         <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select>
         <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option><option value="true">نشط</option><option value="false">معطل</option></select>
       </div>
@@ -5558,7 +5712,7 @@ function UsersPermissionsPage({ employees, can }) {
           treeNodes={treeNodes}
           treePermissions={treePermissions}
           setTreePermissions={setTreePermissions}
-          roles={systemRoles}
+          roles={roleOptions}
           users={users}
           branchOptions={branchOptions}
           canEdit={canEdit}
@@ -5568,7 +5722,8 @@ function UsersPermissionsPage({ employees, can }) {
           onCopy={copyTreePermissions}
         />
       </div>
-      {dialog && <UserEditorModal dialog={dialog} setDialog={setDialog} saveUser={saveUser} employeeOptions={employeeOptions} selectEmployee={selectEmployee} />}
+      <RoleManagementPanel roles={roleRows.length ? roleRows : roleOptions.map((role_name) => ({ role_id: `ROLE-${role_name}`, role_name, role_description: "", is_system_role: systemRoles.includes(role_name), is_active: true }))} users={users} canEdit={canEdit} onSaveRole={async (roleRow) => { const saved = await adminService.saveRole(roleRow); setRoleRows((list) => list.some((r) => r.role_id === saved.role_id) ? list.map((r) => r.role_id === saved.role_id ? saved : r) : [...list, saved]); }} onDeleteRole={async (roleRow) => { const saved = await adminService.deleteRole(roleRow, users); setRoleRows((list) => saved ? list.map((r) => r.role_id === saved.role_id ? saved : r) : list.filter((r) => r.role_id !== roleRow.role_id)); }} onCopyPermissions={async (source, target) => { await treePermissionsService.copyRolePermissions(source, target); alert("تم نسخ صلاحيات الدور"); }} />
+      {dialog && <UserEditorModal dialog={dialog} setDialog={setDialog} saveUser={saveUser} employeeOptions={employeeOptions} selectEmployee={selectEmployee} roles={roleOptions} />}
       {false && dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={saveUser} className="panel w-full max-w-3xl p-6"><div className="mb-5 flex"><h3 className="text-xl font-extrabold">بيانات المستخدم</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div><div className="grid gap-4 md:grid-cols-2"><Label t="ربط الموظف"><select value={dialog.employee_id} onChange={(e) => selectEmployee(e.target.value)} className="field mt-2"><option value="">بدون ربط</option>{employeeOptions.map((e) => <option key={e.id} value={e.id}>{e.name} - {e.id} - {e.branch} - {e.job}</option>)}</select></Label><Label t="اسم الموظف"><input readOnly value={dialog.employee_name || dialog.name || ""} className="field mt-2 bg-slate-50" /></Label><Label t="اسم المستخدم"><input required value={dialog.username} onChange={(e) => setDialog({ ...dialog, username: e.target.value })} className="field mt-2" /></Label><Label t="كلمة المرور"><input required type="password" value={dialog.password || ""} onChange={(e) => setDialog({ ...dialog, password: e.target.value })} className="field mt-2" /></Label><Label t="الدور"><select value={dialog.role} onChange={(e) => setDialog({ ...dialog, role: e.target.value })} className="field mt-2">{systemRoles.map((r) => <option key={r}>{r}</option>)}</select></Label><Label t="الفرع"><input readOnly value={dialog.branch || ""} className="field mt-2 bg-slate-50" /></Label><Label t="الوظيفة"><input readOnly value={dialog.job || ""} className="field mt-2 bg-slate-50" /></Label><Label t="البريد الإلكتروني"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label><Label t="الهاتف"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label></div><div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ البيانات</button></div></form></div>}
     </div>
   );
