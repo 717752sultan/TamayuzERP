@@ -5043,6 +5043,43 @@ function DialogActions({ close }) {
   return <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={close} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ البيانات</button></div>;
 }
 
+function UserEditorModal({ dialog, setDialog, saveUser, employeeOptions, selectEmployee }) {
+  const isAdmin = String(dialog.role || "").includes("مدير النظام") || String(dialog.role || "").includes("ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…");
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+      <form onSubmit={saveUser} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6">
+        <DialogTitle title="بيانات المستخدم" close={() => setDialog(null)} />
+        <div className="grid gap-4 md:grid-cols-2">
+          <Label t="اسم الموظف">
+            <select value={dialog.employee_id || ""} onChange={(e) => selectEmployee(e.target.value)} className="field mt-2">
+              <option value="">اختر الموظف</option>
+              {employeeOptions.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.name} - {emp.id} - {emp.branch || "بدون فرع"} - {emp.job || "بدون وظيفة"}
+                </option>
+              ))}
+            </select>
+            {!employeeOptions.length && <p className="mt-2 rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-700">لا توجد بيانات موظفين، يرجى إضافة موظفين أولًا</p>}
+          </Label>
+          <Label t="اسم الموظف المحدد">
+            <input readOnly={!isAdmin} value={dialog.employee_name || dialog.name || ""} onChange={(e) => setDialog({ ...dialog, employee_name: e.target.value, name: e.target.value })} className={`field mt-2 ${isAdmin ? "" : "bg-slate-50"}`} />
+          </Label>
+          <Label t="الرقم الوظيفي"><input readOnly value={dialog.employee_id || ""} className="field mt-2 bg-slate-50" /></Label>
+          <Label t="اسم المستخدم"><input required value={dialog.username || ""} onChange={(e) => setDialog({ ...dialog, username: e.target.value })} className="field mt-2" /></Label>
+          <Label t="كلمة المرور"><input required type="password" value={dialog.password || ""} onChange={(e) => setDialog({ ...dialog, password: e.target.value })} className="field mt-2" /></Label>
+          <Label t="الدور"><select value={dialog.role || "الموظف"} onChange={(e) => setDialog({ ...dialog, role: e.target.value })} className="field mt-2">{systemRoles.map((role) => <option key={role}>{role}</option>)}</select></Label>
+          <Label t="الفرع"><input readOnly={!isAdmin} value={dialog.branch || ""} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className={`field mt-2 ${isAdmin ? "" : "bg-slate-50"}`} /></Label>
+          <Label t="الوظيفة"><input readOnly={!isAdmin} value={dialog.job || ""} onChange={(e) => setDialog({ ...dialog, job: e.target.value })} className={`field mt-2 ${isAdmin ? "" : "bg-slate-50"}`} /></Label>
+          <Label t="البريد الإلكتروني"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label>
+          <Label t="الهاتف"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label>
+          <Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label>
+        </div>
+        <DialogActions close={() => setDialog(null)} />
+      </form>
+    </div>
+  );
+}
+
 function UsersPermissionsPage({ employees, can }) {
   const [users, setUsers] = useState([]);
   const [employeeOptions, setEmployeeOptions] = useState([]);
@@ -5091,7 +5128,9 @@ function UsersPermissionsPage({ employees, can }) {
   const saveUser = async (e) => {
     e.preventDefault();
     if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
-    if (!dialog.username) return alert("اسم المستخدم مطلوب");
+    if (!dialog.employee_id && !String(dialog.role || "").includes("مدير النظام") && !String(dialog.role || "").includes("ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…")) return alert("يجب اختيار الموظف");
+    if (!dialog.username) return alert("يجب إدخال اسم المستخدم");
+    if (!dialog.role) return alert("يجب تحديد الدور");
     try {
       const selectedEmployee = employeeOptions.find((employee) => employee.id === dialog.employee_id || employee.employee_id === dialog.employee_id);
       const saved = await adminService.saveUser(dialog, selectedEmployee);
@@ -5159,7 +5198,7 @@ function UsersPermissionsPage({ employees, can }) {
   };
   return (
     <div className="space-y-5">
-      <PageHead title="المستخدمون والصلاحيات" desc="إدارة مستخدمي النظام ومصفوفة صلاحيات الأدوار" action={<button disabled={!canEdit} onClick={() => setDialog({ user_id: `USR-${Date.now()}`, employee_id: "", employee_name: "", username: "", role: "الموظف", branch: "", is_active: true })} className="btn-primary"><Plus size={18} /> إضافة مستخدم</button>} />
+      <PageHead title="المستخدمون والصلاحيات" desc="إدارة مستخدمي النظام ومصفوفة صلاحيات الأدوار" action={<button disabled={!canEdit} onClick={() => setDialog({ user_id: `USR-${Date.now()}`, employee_id: "", employee_name: "", username: "", password: "", role: "الموظف", branch: "", job: "", email: "", phone: "", is_active: true })} className="btn-primary"><Plus size={18} /> إضافة مستخدم</button>} />
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
       <div className="panel flex flex-wrap gap-3 p-4">
         <input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="بحث بالاسم أو اسم المستخدم أو الرقم..." />
@@ -5178,7 +5217,8 @@ function UsersPermissionsPage({ employees, can }) {
           <div className="table-wrap"><table><thead><tr><th>القائمة</th>{["عرض", "إضافة", "تعديل", "حذف", "تصدير", "اعتماد"].map((x) => <th key={x}>{x}</th>)}</tr></thead><tbody>{permissionRows.map((p) => <tr key={p.page_key}><td>{pageLabels[p.page_key] || p.page_key}</td>{["can_view", "can_create", "can_edit", "can_delete", "can_export", "can_approve"].map((k) => <td key={k}><input type="checkbox" checked={p[k]} onChange={(e) => updatePermission(p.page_key, k, e.target.checked)} /></td>)}</tr>)}</tbody></table></div>
         </div>
       </div>
-      {dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={saveUser} className="panel w-full max-w-3xl p-6"><div className="mb-5 flex"><h3 className="text-xl font-extrabold">بيانات المستخدم</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div><div className="grid gap-4 md:grid-cols-2"><Label t="ربط الموظف"><select value={dialog.employee_id} onChange={(e) => selectEmployee(e.target.value)} className="field mt-2"><option value="">بدون ربط</option>{employeeOptions.map((e) => <option key={e.id} value={e.id}>{e.name} - {e.id} - {e.branch} - {e.job}</option>)}</select></Label><Label t="اسم الموظف"><input readOnly value={dialog.employee_name || dialog.name || ""} className="field mt-2 bg-slate-50" /></Label><Label t="اسم المستخدم"><input required value={dialog.username} onChange={(e) => setDialog({ ...dialog, username: e.target.value })} className="field mt-2" /></Label><Label t="كلمة المرور"><input required type="password" value={dialog.password || ""} onChange={(e) => setDialog({ ...dialog, password: e.target.value })} className="field mt-2" /></Label><Label t="الدور"><select value={dialog.role} onChange={(e) => setDialog({ ...dialog, role: e.target.value })} className="field mt-2">{systemRoles.map((r) => <option key={r}>{r}</option>)}</select></Label><Label t="الفرع"><input readOnly value={dialog.branch || ""} className="field mt-2 bg-slate-50" /></Label><Label t="الوظيفة"><input readOnly value={dialog.job || ""} className="field mt-2 bg-slate-50" /></Label><Label t="البريد الإلكتروني"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label><Label t="الهاتف"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label></div><div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ البيانات</button></div></form></div>}
+      {dialog && <UserEditorModal dialog={dialog} setDialog={setDialog} saveUser={saveUser} employeeOptions={employeeOptions} selectEmployee={selectEmployee} />}
+      {false && dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={saveUser} className="panel w-full max-w-3xl p-6"><div className="mb-5 flex"><h3 className="text-xl font-extrabold">بيانات المستخدم</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div><div className="grid gap-4 md:grid-cols-2"><Label t="ربط الموظف"><select value={dialog.employee_id} onChange={(e) => selectEmployee(e.target.value)} className="field mt-2"><option value="">بدون ربط</option>{employeeOptions.map((e) => <option key={e.id} value={e.id}>{e.name} - {e.id} - {e.branch} - {e.job}</option>)}</select></Label><Label t="اسم الموظف"><input readOnly value={dialog.employee_name || dialog.name || ""} className="field mt-2 bg-slate-50" /></Label><Label t="اسم المستخدم"><input required value={dialog.username} onChange={(e) => setDialog({ ...dialog, username: e.target.value })} className="field mt-2" /></Label><Label t="كلمة المرور"><input required type="password" value={dialog.password || ""} onChange={(e) => setDialog({ ...dialog, password: e.target.value })} className="field mt-2" /></Label><Label t="الدور"><select value={dialog.role} onChange={(e) => setDialog({ ...dialog, role: e.target.value })} className="field mt-2">{systemRoles.map((r) => <option key={r}>{r}</option>)}</select></Label><Label t="الفرع"><input readOnly value={dialog.branch || ""} className="field mt-2 bg-slate-50" /></Label><Label t="الوظيفة"><input readOnly value={dialog.job || ""} className="field mt-2 bg-slate-50" /></Label><Label t="البريد الإلكتروني"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label><Label t="الهاتف"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label></div><div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ البيانات</button></div></form></div>}
     </div>
   );
 }
