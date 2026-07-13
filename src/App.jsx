@@ -73,7 +73,7 @@ import { supabase } from "./services/supabase";
 import { guaranteesService } from "./services/guarantees";
 import { overtimeService } from "./services/overtime";
 import { reportRowsForExport, rowsToReportHtml } from "./services/reports";
-import { adminService, permissionPages, systemRoles } from "./services/admin";
+import { adminService, defaultInventoryPermissions, permissionPages, systemRoles } from "./services/admin";
 import { approvalService, approvalStatuses } from "./services/workflow";
 import { notificationsService } from "./services/notifications";
 import { auditService } from "./services/audit";
@@ -4170,7 +4170,7 @@ function EmployeeGuaranteesPage({ employees, currentUser, can }) {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">{cards.map(([label, value, I]) => <Mini key={label} label={label} value={value} I={I} />)}</div>
       <div className="panel flex flex-wrap gap-3 p-4">
         <input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="بحث بالموظف أو الرقم أو الضامن..." />
-        <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select>
+        <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branchOptions.map((b) => <option key={b}>{b}</option>)}</select>
         <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[170px]"><option value="all">كل الحالات</option>{guaranteeStatuses.map((s) => <option key={s}>{s}</option>)}</select>
         <input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field max-w-[170px]" />
         <button onClick={() => exportExcel(exportRows, "تقرير ضمانات الموظفين")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button>
@@ -5045,6 +5045,7 @@ function DialogActions({ close }) {
 
 function UsersPermissionsPage({ employees, can }) {
   const [users, setUsers] = useState([]);
+  const [employeeOptions, setEmployeeOptions] = useState([]);
   const [permissions, setPermissions] = useState([]);
   const [filters, setFilters] = useState({ q: "", role: "all", branch: "all", status: "all" });
   const [dialog, setDialog] = useState(null);
@@ -5056,9 +5057,14 @@ function UsersPermissionsPage({ employees, can }) {
     setLoading(true);
     setError("");
     try {
-      const [u, p] = await Promise.all([adminService.listUsers(), adminService.listPermissions()]);
+      const [u, p, employeeRows] = await Promise.all([
+        adminService.listUsers(),
+        adminService.listPermissions(),
+        adminService.loadEmployeesForUserDropdown().catch(() => employees || []),
+      ]);
       setUsers(u);
       setPermissions(p);
+      setEmployeeOptions(employeeRows);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -5071,22 +5077,24 @@ function UsersPermissionsPage({ employees, can }) {
     const u2 = adminService.subscribePermissions(load);
     return () => { u1?.(); u2?.(); };
   }, []);
+  const branchOptions = [...new Set([...(employeeOptions || []).map((e) => e.branch), ...users.map((u) => u.branch), ...branches].filter(Boolean))];
   const filtered = users.filter((u) =>
-    (!filters.q || u.employee_name.includes(filters.q) || u.username.includes(filters.q) || u.employee_id.includes(filters.q)) &&
+    (!filters.q || (u.name || u.employee_name || u.username || "").includes(filters.q) || u.username.includes(filters.q) || u.employee_id.includes(filters.q) || u.branch.includes(filters.q) || u.role.includes(filters.q)) &&
     (filters.role === "all" || u.role === filters.role) &&
     (filters.branch === "all" || u.branch === filters.branch) &&
     (filters.status === "all" || String(u.is_active) === filters.status)
   );
   const selectEmployee = (id) => {
-    const employee = employees.find((e) => e.id === id);
-    setDialog((d) => ({ ...d, employee_id: id, employee_name: employee?.name || "", branch: employee?.branch || "" }));
+    const employee = employeeOptions.find((e) => e.id === id || e.employee_id === id) || employees.find((e) => e.id === id);
+    setDialog((d) => ({ ...d, name: employee?.name || "", employee_id: id, employee_name: employee?.name || "", branch: employee?.branch || "", job: employee?.job || "", email: employee?.email || d?.email || "", phone: employee?.phone || d?.phone || "", username: d?.username || id }));
   };
   const saveUser = async (e) => {
     e.preventDefault();
     if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
     if (!dialog.username) return alert("اسم المستخدم مطلوب");
     try {
-      const saved = await adminService.saveUser(dialog);
+      const selectedEmployee = employeeOptions.find((employee) => employee.id === dialog.employee_id || employee.employee_id === dialog.employee_id);
+      const saved = await adminService.saveUser(dialog, selectedEmployee);
       setUsers((list) => {
         const exists = list.some((x) => x.user_id === saved.user_id);
         return exists ? list.map((x) => (x.user_id === saved.user_id ? saved : x)) : [saved, ...list];
@@ -5096,7 +5104,8 @@ function UsersPermissionsPage({ employees, can }) {
       alert(err.message);
     }
   };
-  const permissionRows = permissionPages.map((page) => permissions.find((p) => p.role === selectedRole && p.page_key === page) || {
+  const inventoryDefaultRows = defaultInventoryPermissions();
+  const permissionRows = permissionPages.map((page) => permissions.find((p) => p.role === selectedRole && p.page_key === page) || (selectedRole === "مسؤول المخزون" ? inventoryDefaultRows.find((p) => p.page_key === page) : null) || {
     id: `${selectedRole}-${page}`,
     role: selectedRole,
     page_key: page,
@@ -5106,6 +5115,8 @@ function UsersPermissionsPage({ employees, can }) {
     can_delete: isAdminLikeRole(selectedRole),
     can_export: isAdminLikeRole(selectedRole),
     can_approve: isAdminLikeRole(selectedRole),
+    can_post: isAdminLikeRole(selectedRole),
+    can_print: isAdminLikeRole(selectedRole),
   });
   const updatePermission = (pageKey, key, value) => {
     setPermissions((list) => {
@@ -5130,6 +5141,8 @@ function UsersPermissionsPage({ employees, can }) {
           can_delete: value,
           can_export: value,
           can_approve: value,
+          can_post: value,
+          can_print: value,
         })),
       ];
     });
@@ -5165,7 +5178,7 @@ function UsersPermissionsPage({ employees, can }) {
           <div className="table-wrap"><table><thead><tr><th>القائمة</th>{["عرض", "إضافة", "تعديل", "حذف", "تصدير", "اعتماد"].map((x) => <th key={x}>{x}</th>)}</tr></thead><tbody>{permissionRows.map((p) => <tr key={p.page_key}><td>{pageLabels[p.page_key] || p.page_key}</td>{["can_view", "can_create", "can_edit", "can_delete", "can_export", "can_approve"].map((k) => <td key={k}><input type="checkbox" checked={p[k]} onChange={(e) => updatePermission(p.page_key, k, e.target.checked)} /></td>)}</tr>)}</tbody></table></div>
         </div>
       </div>
-      {dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={saveUser} className="panel w-full max-w-3xl p-6"><div className="mb-5 flex"><h3 className="text-xl font-extrabold">بيانات المستخدم</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div><div className="grid gap-4 md:grid-cols-2"><Label t="ربط الموظف"><select value={dialog.employee_id} onChange={(e) => selectEmployee(e.target.value)} className="field mt-2"><option value="">بدون ربط</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.name} - {e.id}</option>)}</select></Label><Label t="اسم الموظف"><input value={dialog.employee_name} onChange={(e) => setDialog({ ...dialog, employee_name: e.target.value })} className="field mt-2" /></Label><Label t="اسم المستخدم"><input required value={dialog.username} onChange={(e) => setDialog({ ...dialog, username: e.target.value })} className="field mt-2" /></Label><Label t="الدور"><select value={dialog.role} onChange={(e) => setDialog({ ...dialog, role: e.target.value })} className="field mt-2">{systemRoles.map((r) => <option key={r}>{r}</option>)}</select></Label><Label t="الفرع"><select value={dialog.branch} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className="field mt-2"><option value="">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select></Label><Label t="الحالة"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label></div><div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ البيانات</button></div></form></div>}
+      {dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={saveUser} className="panel w-full max-w-3xl p-6"><div className="mb-5 flex"><h3 className="text-xl font-extrabold">بيانات المستخدم</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div><div className="grid gap-4 md:grid-cols-2"><Label t="ربط الموظف"><select value={dialog.employee_id} onChange={(e) => selectEmployee(e.target.value)} className="field mt-2"><option value="">بدون ربط</option>{employeeOptions.map((e) => <option key={e.id} value={e.id}>{e.name} - {e.id} - {e.branch} - {e.job}</option>)}</select></Label><Label t="اسم الموظف"><input readOnly value={dialog.employee_name || dialog.name || ""} className="field mt-2 bg-slate-50" /></Label><Label t="اسم المستخدم"><input required value={dialog.username} onChange={(e) => setDialog({ ...dialog, username: e.target.value })} className="field mt-2" /></Label><Label t="كلمة المرور"><input required type="password" value={dialog.password || ""} onChange={(e) => setDialog({ ...dialog, password: e.target.value })} className="field mt-2" /></Label><Label t="الدور"><select value={dialog.role} onChange={(e) => setDialog({ ...dialog, role: e.target.value })} className="field mt-2">{systemRoles.map((r) => <option key={r}>{r}</option>)}</select></Label><Label t="الفرع"><input readOnly value={dialog.branch || ""} className="field mt-2 bg-slate-50" /></Label><Label t="الوظيفة"><input readOnly value={dialog.job || ""} className="field mt-2 bg-slate-50" /></Label><Label t="البريد الإلكتروني"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label><Label t="الهاتف"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label></div><div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ البيانات</button></div></form></div>}
     </div>
   );
 }

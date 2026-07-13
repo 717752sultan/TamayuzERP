@@ -37,33 +37,81 @@ export const systemRoles = [
   "الموارد البشرية",
   "مدير فرع",
   "الإدارة العليا",
-  "الموظف",
   "مسؤول المخزون",
+  "الموظف",
 ];
 
-const userFromDb = (row = {}) => ({
-  user_id: row.user_id || row.id,
-  employee_id: row.employee_id || "",
-  employee_name: row.employee_name || "",
-  username: row.username || "",
-  role: row.role || "الموظف",
+const isAdminRole = (role = "") => String(role).includes("مدير النظام") || String(role).includes("ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…");
+
+const employeeFromDb = (row = {}) => ({
+  id: row.id || row.employee_id || row.employeeId || "",
+  employee_id: row.id || row.employee_id || row.employeeId || "",
+  name: row.name || row.employee_name || row.employeeName || "",
   branch: row.branch || "",
-  is_active: row.is_active !== false,
-  created_at: row.created_at || "",
-  updated_at: row.updated_at || "",
+  job: row.job || row.job_title || "",
+  phone: row.phone || "",
+  email: row.email || "",
+  status: row.status || "",
 });
 
-const userToDb = (item = {}) => ({
-  user_id: String(item.user_id || item.id || `USR-${Date.now()}`).trim(),
-  employee_id: String(item.employee_id || item.employeeId || ""),
-  employee_name: String(item.employee_name || item.employeeName || ""),
-  username: String(item.username || "").trim(),
-  role: String(item.role || "الموظف"),
-  branch: String(item.branch || ""),
-  is_active: item.is_active !== false,
-  created_at: item.created_at || new Date().toISOString(),
-  updated_at: new Date().toISOString(),
-});
+const userFromDb = (row = {}, employee = null) => {
+  const employeeName = row.name || row.employee_name || employee?.name || row.username || "";
+  const employeeId = row.employee_id || employee?.id || "";
+  return {
+    user_id: row.user_id || row.id,
+    id: row.user_id || row.id,
+    name: employeeName,
+    employee_id: employeeId,
+    employee_name: employeeName,
+    username: row.username || "",
+    password: row.password || "",
+    role: row.role || "الموظف",
+    branch: row.branch || employee?.branch || "",
+    job: row.job || employee?.job || "",
+    email: row.email || employee?.email || "",
+    phone: row.phone || employee?.phone || "",
+    is_active: row.is_active !== false,
+    created_at: row.created_at || "",
+    updated_at: row.updated_at || "",
+  };
+};
+
+export const normalizeAppUserForDb = (user = {}, selectedEmployee = null) => {
+  const role = String(user.role || "الموظف").trim();
+  const admin = isAdminRole(role);
+  const employeeName =
+    selectedEmployee?.name ||
+    selectedEmployee?.employee_name ||
+    user.name ||
+    user.employee_name ||
+    user.full_name ||
+    (admin ? "مدير النظام" : "") ||
+    user.username;
+  const employeeId =
+    selectedEmployee?.id ||
+    selectedEmployee?.employee_id ||
+    selectedEmployee?.employeeId ||
+    user.employee_id ||
+    user.employeeId ||
+    (admin ? "ADMIN-001" : "");
+
+  return {
+    user_id: String(user.user_id || user.id || `USR-${Date.now()}`).trim(),
+    name: String(employeeName || "مستخدم").trim(),
+    employee_name: String(employeeName || "مستخدم").trim(),
+    username: String(user.username || user.email || employeeId || "").trim(),
+    password: String(user.password || "123456").trim(),
+    role,
+    employee_id: String(employeeId || "").trim(),
+    email: user.email ? String(user.email).trim() : null,
+    branch: String(selectedEmployee?.branch || user.branch || (admin ? "الإدارة" : "")).trim(),
+    job: String(selectedEmployee?.job || user.job || (admin ? "مدير النظام" : "")).trim(),
+    phone: String(selectedEmployee?.phone || user.phone || "").trim(),
+    is_active: user.is_active ?? user.active ?? true,
+    created_at: user.created_at || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+};
 
 const permissionFromDb = (row = {}) => ({
   id: row.id || `${row.role}-${row.page_key}`,
@@ -97,25 +145,96 @@ const permissionToDb = (item = {}) => ({
   can_override_stock: item.can_override_stock === true,
 });
 
+const inventoryDefaults = {
+  inventory_dashboard: ["can_view"],
+  inventory_items: ["can_view", "can_create", "can_edit", "can_delete", "can_export", "can_print"],
+  inventory_suppliers: ["can_view", "can_create", "can_edit", "can_delete", "can_export", "can_print"],
+  inventory_purchase_requests: ["can_view", "can_create", "can_edit", "can_delete", "can_approve", "can_export", "can_print"],
+  inventory_purchase_orders: ["can_view", "can_create", "can_edit", "can_approve", "can_export", "can_print"],
+  inventory_receipts: ["can_view", "can_create", "can_edit", "can_post", "can_export", "can_print"],
+  inventory_issue_vouchers: ["can_view", "can_create", "can_edit", "can_approve", "can_post", "can_export", "can_print"],
+  inventory_returns: ["can_view", "can_create", "can_edit", "can_post", "can_export", "can_print"],
+  inventory_transfers: ["can_view", "can_create", "can_edit", "can_approve", "can_post", "can_export", "can_print"],
+  inventory_adjustments: ["can_view", "can_create", "can_edit", "can_approve", "can_export", "can_print"],
+  inventory_stocktakes: ["can_view", "can_create", "can_edit", "can_approve", "can_post", "can_export", "can_print"],
+  inventory_balances: ["can_view", "can_export", "can_print"],
+  inventory_forecast: ["can_view", "can_export", "can_print"],
+  inventory_reports: ["can_view", "can_export", "can_print"],
+};
+
+export const defaultInventoryPermissions = () =>
+  Object.entries(inventoryDefaults).map(([page_key, keys]) => {
+    const row = {
+      id: `مسؤول المخزون-${page_key}`,
+      role: "مسؤول المخزون",
+      page_key,
+      can_view: false,
+      can_create: false,
+      can_edit: false,
+      can_delete: false,
+      can_export: false,
+      can_approve: false,
+      can_cancel: false,
+      can_post: false,
+      can_print: false,
+      can_override_stock: false,
+    };
+    keys.forEach((key) => { row[key] = true; });
+    return row;
+  });
+
 export const adminService = {
+  async loadEmployeesForUserDropdown() {
+    try {
+      const rows = await supabase.select("employees", "select=*&order=name.asc");
+      return (rows || [])
+        .map(employeeFromDb)
+        .filter((row) => row.id && row.name && (!row.status || row.status === "نشط" || row.status === "ظ†ط´ط·"));
+    } catch (error) {
+      console.error("Users permissions module error:", error);
+      throw new Error("فشل تحميل قائمة الموظفين: " + error.message);
+    }
+  },
   async listUsers() {
     try {
-      const rows = await supabase.select("app_users", "select=*&order=created_at.desc");
-      return (rows || []).map(userFromDb);
+      const [userRows, employees] = await Promise.all([
+        supabase.select("app_users", "select=*&order=created_at.desc"),
+        this.loadEmployeesForUserDropdown().catch(() => []),
+      ]);
+      return (userRows || []).map((row) => {
+        const employee = employees.find((item) => item.id === row.employee_id || item.employee_id === row.employee_id);
+        return userFromDb(row, employee);
+      });
     } catch (error) {
-      console.error("Supabase app_users load/save error:", error);
+      console.error("Users permissions module error:", error);
       throw new Error("فشل تحميل بيانات المستخدمين من Supabase: " + error.message);
     }
   },
-  async saveUser(user) {
+  async saveUser(user, selectedEmployee = null) {
     try {
-      const payload = userToDb(user);
+      const payload = normalizeAppUserForDb(user, selectedEmployee);
+      const admin = isAdminRole(payload.role);
+      if (!payload.employee_id && !admin) throw new Error("يجب اختيار الموظف");
+      if (!payload.name && !admin) throw new Error("لا يمكن حفظ مستخدم بدون اسم موظف");
+      if (!payload.username) throw new Error("يجب إدخال اسم المستخدم");
+      if (!payload.role) throw new Error("يجب تحديد الدور");
+      if (!payload.password) throw new Error("يجب إدخال كلمة المرور");
+
+      const existing = await this.listUsers().catch(() => []);
+      const sameUser = (row) => String(row.user_id || row.id) === String(payload.user_id);
+      if (payload.employee_id && !admin && existing.some((row) => !sameUser(row) && row.employee_id === payload.employee_id)) {
+        throw new Error("هذا الموظف لديه مستخدم مسبقًا");
+      }
+      if (existing.some((row) => !sameUser(row) && row.username === payload.username)) {
+        throw new Error("اسم المستخدم مستخدم مسبقًا");
+      }
+
       const { data, error } = await supabase.from("app_users").upsert(payload, { onConflict: "user_id" }).select().single();
       if (error) throw error;
-      return userFromDb(data);
+      return userFromDb(data, selectedEmployee);
     } catch (error) {
-      console.error("Supabase app_users load/save error:", error);
-      throw new Error("فشل حفظ بيانات المستخدم في Supabase: " + error.message);
+      console.error("Users permissions module error:", error);
+      throw new Error(error.message?.startsWith("فشل") ? error.message : "فشل حفظ بيانات المستخدم: " + error.message);
     }
   },
   async listPermissions() {
@@ -123,7 +242,7 @@ export const adminService = {
       const rows = await supabase.select("app_permissions", "select=*&order=role.asc");
       return (rows || []).map(permissionFromDb);
     } catch (error) {
-      console.error("Supabase app_permissions load/save error:", error);
+      console.error("Users permissions module error:", error);
       throw new Error("فشل تحميل الصلاحيات من Supabase: " + error.message);
     }
   },
@@ -135,7 +254,7 @@ export const adminService = {
       if (error) throw error;
       return (data || []).map(permissionFromDb);
     } catch (error) {
-      console.error("Supabase app_permissions load/save error:", error);
+      console.error("Users permissions module error:", error);
       throw new Error("فشل حفظ الصلاحيات في Supabase: " + error.message);
     }
   },
