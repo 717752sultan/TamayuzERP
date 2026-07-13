@@ -87,27 +87,34 @@ const movementFromDb = (row = {}) => ({
   created_at: row.created_at || "",
 });
 
-const movementToDb = (movement = {}) => ({
-  movement_id: String(movement.movement_id || `MOV-${Date.now()}-${Math.random().toString(16).slice(2)}`).trim(),
-  movement_date: movement.movement_date || new Date().toISOString().slice(0, 10),
-  item_id: String(movement.item_id || ""),
-  item_code: String(movement.item_code || ""),
-  item_name: String(movement.item_name || ""),
+export const normalizeInventoryMovementForDb = (movement = {}) => {
+  const quantityIn = Number(movement.quantity_in || 0);
+  const quantityOut = Number(movement.quantity_out || 0);
+  const unitCost = Number(movement.unit_cost || movement.unit_price || 0);
+  return {
+  movement_id: String(movement.movement_id || movement.id || `MOV-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).trim(),
+  movement_date: movement.movement_date || movement.date || new Date().toISOString().slice(0, 10),
+  item_id: String(movement.item_id || movement.itemId || "").trim(),
+  item_code: String(movement.item_code || movement.itemCode || "بدون كود").trim(),
+  item_name: String(movement.item_name || movement.itemName || movement.name || "صنف غير محدد").trim(),
   location: String(movement.location || "المخزن المركزي"),
-  branch: String(movement.branch || ""),
-  movement_type: String(movement.movement_type || ""),
-  source_module: String(movement.source_module || ""),
-  source_id: String(movement.source_id || ""),
-  source_number: String(movement.source_number || ""),
-  quantity_in: Number(movement.quantity_in || 0),
-  quantity_out: Number(movement.quantity_out || 0),
-  unit_cost: Number(movement.unit_cost || 0),
-  total_value: Number(movement.total_value || 0),
+  branch: String(movement.branch || movement.to_branch || movement.location || "غير محدد").trim(),
+  movement_type: String(movement.movement_type || "حركة مخزون").trim(),
+  source_module: String(movement.source_module || "inventory").trim(),
+  source_id: String(movement.source_id || movement.sourceId || "").trim(),
+  source_number: String(movement.source_number || movement.sourceNumber || "").trim(),
+  quantity_in: quantityIn,
+  quantity_out: quantityOut,
+  unit_cost: unitCost,
+  total_value: Number(movement.total_value || ((quantityIn || quantityOut) * unitCost)),
   balance_after: Number(movement.balance_after || 0),
-  notes: String(movement.notes || ""),
-  created_by: String(movement.created_by || ""),
+  notes: movement.notes ? String(movement.notes).trim() : "",
+  created_by: String(movement.created_by || "النظام").trim(),
   created_at: movement.created_at || new Date().toISOString(),
-});
+  };
+};
+
+const movementToDb = normalizeInventoryMovementForDb;
 
 export const inventoryService = {
   async loadInventoryItems() {
@@ -176,18 +183,21 @@ export const inventoryService = {
       const rows = await supabase.select("inventory_movements", "select=*&order=movement_date.desc");
       return (rows || []).map(movementFromDb);
     } catch (error) {
-      console.error("Supabase inventory_movements load/save error:", error);
+      console.error("Inventory movement error:", error);
       throw new Error("فشل تحميل سجل حركة المخزون من Supabase: " + error.message);
     }
   },
   async saveMovement(movement) {
     try {
       const payload = movementToDb(movement);
+      if (!payload.item_id) throw new Error("يجب تحديد الصنف قبل تنفيذ حركة المخزون");
+      if (!payload.movement_type) throw new Error("يجب تحديد نوع الحركة");
+      if (!payload.quantity_in && !payload.quantity_out) throw new Error("لا يمكن أن تكون الكمية صفر");
       const { data, error } = await supabase.from("inventory_movements").upsert(payload, { onConflict: "movement_id" }).select().single();
       if (error) throw error;
       return movementFromDb(data);
     } catch (error) {
-      console.error("Supabase inventory_movements load/save error:", error);
+      console.error("Inventory movement error:", error);
       throw new Error("فشل حفظ حركة المخزون: " + error.message);
     }
   },
