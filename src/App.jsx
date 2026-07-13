@@ -85,6 +85,11 @@ import { inventoryDocumentsService, inventoryDocumentConfigs } from "./services/
 import { generateInventoryReports, inventoryRowsForExport } from "./services/inventoryReports";
 import { generateBranchForecast } from "./services/inventoryForecast";
 import { canInventory } from "./services/inventoryPermissions";
+import { inventorySettingsService, defaultInventorySettings, defaultDocumentNumbering } from "./services/inventorySettings";
+import { dailyOperationsService, operationTypes, serviceChannels, operationStatuses } from "./services/dailyOperations";
+import { performanceCriteriaService, scoringTypes, defaultJobKpis } from "./services/performanceCriteria";
+import { kpiCalculationService } from "./services/kpiCalculation";
+import { aiAssistantService } from "./services/aiAssistant";
 const icons = {
   dashboard: LayoutDashboard,
   employees: Users,
@@ -101,6 +106,9 @@ const icons = {
   overtime: Clock3,
   shifts: CalendarCheck,
   inventory: Wallet,
+  daily_operations: Gauge,
+  performance_criteria: ClipboardList,
+  performance_kpi_scores: Star,
   users_permissions: UserRoundCog,
   reports_center: FileBarChart,
   audit_logs: ClipboardList,
@@ -111,6 +119,9 @@ const navItems = [
   ["overtime", "العمل الإضافي"],
   ["shifts", "شفتات الموظفين"],
   ["inventory", "إدارة المخزون"],
+  ["daily_operations", "العمليات اليومية"],
+  ["performance_criteria", "معايير الأداء"],
+  ["performance_kpi_scores", "درجات KPI"],
   ["users_permissions", "المستخدمون والصلاحيات"],
   ["reports_center", "مركز التقارير"],
   ["audit_logs", "سجل العمليات"],
@@ -829,12 +840,16 @@ export default function App() {
 	          {page === "overtime" && <OvertimePage {...p} />}{" "}
 	          {page === "shifts" && <EmployeeShiftsPage {...p} />}{" "}
 	          {page === "inventory" && <InventoryManagementPage {...p} />}{" "}
+	          {page === "daily_operations" && <DailyOperationsPage {...p} />}{" "}
+	          {page === "performance_criteria" && <PerformanceCriteriaPage {...p} />}{" "}
+	          {page === "performance_kpi_scores" && <KpiScoresPage {...p} />}{" "}
 	          {page === "users_permissions" && <UsersPermissionsPage {...p} />}{" "}
 	          {page === "reports_center" && <EnterpriseReportsCenter {...p} />}{" "}
 	          {page === "audit_logs" && <AuditLogsPage {...p} />}{" "}
 	          {page === "reports" && <EnhancedReports {...p} />}{" "}
 	          {page === "settings" && <SettingsPage {...p} />}
         </main>
+        <AIAssistantWidget currentUser={p.currentUser} page={page} />
       </div>
     </div>
   );
@@ -4650,7 +4665,60 @@ function InventoryReportsTab({ reports, filters, setFilters, canExport }) {
 }
 
 function InventorySettingsTab() {
-  return <div className="grid gap-4 md:grid-cols-2"><div className="panel p-5"><h3 className="font-extrabold">تصنيفات الأصناف</h3><div className="mt-3 flex flex-wrap gap-2">{inventoryCategories.map((c) => <span key={c} className="rounded-xl bg-slate-100 px-3 py-2 text-sm">{c}</span>)}</div></div><div className="panel p-5"><h3 className="font-extrabold">وحدات القياس</h3><div className="mt-3 flex flex-wrap gap-2">{inventoryUnits.map((u) => <span key={u} className="rounded-xl bg-slate-100 px-3 py-2 text-sm">{u}</span>)}</div></div></div>;
+  const [settings, setSettings] = useState(defaultInventorySettings);
+  const [numbering, setNumbering] = useState(defaultDocumentNumbering);
+  const [branchRows, setBranchRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [s, n, b] = await Promise.all([
+        inventorySettingsService.loadInventorySettings(),
+        inventorySettingsService.loadDocumentNumbering(),
+        inventorySettingsService.loadBranchSettings(),
+      ]);
+      setSettings(s);
+      setNumbering(n);
+      setBranchRows(b);
+    } catch (e) { alert(e.message); } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+  const general = settings.general || {};
+  const setGeneral = (patch) => setSettings({ ...settings, general: { ...general, ...patch } });
+  const saveAll = async () => {
+    try {
+      await inventorySettingsService.saveInventorySettings(settings);
+      await inventorySettingsService.saveDocumentNumbering(numbering);
+      alert("تم حفظ إعدادات المخزون");
+    } catch (e) { alert(e.message); }
+  };
+  if (loading) return <div className="panel p-6 text-center text-sm text-slate-500">جاري تحميل إعدادات المخزون...</div>;
+  return (
+    <div className="space-y-5">
+      <div className="panel p-5">
+        <div className="mb-4 flex"><h3 className="font-extrabold">الإعدادات العامة للمخزون</h3><button onClick={saveAll} className="btn-primary mr-auto"><Save size={17} /> حفظ الإعدادات</button></div>
+        <div className="grid gap-4 md:grid-cols-3">
+          <Label t="اسم المخزن الرئيسي"><input value={general.main_warehouse_name || ""} onChange={(e) => setGeneral({ main_warehouse_name: e.target.value })} className="field mt-2" /></Label>
+          <Label t="تفعيل تعدد المخازن"><select value={String(general.multi_warehouses === true)} onChange={(e) => setGeneral({ multi_warehouses: e.target.value === "true" })} className="field mt-2"><option value="false">لا</option><option value="true">نعم</option></select></Label>
+          <Label t="السماح بالصرف بدون رصيد"><select value={String(general.allow_negative_stock === true)} onChange={(e) => setGeneral({ allow_negative_stock: e.target.value === "true" })} className="field mt-2"><option value="false">لا</option><option value="true">نعم</option></select></Label>
+          <Label t="تعديل المستندات المرحلة"><select value={String(general.allow_edit_posted_documents === true)} onChange={(e) => setGeneral({ allow_edit_posted_documents: e.target.value === "true" })} className="field mt-2"><option value="false">لا</option><option value="true">نعم</option></select></Label>
+          <Label t="طريقة تقييم المخزون"><select value={general.valuation_method || "متوسط التكلفة"} onChange={(e) => setGeneral({ valuation_method: e.target.value })} className="field mt-2"><option>متوسط التكلفة</option><option>آخر سعر شراء</option><option>سعر ثابت</option></select></Label>
+          <Label t="تفعيل حد إعادة الطلب"><select value={String(general.enable_reorder_point !== false)} onChange={(e) => setGeneral({ enable_reorder_point: e.target.value === "true" })} className="field mt-2"><option value="true">نعم</option><option value="false">لا</option></select></Label>
+          <Label t="اعتماد سندات الصرف"><select value={String(general.require_issue_approval !== false)} onChange={(e) => setGeneral({ require_issue_approval: e.target.value === "true" })} className="field mt-2"><option value="true">نعم</option><option value="false">لا</option></select></Label>
+          <Label t="أيام التنبيه قبل النفاد"><input type="number" value={general.stock_alert_days || 0} onChange={(e) => setGeneral({ stock_alert_days: e.target.value })} className="field mt-2" /></Label>
+          <Label t="الوحدة الافتراضية"><select value={general.default_unit || "حبة"} onChange={(e) => setGeneral({ default_unit: e.target.value })} className="field mt-2">{inventoryUnits.map((u) => <option key={u}>{u}</option>)}</select></Label>
+        </div>
+      </div>
+      <div className="panel p-5">
+        <h3 className="mb-4 font-extrabold">ترقيم المستندات</h3>
+        <div className="table-wrap"><table><thead><tr><th>المستند</th><th>Prefix</th><th>الرقم التالي</th><th>إعادة سنوية</th><th>مثال</th></tr></thead><tbody>{numbering.map((row, i) => <tr key={row.numbering_id}><td>{row.document_label}</td><td><input className="field" value={row.prefix} onChange={(e) => setNumbering(numbering.map((x, idx) => idx === i ? { ...x, prefix: e.target.value } : x))} /></td><td><input type="number" className="field" value={row.next_number} onChange={(e) => setNumbering(numbering.map((x, idx) => idx === i ? { ...x, next_number: e.target.value } : x))} /></td><td><input type="checkbox" checked={row.reset_yearly} onChange={(e) => setNumbering(numbering.map((x, idx) => idx === i ? { ...x, reset_yearly: e.target.checked } : x))} /></td><td>{inventorySettingsService.generateDocumentNumber(row)}</td></tr>)}</tbody></table></div>
+      </div>
+      <div className="panel p-5">
+        <div className="mb-4 flex"><h3 className="font-extrabold">إعدادات الفروع المخزنية</h3><button onClick={() => setBranchRows([...branchRows, { branch_setting_id: `IBS-${Date.now()}`, branch: branches[0] || "", allowed_to_request_items: true, allowed_to_receive_items: true, max_monthly_issue_limit: 0, default_receiver: "", notes: "" }])} className="btn-secondary mr-auto"><Plus size={17} /> إضافة فرع</button></div>
+        <div className="table-wrap"><table><thead><tr><th>الفرع</th><th>طلب أصناف</th><th>استلام أصناف</th><th>حد الصرف الشهري</th><th>المستلم الافتراضي</th><th></th></tr></thead><tbody>{branchRows.map((row, i) => <tr key={row.branch_setting_id}><td><select className="field" value={row.branch} onChange={(e) => setBranchRows(branchRows.map((x, idx) => idx === i ? { ...x, branch: e.target.value } : x))}>{branches.map((b) => <option key={b}>{b}</option>)}</select></td><td><input type="checkbox" checked={row.allowed_to_request_items} onChange={(e) => setBranchRows(branchRows.map((x, idx) => idx === i ? { ...x, allowed_to_request_items: e.target.checked } : x))} /></td><td><input type="checkbox" checked={row.allowed_to_receive_items} onChange={(e) => setBranchRows(branchRows.map((x, idx) => idx === i ? { ...x, allowed_to_receive_items: e.target.checked } : x))} /></td><td><input className="field" type="number" value={row.max_monthly_issue_limit} onChange={(e) => setBranchRows(branchRows.map((x, idx) => idx === i ? { ...x, max_monthly_issue_limit: e.target.value } : x))} /></td><td><input className="field" value={row.default_receiver} onChange={(e) => setBranchRows(branchRows.map((x, idx) => idx === i ? { ...x, default_receiver: e.target.value } : x))} /></td><td><button onClick={() => inventorySettingsService.saveBranchSetting(row).then(load).catch((e) => alert(e.message))} className="text-blue-600"><Save size={16} /></button><button onClick={() => inventorySettingsService.deleteBranchSetting(row.branch_setting_id).then(load).catch((e) => alert(e.message))} className="text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>
+      </div>
+    </div>
+  );
 }
 
 function InventoryItemDialog({ dialog, setDialog, save }) {
@@ -5041,6 +5109,55 @@ function DialogTitle({ title, close }) {
 }
 function DialogActions({ close }) {
   return <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={close} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ البيانات</button></div>;
+}
+
+function DailyOperationsPage({ employees, currentUser, can }) {
+  const [rows, setRows] = useState([]), [dialog, setDialog] = useState(null), [filters, setFilters] = useState({ month: "", branch: "all", employee: "", status: "all" }), [loading, setLoading] = useState(true);
+  const load = async () => { setLoading(true); try { setRows(await dailyOperationsService.loadDailyOperations({ month: filters.month })); } catch (e) { alert(e.message); } finally { setLoading(false); } };
+  useEffect(() => { load(); return dailyOperationsService.subscribe(load); }, []);
+  const filtered = rows.filter((r) => (!filters.month || r.month === filters.month) && (filters.branch === "all" || r.branch === filters.branch) && (!filters.employee || r.employee_name.includes(filters.employee) || r.employee_id.includes(filters.employee)) && (filters.status === "all" || r.status === filters.status));
+  const pickEmployee = (id) => { const emp = employees.find((x) => x.id === id) || {}; setDialog({ ...dialog, employee_id: id, employee_name: emp.name || "", branch: emp.branch || "", job_name: emp.job || "" }); };
+  const save = async (e) => { e.preventDefault(); try { const saved = await dailyOperationsService.saveDailyOperation({ ...dialog, entered_by: currentUser?.username || "" }); setRows((list) => list.some((x) => x.operation_id === saved.operation_id) ? list.map((x) => x.operation_id === saved.operation_id ? saved : x) : [saved, ...list]); setDialog(null); } catch (err) { alert(err.message); } };
+  const approve = (row) => dailyOperationsService.approveDailyOperation(row, currentUser?.username || "").then(load).catch((e) => alert(e.message));
+  const totalOps = filtered.reduce((s, x) => s + Number(x.operation_count || 0), 0), totalErrors = filtered.reduce((s, x) => s + Number(x.error_count || 0), 0);
+  const byBranch = Object.entries(groupCount(filtered, "branch")).map(([name, value]) => ({ name, value }));
+  return <div className="space-y-5"><PageHead title="العمليات اليومية" desc="تسجيل الإنتاجية اليومية وربطها بالـ KPI والحوافز" action={<button disabled={can?.("daily_operations", "can_create") === false} onClick={() => setDialog({ operation_id: `OP-${Date.now()}`, operation_date: new Date().toISOString().slice(0, 10), month: new Date().toISOString().slice(0, 7), employee_id: "", employee_name: "", branch: "", job_name: "", operation_type: operationTypes[0], service_channel: serviceChannels[0], currency: "SAR", operation_count: 0, completed_count: 0, error_count: 0, returned_count: 0, pending_count: 0, customer_complaints: 0, amount: 0, status: "مسودة", notes: "" })} className="btn-primary"><Plus size={18} /> إضافة عملية</button>} /><div className="grid gap-4 md:grid-cols-4"><Mini label="إجمالي العمليات" value={totalOps} I={Gauge} /><Mini label="الأخطاء" value={totalErrors} I={AlertTriangle} /><Mini label="نسبة الأخطاء" value={`${totalOps ? ((totalErrors / totalOps) * 100).toFixed(1) : 0}%`} I={TrendingUp} /><Mini label="المعتمدة" value={filtered.filter((x) => x.status === "معتمدة").length} I={BadgeCheck} /></div><div className="panel flex flex-wrap gap-3 p-4"><input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field max-w-[180px]" /><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field min-w-[180px]" placeholder="الموظف" /><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option>{operationStatuses.map((s) => <option key={s}>{s}</option>)}</select><button onClick={() => exportExcel(filtered, "العمليات اليومية")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="grid gap-5 xl:grid-cols-2"><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الموظف</th><th>الفرع</th><th>العملية</th><th>العدد</th><th>الأخطاء</th><th>الحالة</th><th></th></tr></thead><tbody>{loading ? <tr><td colSpan="8">جاري التحميل...</td></tr> : filtered.map((r) => <tr key={r.operation_id}><td>{r.operation_date}</td><td>{r.employee_name}<p className="text-xs text-slate-400">{r.job_name}</p></td><td>{r.branch}</td><td>{r.operation_type}</td><td>{r.operation_count}</td><td>{r.error_count}</td><td><Status>{r.status}</Status></td><td><button onClick={() => setDialog(r)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => approve(r)} className="p-2 text-green-700"><BadgeCheck size={16} /></button><button disabled={r.status !== "مسودة"} onClick={() => dailyOperationsService.deleteDailyOperation(r.operation_id).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div><Chart title="العمليات حسب الفروع" sub="توزيع سجلات العمليات"><ResponsiveContainer width="100%" height={260}><BarChart data={byBranch}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8,8,0,0]} /></BarChart></ResponsiveContainer></Chart></div>{dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="عملية يومية" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="التاريخ"><input type="date" value={dialog.operation_date} onChange={(e) => setDialog({ ...dialog, operation_date: e.target.value, month: e.target.value.slice(0, 7) })} className="field mt-2" /></Label><Label t="الموظف"><select value={dialog.employee_id} onChange={(e) => pickEmployee(e.target.value)} className="field mt-2"><option value="">اختر الموظف</option>{employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.name} - {emp.id} - {emp.branch}</option>)}</select></Label><Label t="الوظيفة"><input readOnly value={dialog.job_name} className="field mt-2 bg-slate-50" /></Label><Label t="نوع العملية"><select value={dialog.operation_type} onChange={(e) => setDialog({ ...dialog, operation_type: e.target.value })} className="field mt-2">{operationTypes.map((t) => <option key={t}>{t}</option>)}</select></Label><Label t="القناة"><select value={dialog.service_channel} onChange={(e) => setDialog({ ...dialog, service_channel: e.target.value })} className="field mt-2">{serviceChannels.map((t) => <option key={t}>{t}</option>)}</select></Label>{["operation_count","completed_count","pending_count","error_count","returned_count","customer_complaints","amount"].map((k) => <Label key={k} t={k}><input type="number" value={dialog[k] || 0} onChange={(e) => setDialog({ ...dialog, [k]: e.target.value })} className="field mt-2" /></Label>)}<Label t="ملاحظات"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}</div>;
+}
+
+function PerformanceCriteriaPage({ can }) {
+  const [templates, setTemplates] = useState([]), [criteriaRows, setCriteriaRows] = useState([]), [selectedJob, setSelectedJob] = useState(""), [dialog, setDialog] = useState(null);
+  const load = async () => { const [t, c] = await Promise.all([performanceCriteriaService.loadJobTemplates(), performanceCriteriaService.loadKpiCriteria()]); setTemplates(t); setCriteriaRows(c); setSelectedJob((j) => j || t[0]?.job_name || Object.keys(defaultJobKpis)[0] || ""); };
+  useEffect(() => { load().catch((e) => alert(e.message)); }, []);
+  const rows = criteriaRows.filter((r) => r.job_name === selectedJob), totalWeight = performanceCriteriaService.validateCriteriaWeights(rows);
+  const saveCriterion = async (e) => { e.preventDefault(); try { await performanceCriteriaService.saveKpiCriterion(dialog); setDialog(null); load(); } catch (err) { alert(err.message); } };
+  return <div className="space-y-5"><PageHead title="معايير الأداء" desc="معايير KPI عادلة ومنفصلة حسب الوظيفة" action={<div className="flex gap-2"><button onClick={() => performanceCriteriaService.seedDefaults().then(load).catch((e) => alert(e.message))} className="btn-secondary">توليد المعايير الافتراضية</button><button disabled={can?.("performance_criteria", "can_create") === false} onClick={() => setDialog({ job_name: selectedJob, criterion_name: "", weight: 10, max_score: 100, scoring_type: scoringTypes[0], target_value: 100, excellent_threshold: 100, good_threshold: 80, acceptable_threshold: 60, affects_incentive: true, is_active: true })} className="btn-primary"><Plus size={18} /> إضافة معيار</button></div>} /><div className="panel flex flex-wrap gap-3 p-4"><select value={selectedJob} onChange={(e) => setSelectedJob(e.target.value)} className="field max-w-md">{[...new Set([...templates.map((t) => t.job_name), ...Object.keys(defaultJobKpis)])].map((j) => <option key={j}>{j}</option>)}</select><span className={`rounded-xl px-4 py-2 text-sm font-bold ${totalWeight === 100 ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>إجمالي الأوزان: {totalWeight}%</span></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>المعيار</th><th>الوزن</th><th>طريقة الاحتساب</th><th>المستهدف</th><th>الحافز</th><th>الحالة</th><th></th></tr></thead><tbody>{rows.map((r) => <tr key={r.criterion_id}><td>{r.criterion_name}</td><td>{r.weight}%</td><td>{r.scoring_type}</td><td>{r.target_value}</td><td>{r.affects_incentive ? "نعم" : "لا"}</td><td><Status>{r.is_active ? "نشط" : "معطل"}</Status></td><td><button onClick={() => setDialog(r)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => performanceCriteriaService.deleteKpiCriterion(r.criterion_id).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div>{dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={saveCriterion} className="panel w-full max-w-4xl p-6"><DialogTitle title="معيار أداء" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="الوظيفة"><input value={dialog.job_name} onChange={(e) => setDialog({ ...dialog, job_name: e.target.value })} className="field mt-2" /></Label><Label t="اسم المعيار"><input required value={dialog.criterion_name} onChange={(e) => setDialog({ ...dialog, criterion_name: e.target.value })} className="field mt-2" /></Label><Label t="الوزن"><input type="number" value={dialog.weight} onChange={(e) => setDialog({ ...dialog, weight: e.target.value })} className="field mt-2" /></Label><Label t="طريقة الاحتساب"><select value={dialog.scoring_type} onChange={(e) => setDialog({ ...dialog, scoring_type: e.target.value })} className="field mt-2">{scoringTypes.map((s) => <option key={s}>{s}</option>)}</select></Label><Label t="المستهدف"><input type="number" value={dialog.target_value} onChange={(e) => setDialog({ ...dialog, target_value: e.target.value })} className="field mt-2" /></Label><Label t="حد ممتاز"><input type="number" value={dialog.excellent_threshold} onChange={(e) => setDialog({ ...dialog, excellent_threshold: e.target.value })} className="field mt-2" /></Label><Label t="حد جيد"><input type="number" value={dialog.good_threshold} onChange={(e) => setDialog({ ...dialog, good_threshold: e.target.value })} className="field mt-2" /></Label><Label t="حد مقبول"><input type="number" value={dialog.acceptable_threshold} onChange={(e) => setDialog({ ...dialog, acceptable_threshold: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}</div>;
+}
+
+function KpiScoresPage({ employees }) {
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7)), [scores, setScores] = useState([]);
+  const load = () => kpiCalculationService.loadKpiScores(month).then(setScores).catch((e) => alert(e.message));
+  useEffect(() => { load(); }, [month]);
+  const grouped = Object.entries(scores.reduce((acc, row) => { const key = row.employee_name || row.employee_id; acc[key] = (acc[key] || 0) + row.weighted_score; return acc; }, {})).map(([name, total]) => ({ name, total: Number(total.toFixed(2)) })).sort((a, b) => b.total - a.total);
+  return <div className="space-y-5"><PageHead title="درجات KPI" desc="احتساب تلقائي من العمليات اليومية حسب وظيفة الموظف" action={<button onClick={() => kpiCalculationService.recalculateMonthKpis(employees, month).then(setScores).catch((e) => alert(e.message))} className="btn-primary"><Gauge size={18} /> إعادة حساب الشهر</button>} /><div className="panel flex gap-3 p-4"><input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="field max-w-[180px]" /><button onClick={() => exportExcel(scores, "درجات KPI")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="grid gap-5 xl:grid-cols-2"><Chart title="أفضل الموظفين حسب KPI" sub="المقارنة داخل معايير كل وظيفة"><ResponsiveContainer width="100%" height={280}><BarChart data={grouped.slice(0, 10)}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis /><Tooltip /><Bar dataKey="total" fill="#7f1d1d" radius={[8,8,0,0]} /></BarChart></ResponsiveContainer></Chart><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>الموظف</th><th>الوظيفة</th><th>المعيار</th><th>القيمة</th><th>الدرجة</th><th>الموزونة</th></tr></thead><tbody>{scores.map((r) => <tr key={r.score_id}><td>{r.employee_name}</td><td>{r.job_name}</td><td>{r.criterion_name}</td><td>{r.actual_value}</td><td>{r.score}</td><td>{r.weighted_score.toFixed(2)}</td></tr>)}</tbody></table></div></div></div></div>;
+}
+
+function AIAssistantWidget({ currentUser, page }) {
+  const [open, setOpen] = useState(false), [session, setSession] = useState(null), [messages, setMessages] = useState([]), [input, setInput] = useState(""), [loading, setLoading] = useState(false);
+  const suggestions = ["ما ملخص أداء الموظفين هذا الشهر؟", "ما الأصناف التي تحتاج شراء؟", "ما أكثر فرع نشاطًا؟", "اقترح معايير تقييم لمدير فرع."];
+  const send = async (text = input) => {
+    if (!text.trim()) return;
+    setLoading(true);
+    try {
+      let current = session;
+      if (!current) { current = await aiAssistantService.createChatSession(currentUser?.user_id || currentUser?.username || "", "محادثة المساعد"); setSession(current); }
+      const userMsg = { session_id: current.session_id, user_id: currentUser?.user_id || "", role: "user", message: text, context: { page } };
+      setMessages((m) => [...m, userMsg]); setInput(""); await aiAssistantService.saveChatMessage(userMsg);
+      const reply = await aiAssistantService.generateAssistantReply(text);
+      const assistantMsg = { session_id: current.session_id, user_id: currentUser?.user_id || "", role: "assistant", message: reply, context: { page } };
+      await aiAssistantService.saveChatMessage(assistantMsg); setMessages((m) => [...m, assistantMsg]);
+    } catch (e) { alert(e.message); } finally { setLoading(false); }
+  };
+  return <div className="fixed bottom-5 left-5 z-40 no-print"><button onClick={() => setOpen(!open)} className="grid h-14 w-14 place-items-center rounded-full bg-brand-700 text-white shadow-xl"><MessageSquareWarning /></button>{open && <div className="absolute bottom-16 left-0 w-[360px] overflow-hidden rounded-2xl border bg-white shadow-2xl"><div className="bg-brand-700 p-4 text-white"><div className="flex"><b>المساعد الذكي</b><button onClick={() => setMessages([])} className="mr-auto text-xs">مسح</button></div><p className="mt-1 text-xs opacity-80">يعمل حاليًا بوضع التحليل الداخلي بدون اتصال خارجي.</p></div><div className="h-80 space-y-2 overflow-y-auto p-3">{!messages.length && <div className="space-y-2">{suggestions.map((s) => <button key={s} onClick={() => send(s)} className="w-full rounded-xl bg-slate-50 p-2 text-right text-xs">{s}</button>)}</div>}{messages.map((m, i) => <div key={i} className={`rounded-xl p-3 text-sm ${m.role === "user" ? "bg-brand-50 text-brand-900" : "bg-slate-50"}`}>{m.message}</div>)}{loading && <p className="text-xs text-slate-400">المساعد يكتب...</p>}</div><div className="flex gap-2 border-t p-3"><input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} className="field" placeholder="اكتب سؤالك..." /><button onClick={() => send()} className="btn-primary">إرسال</button></div></div>}</div>;
 }
 
 function UserEditorModal({ dialog, setDialog, saveUser, employeeOptions, selectEmployee }) {
