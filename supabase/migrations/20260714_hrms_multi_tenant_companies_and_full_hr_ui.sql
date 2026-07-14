@@ -1,6 +1,8 @@
 -- HRMS multi-tenant SaaS foundation + full HR UI support.
 -- Safe migration: does not delete existing data.
 
+create extension if not exists pgcrypto;
+
 create table if not exists public.companies (
   company_id text primary key,
   company_code text unique not null,
@@ -51,17 +53,58 @@ insert into public.companies (
 )
 on conflict (company_code) do update set
   company_name = excluded.company_name,
+  legal_name = excluded.legal_name,
+  primary_color = excluded.primary_color,
+  secondary_color = excluded.secondary_color,
+  subscription_plan = excluded.subscription_plan,
   subscription_status = excluded.subscription_status,
+  max_users = excluded.max_users,
+  max_branches = excluded.max_branches,
   is_active = excluded.is_active,
   updated_at = now();
 
-alter table if exists public.app_users
+-- Ensure app_users exists if missing
+create table if not exists public.app_users (
+  id uuid primary key default gen_random_uuid(),
+  name text not null default 'مستخدم',
+  username text unique not null,
+  password text not null,
+  role text not null default 'الموظف',
+  employee_id text not null default 'USER-001',
+  email text,
+  is_active boolean not null default true,
+  created_at timestamptz default now()
+);
+
+alter table public.app_users
+  add column if not exists user_id text,
   add column if not exists company_id text,
   add column if not exists company_code text,
   add column if not exists is_platform_admin boolean default false,
   add column if not exists branch text,
   add column if not exists job text,
   add column if not exists phone text,
+  add column if not exists employee_name text,
+  add column if not exists updated_at timestamptz default now();
+
+-- Ensure app_roles exists if missing
+create table if not exists public.app_roles (
+  role_id text,
+  role_name text unique not null,
+  role_description text,
+  is_system_role boolean default false,
+  is_active boolean default true,
+  company_id text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table public.app_roles
+  add column if not exists role_id text,
+  add column if not exists company_id text,
+  add column if not exists role_description text,
+  add column if not exists is_system_role boolean default false,
+  add column if not exists is_active boolean default true,
   add column if not exists updated_at timestamptz default now();
 
 do $$
@@ -139,35 +182,73 @@ begin
   foreach tbl in array tenant_tables loop
     if to_regclass('public.' || tbl) is not null then
       execute format('alter table public.%I add column if not exists company_id text', tbl);
-      execute format('update public.%I set company_id = %L where company_id is null or company_id = ''''', tbl, pure_company_id);
-      execute format('create index if not exists %I on public.%I (company_id)', 'idx_' || tbl || '_company_id', tbl);
+
+      execute format(
+        'update public.%I set company_id = %L where company_id is null or company_id = ''''',
+        tbl,
+        pure_company_id
+      );
+
+      execute format(
+        'create index if not exists %I on public.%I (company_id)',
+        'idx_' || tbl || '_company_id',
+        tbl
+      );
 
       if exists (
-        select 1 from information_schema.columns
-        where table_schema = 'public' and table_name = tbl and column_name = 'branch'
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = tbl
+          and column_name = 'branch'
       ) then
-        execute format('create index if not exists %I on public.%I (company_id, branch)', 'idx_' || tbl || '_company_branch', tbl);
+        execute format(
+          'create index if not exists %I on public.%I (company_id, branch)',
+          'idx_' || tbl || '_company_branch',
+          tbl
+        );
       end if;
 
       if exists (
-        select 1 from information_schema.columns
-        where table_schema = 'public' and table_name = tbl and column_name = 'employee_id'
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = tbl
+          and column_name = 'employee_id'
       ) then
-        execute format('create index if not exists %I on public.%I (company_id, employee_id)', 'idx_' || tbl || '_company_employee', tbl);
+        execute format(
+          'create index if not exists %I on public.%I (company_id, employee_id)',
+          'idx_' || tbl || '_company_employee',
+          tbl
+        );
       end if;
 
       if exists (
-        select 1 from information_schema.columns
-        where table_schema = 'public' and table_name = tbl and column_name = 'created_at'
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = tbl
+          and column_name = 'created_at'
       ) then
-        execute format('create index if not exists %I on public.%I (company_id, created_at)', 'idx_' || tbl || '_company_created', tbl);
+        execute format(
+          'create index if not exists %I on public.%I (company_id, created_at)',
+          'idx_' || tbl || '_company_created',
+          tbl
+        );
       end if;
 
       if exists (
-        select 1 from information_schema.columns
-        where table_schema = 'public' and table_name = tbl and column_name = 'status'
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = tbl
+          and column_name = 'status'
       ) then
-        execute format('create index if not exists %I on public.%I (company_id, status)', 'idx_' || tbl || '_company_status', tbl);
+        execute format(
+          'create index if not exists %I on public.%I (company_id, status)',
+          'idx_' || tbl || '_company_status',
+          tbl
+        );
       end if;
     end if;
   end loop;
@@ -178,8 +259,12 @@ set
   company_id = coalesce(company_id, 'COMP-PUREMONEY'),
   company_code = coalesce(company_code, 'PUREMONEY'),
   updated_at = now()
-where company_id is null or company_code is null;
+where company_id is null
+   or company_id = ''
+   or company_code is null
+   or company_code = '';
 
+-- Admin user: conflict is username, not user_id
 insert into public.app_users (
   user_id,
   company_id,
@@ -204,7 +289,7 @@ insert into public.app_users (
   '123456',
   'مدير النظام',
   'مدير النظام',
-  'ADMIN',
+  'ADMIN-001',
   'مدير النظام',
   'المركز الرئيسي',
   'مدير النظام',
@@ -213,15 +298,22 @@ insert into public.app_users (
   now(),
   now()
 )
-on conflict (user_id) do update set
+on conflict (username) do update set
+  user_id = coalesce(public.app_users.user_id, excluded.user_id),
   company_id = excluded.company_id,
   company_code = excluded.company_code,
-  username = excluded.username,
   password = excluded.password,
+  name = coalesce(nullif(public.app_users.name, ''), excluded.name),
+  employee_name = coalesce(nullif(public.app_users.employee_name, ''), excluded.employee_name),
+  employee_id = coalesce(nullif(public.app_users.employee_id, ''), excluded.employee_id),
   role = excluded.role,
+  branch = coalesce(nullif(public.app_users.branch, ''), excluded.branch),
+  job = coalesce(nullif(public.app_users.job, ''), excluded.job),
+  is_platform_admin = false,
   is_active = true,
   updated_at = now();
 
+-- Platform admin user
 insert into public.app_users (
   user_id,
   company_id,
@@ -255,26 +347,45 @@ insert into public.app_users (
   now(),
   now()
 )
-on conflict (user_id) do update set
+on conflict (username) do update set
+  user_id = coalesce(public.app_users.user_id, excluded.user_id),
   company_id = excluded.company_id,
   company_code = excluded.company_code,
+  password = excluded.password,
+  name = excluded.name,
+  employee_name = excluded.employee_name,
+  employee_id = excluded.employee_id,
   role = excluded.role,
+  branch = excluded.branch,
+  job = excluded.job,
   is_platform_admin = true,
   is_active = true,
   updated_at = now();
 
-insert into public.app_roles (role_id, company_id, role_name, role_description, is_system_role, is_active)
+-- Roles: conflict is role_name, not role_id
+insert into public.app_roles (
+  role_id,
+  company_id,
+  role_name,
+  role_description,
+  is_system_role,
+  is_active,
+  updated_at
+)
 values
-  ('ROLE-PUREMONEY-ADMIN', 'COMP-PUREMONEY', 'مدير النظام', 'مدير نظام الشركة', true, true),
-  ('ROLE-PUREMONEY-HR', 'COMP-PUREMONEY', 'الموارد البشرية', 'إدارة الموارد البشرية', true, true),
-  ('ROLE-PUREMONEY-BRANCH-MANAGER', 'COMP-PUREMONEY', 'مدير فرع', 'إدارة الفرع', true, true),
-  ('ROLE-PUREMONEY-EXECUTIVE', 'COMP-PUREMONEY', 'الإدارة العليا', 'عرض التقارير والاعتمادات', true, true),
-  ('ROLE-PUREMONEY-INVENTORY', 'COMP-PUREMONEY', 'مسؤول المخزون', 'إدارة المخزون', true, true),
-  ('ROLE-PUREMONEY-EMPLOYEE', 'COMP-PUREMONEY', 'الموظف', 'بوابة الموظف', true, true),
-  ('ROLE-PLATFORM-SUPER-ADMIN', 'COMP-PUREMONEY', 'مشرف النظام العام', 'إدارة منصة الشركات', true, true)
-on conflict (role_id) do update set
-  company_id = excluded.company_id,
-  role_name = excluded.role_name,
-  is_active = true;
+  ('ROLE-PUREMONEY-ADMIN', 'COMP-PUREMONEY', 'مدير النظام', 'مدير نظام الشركة', true, true, now()),
+  ('ROLE-PUREMONEY-HR', 'COMP-PUREMONEY', 'الموارد البشرية', 'إدارة الموارد البشرية', true, true, now()),
+  ('ROLE-PUREMONEY-BRANCH-MANAGER', 'COMP-PUREMONEY', 'مدير فرع', 'إدارة الفرع', true, true, now()),
+  ('ROLE-PUREMONEY-EXECUTIVE', 'COMP-PUREMONEY', 'الإدارة العليا', 'عرض التقارير والاعتمادات', true, true, now()),
+  ('ROLE-PUREMONEY-INVENTORY', 'COMP-PUREMONEY', 'مسؤول المخزون', 'إدارة المخزون', true, true, now()),
+  ('ROLE-PUREMONEY-EMPLOYEE', 'COMP-PUREMONEY', 'الموظف', 'بوابة الموظف', true, true, now()),
+  ('ROLE-PLATFORM-SUPER-ADMIN', 'COMP-PUREMONEY', 'مشرف النظام العام', 'إدارة منصة الشركات', true, true, now())
+on conflict (role_name) do update set
+  role_id = coalesce(public.app_roles.role_id, excluded.role_id),
+  company_id = coalesce(public.app_roles.company_id, excluded.company_id),
+  role_description = coalesce(public.app_roles.role_description, excluded.role_description),
+  is_system_role = coalesce(public.app_roles.is_system_role, excluded.is_system_role),
+  is_active = true,
+  updated_at = now();
 
 notify pgrst, 'reload schema';
