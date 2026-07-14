@@ -1,6 +1,8 @@
 import { supabase } from "./supabase";
 import { normalizeCompany, requireCompanyId } from "./tenant";
 
+const COMPANY_ADMIN_ROLE = "مدير النظام";
+
 const companyToDb = (company = {}) => {
   const code = String(company.company_code || "").trim().toUpperCase();
   return {
@@ -26,6 +28,14 @@ const companyToDb = (company = {}) => {
   };
 };
 
+const adminUserToCompanyFields = (company = {}, adminUser = null) => ({
+  ...company,
+  admin_user: adminUser,
+  admin_user_id: adminUser?.user_id || adminUser?.id || "",
+  admin_username: adminUser?.username || "",
+  admin_name: adminUser?.name || adminUser?.employee_name || "",
+});
+
 export const companiesService = {
   async loadCompanies() {
     try {
@@ -33,8 +43,35 @@ export const companiesService = {
       return (rows || []).map(normalizeCompany);
     } catch (error) {
       console.error("Tenant/company error:", error);
-      throw new Error("فشل تحميل بيانات الشركة: " + error.message);
+      throw new Error("فشل تحميل بيانات الشركات: " + error.message);
     }
+  },
+
+  async loadCompanyAdminUser(companyId) {
+    if (!companyId) return null;
+    try {
+      const rows = await supabase.select(
+        "app_users",
+        `company_id=eq.${encodeURIComponent(companyId)}&role=eq.${encodeURIComponent(COMPANY_ADMIN_ROLE)}&is_platform_admin=eq.false&is_active=eq.true&select=*&limit=1`,
+      );
+      return rows?.[0] || null;
+    } catch (error) {
+      console.error("Tenant/company admin user load error:", error);
+      return null;
+    }
+  },
+
+  async loadCompaniesWithAdminUsers() {
+    const rows = await this.loadCompanies();
+    return Promise.all(
+      rows.map(async (company) => {
+        const [adminUser, users] = await Promise.all([
+          this.loadCompanyAdminUser(company.company_id),
+          supabase.select("app_users", `company_id=eq.${encodeURIComponent(company.company_id)}&select=user_id`).catch(() => []),
+        ]);
+        return { ...adminUserToCompanyFields(company, adminUser), users_count: users?.length || 0 };
+      }),
+    );
   },
 
   async loadCompanyProfile(companyId = requireCompanyId()) {
@@ -66,39 +103,67 @@ export const companiesService = {
     return this.saveCompany({ ...company, is_active: false, subscription_status: "inactive" });
   },
 
+  async ensureUniqueAdminUsername(companyId, username, currentUserId = "") {
+    const cleanUsername = String(username || "").trim();
+    if (!companyId || !cleanUsername) return;
+    const rows = await supabase.select(
+      "app_users",
+      `company_id=eq.${encodeURIComponent(companyId)}&username=eq.${encodeURIComponent(cleanUsername)}&select=user_id,username&limit=2`,
+    );
+    const duplicate = (rows || []).some((row) => String(row.user_id || "") !== String(currentUserId || ""));
+    if (duplicate) throw new Error("اسم المستخدم موجود مسبقًا داخل هذه الشركة");
+  },
+
   async createCompanyAdminUser(company, admin = {}) {
-    try {
-      const normalized = normalizeCompany(company);
-      const countRows = await supabase.select("app_users", `company_id=eq.${encodeURIComponent(normalized.company_id)}&select=user_id`);
-      if (normalized.max_users && countRows.length >= normalized.max_users) {
-        throw new Error("تم تجاوز الحد الأقصى للمستخدمين في باقة الشركة");
-      }
-      const username = String(admin.username || "admin").trim();
-      const payload = {
-        user_id: admin.user_id || `USR-${normalized.company_code}-${Date.now()}`,
-        company_id: normalized.company_id,
-        company_code: normalized.company_code,
-        username,
-        password: String(admin.password || "123456"),
-        name: admin.name || "مدير النظام",
-        employee_name: admin.employee_name || admin.name || "مدير النظام",
-        employee_id: admin.employee_id || "",
-        role: "مدير النظام",
-        branch: admin.branch || "المركز الرئيسي",
-        job: admin.job || "مدير النظام",
-        phone: admin.phone || "",
-        email: admin.email || normalized.email || "",
-        is_platform_admin: false,
-        is_active: true,
-        updated_at: new Date().toISOString(),
-      };
-      const { data, error } = await supabase.from("app_users").upsert(payload, { onConflict: "user_id" }).select().single();
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      console.error("Tenant/company error:", error);
-      throw error;
+    const normalized = normalizeCompany(company);
+    const countRows = await supabase.select("app_users", `company_id=eq.${encodeURIComponent(normalized.company_id)}&select=user_id`);
+    if (normalized.max_users && countRows.length >= normalized.max_users) {
+      throw new Error("تم تجاوز الحد الأقصى للمستخدمين في باقة الشركة");
     }
+    return this.saveCompanyAdminUser(normalized, admin);
+  },
+
+  async saveCompanyAdminUser(company, admin = {}) {
+    const normalized = normalizeCompany(company);
+    const adminUserId = admin.user_id || admin.admin_user_id || "";
+    const existingAdmin = await this.loadCompanyAdminUser(normalized.company_id);
+    const currentAdmin = existingAdmin || (adminUserId ? { ...admin, user_id: adminUserId } : null);
+    const username = String(admin.username || admin.admin_username || currentAdmin?.username || "admin").trim();
+    if (!username) throw new Error("يجب إدخال اسم مستخدم مدير الشركة");
+    await this.ensureUniqueAdminUsername(normalized.company_id, username, currentAdmin?.user_id || adminUserId || "");
+
+    const payload = {
+      user_id: currentAdmin?.user_id || admin.user_id || `USR-${normalized.company_code}-${Date.now()}`,
+      company_id: normalized.company_id,
+      company_code: normalized.company_code,
+      username,
+      password: String(admin.password || admin.admin_password || currentAdmin?.password || "123456"),
+      name: String(admin.name || admin.admin_name || currentAdmin?.name || currentAdmin?.employee_name || COMPANY_ADMIN_ROLE).trim(),
+      employee_name: String(admin.employee_name || admin.name || admin.admin_name || currentAdmin?.employee_name || currentAdmin?.name || COMPANY_ADMIN_ROLE).trim(),
+      employee_id: admin.employee_id || currentAdmin?.employee_id || "",
+      role: COMPANY_ADMIN_ROLE,
+      branch: admin.branch || currentAdmin?.branch || "المركز الرئيسي",
+      job: admin.job || currentAdmin?.job || COMPANY_ADMIN_ROLE,
+      phone: admin.phone || currentAdmin?.phone || "",
+      email: admin.email || currentAdmin?.email || normalized.email || "",
+      is_platform_admin: false,
+      is_active: true,
+      created_at: currentAdmin?.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase.from("app_users").upsert(payload, { onConflict: "user_id" }).select().single();
+    if (error) {
+      console.error("Tenant/company admin user save error:", error);
+      throw new Error(error.message || "تعذر حفظ مستخدم مدير الشركة");
+    }
+    return data;
+  },
+
+  async saveCompanyWithAdminUser(companyPayload, adminPayload = {}) {
+    const savedCompany = await this.saveCompany(companyPayload);
+    const savedAdmin = await this.saveCompanyAdminUser(savedCompany, adminPayload);
+    return adminUserToCompanyFields(savedCompany, savedAdmin);
   },
 
   async seedCompanyDefaults(company) {
@@ -129,8 +194,8 @@ export const companiesService = {
   async createCompanyWithDefaults(company, admin) {
     const savedCompany = await this.saveCompany(company);
     await this.seedCompanyDefaults(savedCompany);
-    await this.createCompanyAdminUser(savedCompany, admin);
-    return savedCompany;
+    const savedAdmin = await this.createCompanyAdminUser(savedCompany, admin);
+    return adminUserToCompanyFields(savedCompany, savedAdmin);
   },
 
   subscribe(onChange) {

@@ -28,7 +28,7 @@ const tableFromRestPath = (path = "") => {
   return match ? decodeURIComponent(match[1]) : "";
 };
 
-const shouldScopeTable = (table) => table && tenantAwareTables.has(table) && getCurrentCompanyId() && !isPlatformAdmin();
+const shouldScopeTable = (table) => table && tenantAwareTables.has(table) && getCurrentCompanyId();
 
 const appendTenantFilterToPath = (path = "", method = "GET") => {
   const table = tableFromRestPath(path);

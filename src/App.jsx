@@ -595,6 +595,7 @@ export default function App() {
 	    [permissionsLoading, setPermissionsLoading] = useState(false),
 	    [notifications, setNotifications] = useState([]),
 	    [notificationsOpen, setNotificationsOpen] = useState(false),
+      [companies, setCompanies] = useState([]),
       [currentCompany, setCurrentCompany] = useState(restoredTenant.currentCompany || null),
       [currentUserState, setCurrentUserState] = useState(restoredTenant.currentUser || null);
   const setEmployees = (updater) =>
@@ -625,6 +626,31 @@ export default function App() {
   useEffect(() => {
     syncSettings(settings);
   }, [settings]);
+  useEffect(() => {
+    if (!logged) return;
+    const user = currentUserState || getCurrentUser() || {};
+    const platformAdmin = user?.is_platform_admin === true || user?.role === platformSuperAdminRole || role === platformSuperAdminRole;
+    if (!platformAdmin) {
+      setCompanies([]);
+      return;
+    }
+    let alive = true;
+    const loadCompanies = async () => {
+      try {
+        const rows = await companiesService.loadCompanies();
+        if (alive) setCompanies(rows);
+      } catch (error) {
+        console.error("Tenant/company list load error:", error);
+        if (alive) setCompanies([]);
+      }
+    };
+    loadCompanies();
+    const unsubscribe = companiesService.subscribe(loadCompanies);
+    return () => {
+      alive = false;
+      unsubscribe?.();
+    };
+  }, [logged, role, currentUserState?.user_id]);
 	  useEffect(() => {
 	    if (!logged) return;
       if (!currentCompany?.company_id) return;
@@ -719,13 +745,14 @@ export default function App() {
       <Login
         settings={settings}
         onLogin={(user) => {
-          const company = getCurrentCompany() || {
+          const isPlatformLogin = user?.is_platform_admin === true || user?.role === platformSuperAdminRole;
+          const company = isPlatformLogin ? null : (getCurrentCompany() || {
             company_id: user.company_id,
             company_code: user.company_code,
             company_name: user.company_name,
             logo_url: user.logo_url,
             primary_color: user.primary_color,
-          };
+          });
           setTenantSession({ company, user });
           setCurrentCompany(company);
           setCurrentUserState(user);
@@ -768,25 +795,33 @@ export default function App() {
       />
     );
 	  const currentUser = currentUserState || getCurrentUser() || {},
+      isPlatformAdminUser = currentUser?.is_platform_admin === true || currentUser?.role === platformSuperAdminRole || role === platformSuperAdminRole,
+      hasSelectedCompany = Boolean(currentCompany?.company_id),
 	    roleMatrix = settings.rolePermissions?.[role] || {},
 	    hasRoleMatrix = Object.keys(roleMatrix).length > 0,
 	    canNode = (nodeKey, action = "can_view") => hasTreePermission(treeRolePermissions, role, nodeKey, action),
-	    canPage = (pageKey, action = "can_view") => pageAllowedByTree(treeRolePermissions, role, pageKey, action) || canByPermission(appPermissions, role, pageKey, action),
+	    canPage = (pageKey, action = "can_view") => {
+        if (isPlatformAdminUser) return hasSelectedCompany || pageKey === "companies_admin";
+        return pageAllowedByTree(treeRolePermissions, role, pageKey, action) || canByPermission(appPermissions, role, pageKey, action);
+      },
 	    visibleNavItems = navItems.filter(([id]) => {
-        if (id === "companies_admin") return currentUser?.is_platform_admin === true || role === platformSuperAdminRole;
+        if (isPlatformAdminUser) return hasSelectedCompany ? true : id === "companies_admin";
+        if (id === "companies_admin") return false;
 	      if (id === "dashboard") return hasAnyPermission(treeRolePermissions, role, dashboardPermissionNodes, "can_view");
 	      if (treeRolePermissions.length) return pageAllowedByTree(treeRolePermissions, role, id, "can_view");
 	      if (appPermissions.length) return canByPermission(appPermissions, role, id === "reports" ? "reports" : id, "can_view");
 	      return hasRoleMatrix ? roleMatrix[id]?.view : isAdminLikeRole(role);
 	    }),
-	    firstAllowedPage = getFirstAllowedPageForUser({ ...currentUser, role }, treeRolePermissions, appPermissions, visibleNavItems),
+	    firstAllowedPage = isPlatformAdminUser && !hasSelectedCompany ? "companies_admin" : getFirstAllowedPageForUser({ ...currentUser, role }, treeRolePermissions, appPermissions, visibleNavItems),
 	    activePage = visibleNavItems.some(([id]) => id === page) ? page : firstAllowedPage,
     title = navItems.find((x) => x[0] === activePage)?.[1],
     company = currentCompany || getCurrentCompany() || {},
     companyName = company.company_name || currentUser.company_name || "Pure Money",
     companyLogo = company.logo_url || currentUser.logo_url || "",
-    manager = { ...(settings.manager || defaultSettings.manager), name: currentUser.name || currentUser.username || (settings.manager || defaultSettings.manager).name },
-    initials = manager.name
+    userCardName = currentUser?.name || currentUser?.username || "مستخدم",
+    userCardUsername = currentUser?.username || "مستخدم",
+    userCardRole = currentUser?.role || "غير محدد",
+    initials = userCardName
       .split(" ")
       .slice(0, 2)
       .map((x) => x[0])
@@ -805,6 +840,41 @@ export default function App() {
 	      can: (pageKey, action = "can_view") => canPage(pageKey, action),
 	      canNode,
 	    };
+  const handlePlatformCompanyChange = (companyId) => {
+    if (!isPlatformAdminUser) return;
+    const selected = companies.find((item) => item.company_id === companyId) || null;
+    const nextUser = selected
+      ? {
+          ...currentUser,
+          company_id: selected.company_id,
+          company_code: selected.company_code,
+          company_name: selected.company_name,
+          logo_url: selected.logo_url,
+          primary_color: selected.primary_color,
+          is_platform_admin: true,
+        }
+      : {
+          ...currentUser,
+          company_id: "",
+          company_code: "",
+          company_name: "",
+          logo_url: "",
+          primary_color: "",
+          is_platform_admin: true,
+        };
+    setTenantSession({ company: selected, user: nextUser });
+    setCurrentCompany(selected);
+    setCurrentUserState(nextUser);
+    setEmployeesState([]);
+    setEvaluationsState([]);
+    setSettingsState(hydrateSettings(defaultSettings));
+    setDataError("");
+    setDataLoading(false);
+    setAppPermissions([]);
+    setTreeRolePermissions([]);
+    setNotifications([]);
+    setPage(selected ? "dashboard" : "companies_admin");
+  };
   if (visibleNavItems.length && activePage && activePage !== page) {
     setTimeout(() => setPage(activePage), 0);
   }
@@ -865,8 +935,8 @@ export default function App() {
               {initials}
             </div>
             <div>
-              <b className="text-sm">{manager.name}</b>
-              <p className="text-[11px] text-slate-400">{role}</p>
+              <b className="text-sm">{userCardUsername}</b>
+              <p className="text-[11px] text-slate-400">{userCardRole}</p>
             </div>
           </div>
           <button
@@ -900,6 +970,23 @@ export default function App() {
             </p>
           </div>
           <div className="mr-auto flex items-center gap-3">
+            {isPlatformAdminUser && (
+              <label className="flex max-w-[260px] items-center gap-2 rounded-xl border bg-white px-3 py-2 text-xs font-bold text-slate-600">
+                <span>اختر الشركة</span>
+                <select
+                  value={currentCompany?.company_id || ""}
+                  onChange={(event) => handlePlatformCompanyChange(event.target.value)}
+                  className="min-w-[170px] bg-transparent text-sm outline-none"
+                >
+                  <option value="">إدارة المنصة فقط</option>
+                  {companies.map((item) => (
+                    <option key={item.company_id} value={item.company_id}>
+                      {item.company_code || item.company_name} - {item.company_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label className="hidden h-10 items-center gap-2 rounded-xl bg-slate-100 px-3 md:flex">
               <Search size={17} />
               <input
@@ -946,8 +1033,8 @@ export default function App() {
                 {initials}
               </div>
               <div>
-                <b className="text-sm">{manager.name}</b>
-                <p className="text-[11px] text-slate-500">{role}</p>
+                <b className="text-sm">{userCardUsername}</b>
+                <p className="text-[11px] text-slate-500">{userCardRole}</p>
               </div>
             </div>
           </div>
@@ -1119,7 +1206,7 @@ function CompaniesAdminPage({ currentUser }) {
     if (!canManage) return;
     setLoading(true);
     try {
-      setRows(await companiesService.loadCompanies());
+      setRows(await companiesService.loadCompaniesWithAdminUsers());
     } catch (error) {
       alert(error.message);
     } finally {
@@ -1128,12 +1215,41 @@ function CompaniesAdminPage({ currentUser }) {
   };
   useEffect(() => { load(); }, [canManage]);
   if (!canManage) return <div className="panel p-6 text-center font-bold text-red-600">لا تملك صلاحية الوصول إلى بيانات هذه الشركة</div>;
+  const openAddCompany = () => setDialog({
+    company_code: "",
+    company_name: "",
+    subscription_plan: "standard",
+    subscription_status: "active",
+    max_users: 25,
+    max_branches: 5,
+    primary_color: "#7f1d1d",
+    is_active: true,
+    admin_username: "",
+    admin_name: "",
+    admin_password: "123456",
+  });
+  const openEditCompany = (row) => setDialog({
+    ...row,
+    admin_username: row.admin_username || row.admin_user?.username || "",
+    admin_name: row.admin_name || row.admin_user?.name || row.admin_user?.employee_name || "",
+    admin_user_id: row.admin_user_id || row.admin_user?.user_id || "",
+    admin_password: "",
+  });
   const save = async (e) => {
     e.preventDefault();
     try {
+      const adminUsername = String(dialog.admin_username || "").trim();
+      if (!adminUsername) return alert("يجب إدخال اسم مستخدم مدير الشركة");
+      const adminPayload = {
+        user_id: dialog.admin_user_id,
+        username: adminUsername,
+        password: dialog.admin_password || "",
+        name: dialog.admin_name || "مدير النظام",
+        email: dialog.email || "",
+      };
       const saved = dialog.company_id
-        ? await companiesService.saveCompany(dialog)
-        : await companiesService.createCompanyWithDefaults(dialog, { username: dialog.admin_username || "admin", password: dialog.admin_password || "123456", email: dialog.email });
+        ? await companiesService.saveCompanyWithAdminUser(dialog, adminPayload)
+        : await companiesService.createCompanyWithDefaults(dialog, adminPayload);
       setRows((list) => list.some((x) => x.company_id === saved.company_id) ? list.map((x) => x.company_id === saved.company_id ? saved : x) : [saved, ...list]);
       setDialog(null);
     } catch (error) {
@@ -1143,13 +1259,13 @@ function CompaniesAdminPage({ currentUser }) {
   const tabs = ["الشركات", "اشتراكات الشركات", "مستخدمو الشركات", "نسخ احتياطية الشركات", "إعدادات المنصة"];
   return (
     <div className="space-y-5">
-      <PageHead title="إدارة الشركات" desc="إدارة منصة SaaS متعددة الشركات والاشتراكات والمستخدمين" action={<button onClick={() => setDialog({ company_code: "", company_name: "", subscription_plan: "standard", subscription_status: "active", max_users: 25, max_branches: 5, primary_color: "#7f1d1d", is_active: true })} className="btn-primary"><Plus size={18} /> إضافة شركة</button>} />
+      <PageHead title="إدارة الشركات" desc="إدارة منصة SaaS متعددة الشركات والاشتراكات والمستخدمين" action={<button onClick={openAddCompany} className="btn-primary"><Plus size={18} /> إضافة شركة</button>} />
       <div className="panel flex flex-wrap gap-2 p-3">{tabs.map((item) => <button key={item} onClick={() => setTab(item)} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === item ? "bg-brand-700 text-white" : "bg-slate-100 text-slate-600"}`}>{item}</button>)}</div>
-      <div className="grid gap-4 md:grid-cols-4"><Mini label="عدد الشركات" value={rows.length} I={Building2} /><Mini label="النشطة" value={rows.filter((r) => r.is_active).length} I={BadgeCheck} /><Mini label="اشتراكات فعالة" value={rows.filter((r) => ["active", "trial"].includes(r.subscription_status)).length} I={Wallet} /><Mini label="المشرف" value={currentUser?.username || ""} I={UserRoundCog} /></div>
+      <div className="grid gap-4 md:grid-cols-4"><Mini label="عدد الشركات" value={rows.length} I={Building2} /><Mini label="النشطة" value={rows.filter((r) => r.is_active).length} I={BadgeCheck} /><Mini label="اشتراكات فعالة" value={rows.filter((r) => ["active", "trial"].includes(r.subscription_status)).length} I={Wallet} /><Mini label="المشرف" value={currentUser?.username || "مستخدم"} I={UserRoundCog} /></div>
       <div className="panel p-4">
-        {loading ? <p className="text-sm text-slate-400">جاري التحميل...</p> : <div className="table-wrap"><table><thead><tr><th>كود الشركة</th><th>اسم الشركة</th><th>الباقة</th><th>حالة الاشتراك</th><th>المستخدمون</th><th>الفروع</th><th>الحالة</th><th></th></tr></thead><tbody>{rows.map((row) => <tr key={row.company_id}><td>{row.company_code}</td><td>{row.company_name}</td><td>{row.subscription_plan}</td><td><Status>{row.subscription_status}</Status></td><td>{row.max_users}</td><td>{row.max_branches}</td><td><Status>{row.is_active ? "نشط" : "معطل"}</Status></td><td><button onClick={() => setDialog(row)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => companiesService.deleteOrDeactivateCompany(row).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>}
+        {loading ? <p className="text-sm text-slate-400">جاري التحميل...</p> : <div className="table-wrap"><table><thead><tr><th>اسم الشركة</th><th>كود الشركة</th><th>حالة الاشتراك</th><th>الحالة</th><th>اسم مستخدم مدير الشركة</th><th>اسم مدير الشركة</th><th>عدد المستخدمين</th><th>الحد الأقصى للمستخدمين</th><th></th></tr></thead><tbody>{rows.map((row) => <tr key={row.company_id}><td>{row.company_name}</td><td>{row.company_code}</td><td><Status>{row.subscription_status}</Status></td><td><Status>{row.is_active ? "نشط" : "معطل"}</Status></td><td>{row.admin_username || "غير محدد"}</td><td>{row.admin_name || "غير محدد"}</td><td>{row.users_count ?? "—"}</td><td>{row.max_users}</td><td><button onClick={() => openEditCompany(row)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => companiesService.deleteOrDeactivateCompany(row).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>}
       </div>
-      {dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6"><DialogTitle title="بيانات الشركة" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="اسم الشركة"><input required value={dialog.company_name || ""} onChange={(e) => setDialog({ ...dialog, company_name: e.target.value })} className="field mt-2" /></Label><Label t="كود الشركة"><input required value={dialog.company_code || ""} onChange={(e) => setDialog({ ...dialog, company_code: e.target.value.toUpperCase() })} className="field mt-2" /></Label><Label t="البريد"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label><Label t="الهاتف"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label><Label t="الباقة"><input value={dialog.subscription_plan || ""} onChange={(e) => setDialog({ ...dialog, subscription_plan: e.target.value })} className="field mt-2" /></Label><Label t="حالة الاشتراك"><select value={dialog.subscription_status || "active"} onChange={(e) => setDialog({ ...dialog, subscription_status: e.target.value })} className="field mt-2"><option value="active">active</option><option value="trial">trial</option><option value="inactive">inactive</option></select></Label><Label t="الحد الأقصى للمستخدمين"><input type="number" value={dialog.max_users || 0} onChange={(e) => setDialog({ ...dialog, max_users: e.target.value })} className="field mt-2" /></Label><Label t="الحد الأقصى للفروع"><input type="number" value={dialog.max_branches || 0} onChange={(e) => setDialog({ ...dialog, max_branches: e.target.value })} className="field mt-2" /></Label><Label t="رابط الشعار"><input value={dialog.logo_url || ""} onChange={(e) => setDialog({ ...dialog, logo_url: e.target.value })} className="field mt-2" /></Label><Label t="اللون الأساسي"><input type="color" value={dialog.primary_color || "#7f1d1d"} onChange={(e) => setDialog({ ...dialog, primary_color: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label><Label t="اسم مستخدم مدير الشركة"><input value={dialog.admin_username || "admin"} onChange={(e) => setDialog({ ...dialog, admin_username: e.target.value })} className="field mt-2" /></Label><Label t="كلمة مرور مدير الشركة"><input value={dialog.admin_password || "123456"} onChange={(e) => setDialog({ ...dialog, admin_password: e.target.value })} className="field mt-2" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}
+      {dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6"><DialogTitle title="بيانات الشركة" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="اسم الشركة"><input required value={dialog.company_name || ""} onChange={(e) => setDialog({ ...dialog, company_name: e.target.value })} className="field mt-2" /></Label><Label t="كود الشركة"><input required value={dialog.company_code || ""} onChange={(e) => setDialog({ ...dialog, company_code: e.target.value.toUpperCase() })} className="field mt-2" /></Label><Label t="البريد"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label><Label t="الهاتف"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label><Label t="الباقة"><input value={dialog.subscription_plan || ""} onChange={(e) => setDialog({ ...dialog, subscription_plan: e.target.value })} className="field mt-2" /></Label><Label t="حالة الاشتراك"><select value={dialog.subscription_status || "active"} onChange={(e) => setDialog({ ...dialog, subscription_status: e.target.value })} className="field mt-2"><option value="active">active</option><option value="trial">trial</option><option value="inactive">inactive</option></select></Label><Label t="الحد الأقصى للمستخدمين"><input type="number" value={dialog.max_users || 0} onChange={(e) => setDialog({ ...dialog, max_users: e.target.value })} className="field mt-2" /></Label><Label t="الحد الأقصى للفروع"><input type="number" value={dialog.max_branches || 0} onChange={(e) => setDialog({ ...dialog, max_branches: e.target.value })} className="field mt-2" /></Label><Label t="رابط الشعار"><input value={dialog.logo_url || ""} onChange={(e) => setDialog({ ...dialog, logo_url: e.target.value })} className="field mt-2" /></Label><Label t="اللون الأساسي"><input type="color" value={dialog.primary_color || "#7f1d1d"} onChange={(e) => setDialog({ ...dialog, primary_color: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label><Label t="اسم مستخدم مدير الشركة"><input required value={dialog.admin_username || ""} onChange={(e) => setDialog({ ...dialog, admin_username: e.target.value })} onBlur={(e) => setDialog((d) => ({ ...d, admin_username: e.target.value.trim() }))} className="field mt-2" /></Label><Label t="اسم مدير الشركة"><input value={dialog.admin_name || ""} onChange={(e) => setDialog({ ...dialog, admin_name: e.target.value })} className="field mt-2" /></Label><Label t="كلمة مرور مدير الشركة"><input type="password" value={dialog.admin_password || ""} placeholder={dialog.company_id ? "اتركها فارغة للإبقاء على كلمة المرور الحالية" : "123456"} onChange={(e) => setDialog({ ...dialog, admin_password: e.target.value })} className="field mt-2" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}
     </div>
   );
 }
