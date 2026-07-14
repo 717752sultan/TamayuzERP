@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import { inventoryService } from "./inventory";
+import { inventoryService, calculateInventoryLineTotal, getInventoryCurrency } from "./inventory";
 
 export const inventoryDocumentConfigs = {
   purchase_requests: {
@@ -94,7 +94,13 @@ const toDocumentDb = (type, doc = {}) => {
     approved_at: doc.approved_at || null,
     rejection_reason: String(doc.rejection_reason || ""),
     notes: String(doc.notes || ""),
-    total_amount: Number(doc.total_amount || doc.invoice_total || doc.net_amount || 0),
+    currency_code: String(doc.currency_code || "YER"),
+    currency_name: String(doc.currency_name || getInventoryCurrency(doc.currency_code || "YER").currency_name),
+    exchange_rate: Number(doc.exchange_rate || getInventoryCurrency(doc.currency_code || "YER").exchange_rate || 1),
+    base_currency_code: String(doc.base_currency_code || "YER"),
+    total_amount: Number(doc.total_amount || doc.invoice_total || doc.net_amount || doc.total_value || 0),
+    total_value: Number(doc.total_value || doc.total_amount || doc.invoice_total || doc.net_amount || 0),
+    total_value_base: Number(doc.total_value_base || 0),
     created_at: doc.created_at || new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
@@ -111,6 +117,12 @@ const fromDocumentDb = (type, row = {}) => {
     status: row.status || row.approval_status || "مسودة",
     approval_status: row.approval_status || row.status || "مسودة",
     total_amount: Number(row.total_amount || row.invoice_total || row.net_amount || 0),
+    total_value: Number(row.total_value || row.total_amount || row.invoice_total || row.net_amount || 0),
+    total_value_base: Number(row.total_value_base || 0),
+    currency_code: row.currency_code || "YER",
+    currency_name: row.currency_name || getInventoryCurrency(row.currency_code || "YER").currency_name,
+    exchange_rate: Number(row.exchange_rate || 1),
+    base_currency_code: row.base_currency_code || "YER",
   };
 };
 
@@ -135,7 +147,13 @@ const normalizeIssueVoucherForDb = (voucher = {}) => {
     approved_at: voucher.approved_at || null,
     rejection_reason: cleanText(voucher.rejection_reason),
     notes: cleanText(voucher.notes),
-    total_amount: Number(voucher.total_amount || voucher.net_amount || 0),
+    currency_code: cleanText(voucher.currency_code, "YER"),
+    currency_name: cleanText(voucher.currency_name, getInventoryCurrency(voucher.currency_code || "YER").currency_name),
+    exchange_rate: Number(voucher.exchange_rate || getInventoryCurrency(voucher.currency_code || "YER").exchange_rate || 1),
+    base_currency_code: cleanText(voucher.base_currency_code, "YER"),
+    total_amount: Number(voucher.total_amount || voucher.net_amount || voucher.total_value || 0),
+    total_value: Number(voucher.total_value || voucher.total_amount || voucher.net_amount || 0),
+    total_value_base: Number(voucher.total_value_base || 0),
     created_at: voucher.created_at || new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
@@ -144,6 +162,7 @@ const normalizeIssueVoucherForDb = (voucher = {}) => {
 const normalizeIssueDetailForDb = (detail = {}, issueId) => {
   const quantity = Number(detail.quantity_issued || detail.quantity_approved || detail.quantity_requested || detail.quantity || 0);
   const unitCost = Number(detail.unit_cost || detail.unit_price || detail.default_unit_cost || 0);
+  const totals = calculateInventoryLineTotal({ ...detail, quantity, unit_cost: unitCost });
   return {
     issue_detail_id: cleanText(detail.issue_detail_id || detail.id || detail.detail_id, makeId("ISD")),
     issue_id: issueId,
@@ -156,7 +175,14 @@ const normalizeIssueDetailForDb = (detail = {}, issueId) => {
     quantity_approved: Number(detail.quantity_approved || quantity),
     quantity_issued: quantity,
     unit_cost: unitCost,
-    total_value: Number(detail.total_value || detail.total_amount || quantity * unitCost),
+    unit_price: unitCost,
+    currency_code: totals.currency_code,
+    currency_name: totals.currency_name,
+    exchange_rate: totals.exchange_rate,
+    base_currency_code: totals.base_currency_code,
+    total_value: totals.total_value,
+    total_amount: totals.total_value,
+    total_value_base: totals.total_value_base,
     notes: cleanText(detail.notes),
   };
 };
@@ -175,7 +201,13 @@ const normalizeTransferVoucherForDb = (transfer = {}) => {
     status: cleanText(transfer.status, "مسودة"),
     approval_status: cleanText(transfer.approval_status || transfer.status, "مسودة"),
     notes: cleanText(transfer.notes),
-    total_amount: Number(transfer.total_amount || 0),
+    currency_code: cleanText(transfer.currency_code, "YER"),
+    currency_name: cleanText(transfer.currency_name, getInventoryCurrency(transfer.currency_code || "YER").currency_name),
+    exchange_rate: Number(transfer.exchange_rate || getInventoryCurrency(transfer.currency_code || "YER").exchange_rate || 1),
+    base_currency_code: cleanText(transfer.base_currency_code, "YER"),
+    total_amount: Number(transfer.total_amount || transfer.total_value || 0),
+    total_value: Number(transfer.total_value || transfer.total_amount || 0),
+    total_value_base: Number(transfer.total_value_base || 0),
     created_at: transfer.created_at || new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
@@ -184,6 +216,7 @@ const normalizeTransferVoucherForDb = (transfer = {}) => {
 const normalizeTransferDetailForDb = (detail = {}, transferId) => {
   const quantity = Number(detail.quantity || detail.quantity_issued || 0);
   const unitCost = Number(detail.unit_cost || detail.unit_price || detail.default_unit_cost || 0);
+  const totals = calculateInventoryLineTotal({ ...detail, quantity, unit_cost: unitCost });
   return {
     transfer_detail_id: cleanText(detail.transfer_detail_id || detail.id || detail.detail_id, makeId("TRD")),
     transfer_id: transferId,
@@ -193,7 +226,14 @@ const normalizeTransferDetailForDb = (detail = {}, transferId) => {
     unit_type: cleanText(detail.unit_type || detail.unit, "حبة"),
     quantity,
     unit_cost: unitCost,
-    total_value: Number(detail.total_value || detail.total_amount || quantity * unitCost),
+    unit_price: unitCost,
+    currency_code: totals.currency_code,
+    currency_name: totals.currency_name,
+    exchange_rate: totals.exchange_rate,
+    base_currency_code: totals.base_currency_code,
+    total_value: totals.total_value,
+    total_amount: totals.total_value,
+    total_value_base: totals.total_value_base,
     notes: cleanText(detail.notes),
   };
 };
@@ -229,6 +269,7 @@ const validateStockDocument = (type, payload, rows) => {
 const toDetailDb = (type, parentId, detail = {}) => {
   const config = inventoryDocumentConfigs[type];
   const detailIdKey = `${config.idKey.replace("_id", "")}_detail_id`;
+  const totals = calculateInventoryLineTotal(detail);
   return {
     [detailIdKey]: String(detail[detailIdKey] || detail.detail_id || `${parentId}-D-${Date.now()}-${Math.random().toString(16).slice(2)}`),
     [config.idKey]: parentId,
@@ -247,15 +288,19 @@ const toDetailDb = (type, parentId, detail = {}) => {
     quantity_approved: Number(detail.quantity_approved || detail.quantity || 0),
     quantity_issued: Number(detail.quantity_issued || detail.quantity || 0),
     returned_quantity: Number(detail.returned_quantity || detail.quantity || 0),
-    quantity: Number(detail.quantity || detail.quantity_issued || detail.accepted_quantity || detail.ordered_quantity || 0),
-    unit_price: Number(detail.unit_price || detail.unit_cost || 0),
-    unit_cost: Number(detail.unit_cost || detail.unit_price || 0),
-    total_amount: Number(detail.total_amount || detail.total_value || 0),
-    total_value: Number(detail.total_value || detail.total_amount || 0),
+    quantity: totals.quantity,
+    unit_price: totals.unit_price,
+    unit_cost: totals.unit_cost,
+    currency_code: totals.currency_code,
+    currency_name: totals.currency_name,
+    exchange_rate: totals.exchange_rate,
+    base_currency_code: totals.base_currency_code,
+    total_amount: totals.total_value,
+    total_value: totals.total_value,
+    total_value_base: totals.total_value_base,
     notes: String(detail.notes || ""),
   };
 };
-
 export const inventoryDocumentsService = {
   async loadDocuments(type) {
     const config = inventoryDocumentConfigs[type];
@@ -285,6 +330,15 @@ export const inventoryDocumentsService = {
       const payload = normalizeDocumentPayload(type, doc);
       const parentId = payload[config.idKey];
       const rows = config.detailTable && details.length ? normalizeDetailRows(type, parentId, details) : [];
+      if (rows.length) {
+        payload.total_amount = rows.reduce((sum, row) => sum + Number(row.total_value || row.total_amount || 0), 0);
+        payload.total_value = payload.total_amount;
+        payload.total_value_base = rows.reduce((sum, row) => sum + Number(row.total_value_base || 0), 0);
+        payload.currency_code = rows[0]?.currency_code || payload.currency_code || "YER";
+        payload.currency_name = rows[0]?.currency_name || payload.currency_name || getInventoryCurrency(payload.currency_code).currency_name;
+        payload.exchange_rate = rows[0]?.exchange_rate || payload.exchange_rate || 1;
+        payload.base_currency_code = "YER";
+      }
       if (details.length) validateStockDocument(type, payload, rows);
       const { data, error } = await supabase.from(config.table).upsert(payload, { onConflict: config.idKey }).select().single();
       if (error) throw error;
@@ -336,6 +390,10 @@ export const inventoryDocumentsService = {
             quantity_out: detail.quantity_issued,
             unit_cost: detail.unit_cost,
             total_value: detail.total_value,
+            total_value_base: detail.total_value_base,
+            currency_code: detail.currency_code,
+            currency_name: detail.currency_name,
+            exchange_rate: detail.exchange_rate,
             notes: detail.notes,
             created_by: user,
           });
@@ -370,6 +428,10 @@ export const inventoryDocumentsService = {
             quantity_out: detail.quantity,
             unit_cost: detail.unit_cost,
             total_value: detail.total_value,
+            total_value_base: detail.total_value_base,
+            currency_code: detail.currency_code,
+            currency_name: detail.currency_name,
+            exchange_rate: detail.exchange_rate,
             notes: detail.notes,
             created_by: user,
           });
@@ -388,6 +450,10 @@ export const inventoryDocumentsService = {
             quantity_out: 0,
             unit_cost: detail.unit_cost,
             total_value: detail.total_value,
+            total_value_base: detail.total_value_base,
+            currency_code: detail.currency_code,
+            currency_name: detail.currency_name,
+            exchange_rate: detail.exchange_rate,
             notes: detail.notes,
             created_by: user,
           });
@@ -429,7 +495,11 @@ export const inventoryDocumentsService = {
         quantity_in: signIn ? qty : 0,
         quantity_out: signIn ? 0 : qty,
         unit_cost: unitCost,
-        total_value: qty * unitCost,
+        total_value: calculateInventoryLineTotal({ ...detail, quantity: qty, unit_cost: unitCost }).total_value,
+        total_value_base: calculateInventoryLineTotal({ ...detail, quantity: qty, unit_cost: unitCost }).total_value_base,
+        currency_code: detail.currency_code || doc.currency_code || "YER",
+        currency_name: detail.currency_name || doc.currency_name || getInventoryCurrency(detail.currency_code || doc.currency_code || "YER").currency_name,
+        exchange_rate: detail.exchange_rate || doc.exchange_rate || getInventoryCurrency(detail.currency_code || doc.currency_code || "YER").exchange_rate,
         created_by: user,
       });
       movements.push(movement);
