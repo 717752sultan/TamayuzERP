@@ -5,7 +5,7 @@ let tenantState = {
   currentUser: null,
 };
 
-export const platformSuperAdminRole = "مشرف النظام العام";
+export const platformSuperAdminRole = "مدير عام النظام";
 
 export const normalizeCompany = (row = {}) => ({
   company_id: row.company_id || row.id || "",
@@ -139,6 +139,7 @@ export const tenantAwareTables = new Set([
   "daily_operations",
   "incentives",
   "guarantees",
+  "employee_guarantees",
   "overtime_assignments",
   "shift_types",
   "shift_type_periods",

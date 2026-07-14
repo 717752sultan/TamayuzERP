@@ -1,4 +1,20 @@
+import { getCurrentCompanyId } from "./tenant";
 import { supabase } from "./supabase";
+
+export const guaranteeTableCandidates = ["guarantees", "employee_guarantees"];
+
+const isMissingTableError = (error = {}) => {
+  const message = String(error.message || error || "").toLowerCase();
+  return (
+    message.includes("could not find") ||
+    message.includes("does not exist") ||
+    message.includes("relation") ||
+    message.includes("schema cache") ||
+    message.includes("404")
+  );
+};
+
+const cleanStatus = (value, fallback = "سارية") => String(value || fallback);
 
 const normalizeGuaranteeForDb = (item = {}) => ({
   guarantee_id: String(item.guarantee_id || item.id || `G-${Date.now()}`).trim(),
@@ -12,10 +28,11 @@ const normalizeGuaranteeForDb = (item = {}) => ({
   commercial_shop_name: String(item.commercial_shop_name || item.commercialShopName || ""),
   commercial_shop_location: String(item.commercial_shop_location || item.commercialShopLocation || ""),
   commercial_register_number: String(item.commercial_register_number || item.commercialRegisterNumber || "").trim(),
+  guarantee_type: String(item.guarantee_type || item.guaranteeType || "ضمان تجاري"),
   guarantee_date: item.guarantee_date || item.guaranteeDate || null,
   guarantee_expiry_date: item.guarantee_expiry_date || item.guaranteeExpiryDate || null,
-  guarantee_status: String(item.guarantee_status || item.guaranteeStatus || "سارية"),
-  approval_status: String(item.approval_status || item.approvalStatus || "مسودة"),
+  guarantee_status: cleanStatus(item.guarantee_status || item.guaranteeStatus),
+  approval_status: cleanStatus(item.approval_status || item.approvalStatus, "مسودة"),
   approved_by: String(item.approved_by || item.approvedBy || ""),
   approved_at: item.approved_at || item.approvedAt || null,
   rejection_reason: String(item.rejection_reason || item.rejectionReason || ""),
@@ -25,8 +42,8 @@ const normalizeGuaranteeForDb = (item = {}) => ({
   updated_at: new Date().toISOString(),
 });
 
-const fromDb = (row = {}) => ({
-  guarantee_id: row.guarantee_id,
+export const guaranteeFromDb = (row = {}) => ({
+  guarantee_id: row.guarantee_id || row.id || "",
   employee_id: row.employee_id || "",
   employee_name: row.employee_name || "",
   branch: row.branch || "",
@@ -37,6 +54,7 @@ const fromDb = (row = {}) => ({
   commercial_shop_name: row.commercial_shop_name || "",
   commercial_shop_location: row.commercial_shop_location || "",
   commercial_register_number: row.commercial_register_number || "",
+  guarantee_type: row.guarantee_type || "ضمان تجاري",
   guarantee_date: row.guarantee_date || "",
   guarantee_expiry_date: row.guarantee_expiry_date || "",
   guarantee_status: row.guarantee_status || "سارية",
@@ -50,43 +68,102 @@ const fromDb = (row = {}) => ({
   updated_at: row.updated_at || "",
 });
 
-export const guaranteesService = {
-  async list() {
+let activeGuaranteesTable = null;
+
+async function selectFromTable(table) {
+  const companyId = getCurrentCompanyId();
+  if (!companyId) return [];
+  const query = `select=*&company_id=eq.${encodeURIComponent(companyId)}&order=guarantee_date.desc`;
+  return supabase.select(table, query);
+}
+
+async function resolveTableForWrite() {
+  if (activeGuaranteesTable) return activeGuaranteesTable;
+  for (const table of guaranteeTableCandidates) {
     try {
-      const rows = await supabase.select("employee_guarantees", "select=*&order=guarantee_date.desc");
-      return (rows || []).map(fromDb);
+      await selectFromTable(table);
+      activeGuaranteesTable = table;
+      return table;
     } catch (error) {
-      console.error("Supabase employee_guarantees load/save error:", error);
-      throw new Error("فشل تحميل بيانات ضمانات الموظفين من Supabase: " + error.message);
+      if (!isMissingTableError(error)) throw error;
     }
+  }
+  return null;
+}
+
+export const guaranteesService = {
+  get activeTable() {
+    return activeGuaranteesTable;
+  },
+  async list() {
+    const companyId = getCurrentCompanyId();
+    if (!companyId) return [];
+
+    for (const table of guaranteeTableCandidates) {
+      try {
+        const rows = await selectFromTable(table);
+        activeGuaranteesTable = table;
+        return (Array.isArray(rows) ? rows : []).map(guaranteeFromDb);
+      } catch (error) {
+        console.error("Guarantees load error:", error);
+        if (!isMissingTableError(error)) {
+          throw new Error("تعذر تحميل ضمانات الموظفين");
+        }
+      }
+    }
+
+    return [];
   },
   async upsert(guarantee) {
-    try {
-      const payload = normalizeGuaranteeForDb(guarantee);
-      const { data, error } = await supabase
-        .from("employee_guarantees")
-        .upsert(payload, { onConflict: "guarantee_id" })
-        .select()
-        .single();
-      if (error) throw error;
-      return fromDb(data);
-    } catch (error) {
-      console.error("Supabase employee_guarantees load/save error:", error);
-      throw new Error("فشل حفظ بيانات الضمانة في Supabase: " + error.message);
+    const table = await resolveTableForWrite();
+    if (!table) {
+      throw new Error("لم يتم ربط بيانات ضمانات الموظفين بقاعدة البيانات بعد");
     }
+
+    const payload = normalizeGuaranteeForDb(guarantee);
+    const { data, error } = await supabase
+      .from(table)
+      .upsert(payload, { onConflict: "guarantee_id" })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Guarantees save error:", error);
+      throw new Error("تعذر حفظ بيانات الضمانة");
+    }
+
+    return guaranteeFromDb(data);
   },
   async remove(id) {
+    const table = await resolveTableForWrite();
+    if (!table) {
+      throw new Error("لم يتم ربط بيانات ضمانات الموظفين بقاعدة البيانات بعد");
+    }
+
     try {
-      return await supabase.request(`/rest/v1/employee_guarantees?guarantee_id=eq.${encodeURIComponent(id)}`, {
+      return await supabase.request(`/rest/v1/${table}?guarantee_id=eq.${encodeURIComponent(id)}`, {
         method: "DELETE",
         prefer: "return=minimal",
       });
     } catch (error) {
-      console.error("Supabase employee_guarantees load/save error:", error);
-      throw new Error("فشل حذف الضمانة من Supabase: " + error.message);
+      console.error("Guarantees delete error:", error);
+      throw new Error("تعذر حذف الضمانة");
     }
   },
   subscribe(onChange) {
-    return supabase.subscribeToTable("employee_guarantees", onChange);
+    try {
+      const unsubs = guaranteeTableCandidates.map((table) => {
+        try {
+          return supabase.subscribeToTable(table, onChange);
+        } catch (error) {
+          console.error("Guarantees realtime error:", error);
+          return null;
+        }
+      });
+      return () => unsubs.forEach((unsubscribe) => unsubscribe?.());
+    } catch (error) {
+      console.error("Guarantees realtime error:", error);
+      return () => {};
+    }
   },
 };

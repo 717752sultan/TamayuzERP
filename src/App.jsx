@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   LayoutDashboard,
@@ -97,6 +97,7 @@ import { generateRecruitmentReports } from "./services/recruitmentReports";
 import { backupService } from "./services/backup";
 import { companiesService } from "./services/companies";
 import { clearTenantSession, getCurrentCompany, getCurrentUser, loadTenantSession, platformSuperAdminRole, setTenantSession } from "./services/tenant";
+import { assistantModes } from "./constants/pageRegistry";
 const icons = {
   dashboard: LayoutDashboard,
   employees: Users,
@@ -220,10 +221,10 @@ const defaultSettings = {
     { name: "الإدارة العليا", description: "عرض التقارير واعتماد الحوافز" },
   ],
   users: [
-    { name: "محمد العتيبي", username: "admin", password: "", role: "مدير النظام", employeeId: "" },
+    { name: "سلطان الشجني", username: "admin", password: "", role: "مدير عام النظام", employeeId: "" },
     { name: "أحمد محمد السالم", username: "employee", password: "", role: "الموظف", employeeId: "EMP-001" },
   ],
-  manager: { name: "محمد العتيبي", username: "admin", role: "مدير النظام" },
+  manager: { name: "سلطان الشجني", username: "admin", role: "مدير عام النظام" },
 };
 const colors = {
   "ممتاز": "bg-emerald-50 text-emerald-700",
@@ -494,8 +495,42 @@ function LoadingScreen({ message = "جاري تحميل البيانات..." }) 
     </div>
   );
 }
+class PageErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error, info) {
+    console.error("Page render error:", error, info);
+  }
+  componentDidUpdate(prevProps) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.hasError) {
+      this.setState({ hasError: false });
+    }
+  }
+  render() {
+    if (!this.state.hasError) return this.props.children;
+    return (
+      <div className="grid min-h-[60vh] place-items-center p-5" dir="rtl">
+        <div className="panel max-w-xl p-8 text-center">
+          <AlertTriangle className="mx-auto mb-4 text-red-600" size={42} />
+          <h2 className="text-xl font-extrabold">حدث خطأ أثناء تحميل الصفحة</h2>
+          <p className="mt-3 text-sm leading-7 text-slate-500">
+            يرجى تحديث الصفحة أو التواصل مع مدير النظام.
+          </p>
+          <button type="button" onClick={this.props.onBack} className="btn-primary mt-5">
+            العودة إلى لوحة التحكم
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
 const isAdminLikeRole = (role = "") =>
-  ["مدير النظام", "الإدارة العليا", "مشرف النظام العام"].some((x) => String(role).includes(x));
+  ["مدير النظام", "مدير عام النظام", "الإدارة العليا"].some((x) => String(role).includes(x));
 const canByPermission = (permissions, role, pageKey, action = "can_view") => {
   if (isAdminLikeRole(role)) return true;
   if (!permissions?.length) return action === "can_view" ? false : true;
@@ -519,7 +554,7 @@ const permissionNodeGroups = {
   templates: ["templates"],
   incentives: ["incentives_calculation", "incentives_approval"],
   audit_logs: ["audit_logs"],
-  ai_assistant: ["ai_chat", "ai_reports_analysis"],
+  ai_assistant: ["ai_chat", "ai_reports_analysis", "ai_navigation", "ai_report_generator", "ai_plan_generator", "ai_hr_letters", "ai_inventory_analysis", "ai_performance_analysis"],
 };
 const hasTreePermission = (rows, role, nodeKey, action = "can_view") => {
   if (isAdminLikeRole(role)) return true;
@@ -918,6 +953,7 @@ export default function App() {
           </div>
         </header>
         <main className="p-4 md:p-7">
+          <PageErrorBoundary resetKey={activePage} onBack={() => setPage("dashboard")}>
           {activePage === "companies_admin" && <CompaniesAdminPage {...p} />}{" "}
           {activePage === "dashboard" && <Dashboard {...p} />}{" "}
           {activePage === "employees" && <EnhancedEmployees {...p} />}{" "}
@@ -942,8 +978,9 @@ export default function App() {
 	          {activePage === "reports" && <EnhancedReports {...p} />}{" "}
 	          {activePage === "settings" && <SettingsPage {...p} />}
           {fullHrNavItems.some(([id]) => id === activePage) && <HRModulePage pageKey={activePage} currentCompany={company} can={p.can} />}
+          </PageErrorBoundary>
         </main>
-        <AIAssistantWidget currentUser={p.currentUser} page={activePage} />
+        <AIAssistantWidget currentUser={p.currentUser} currentCompany={company} page={activePage} setPage={setPage} can={p.can} employees={employees} evaluations={evaluations} settings={settings} />
       </div>
     </div>
   );
@@ -3989,12 +4026,14 @@ const makeOvertimeMessage = (assignment, employee) =>
 شاكرين لكم تعاونكم والتزامكم.
 إدارة الموارد البشرية`;
 const tableColumnsGuarantees = [
-  { key: "employee_name", label: "الموظف" },
-  { key: "employee_id", label: "رقم الموظف" },
+  { key: "guarantee_id", label: "رقم الضمان" },
+  { key: "employee_name", label: "اسم الموظف" },
   { key: "branch", label: "الفرع" },
+  { key: "guarantee_type", label: "نوع الضمان" },
   { key: "guarantor_name", label: "اسم الضامن" },
-  { key: "commercial_register_number", label: "السجل التجاري" },
-  { key: "guarantee_date", label: "تاريخ الضمانة" },
+  { key: "guarantor_phone", label: "رقم هاتف الضامن" },
+  { key: "guarantee_date", label: "تاريخ الضمان" },
+  { key: "guarantee_expiry_date", label: "تاريخ الانتهاء" },
   { key: "guarantee_status", label: "الحالة" },
 ];
 const tableColumnsOvertime = [
@@ -4007,13 +4046,19 @@ const tableColumnsOvertime = [
   { key: "status", label: "الحالة" },
 ];
 
-function EmployeeGuaranteesPage({ employees, currentUser, can }) {
+function EmployeeGuaranteesPage({ employees = [], currentUser, currentCompany, can }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState(null);
   const [viewing, setViewing] = useState(null);
-  const [filters, setFilters] = useState({ q: "", branch: "all", status: "all", month: "" });
+  const [filters, setFilters] = useState({ q: "", branch: "all", type: "all", status: "all", from: "", to: "", month: "" });
+  const safeEmployees = Array.isArray(employees) ? employees : [];
+  const safeItems = Array.isArray(items) ? items : [];
+  const companyId = currentCompany?.company_id || currentUser?.company_id || null;
+  const localBranchOptions = [...new Set([...safeEmployees.map((e) => e?.branch), ...safeItems.map((g) => g?.branch), ...branches].filter(Boolean))];
+  const guaranteeTypes = [...new Set(["ضمان تجاري", "ضمان شخصي", "ضمان بنكي", ...safeItems.map((g) => g?.guarantee_type).filter(Boolean)])];
+  const canView = can?.("guarantees", "can_view") !== false;
   const canCreate = can?.("guarantees", "can_create") !== false;
   const canEdit = can?.("guarantees", "can_edit") !== false;
   const canDelete = can?.("guarantees", "can_delete") !== false;
@@ -4021,9 +4066,16 @@ function EmployeeGuaranteesPage({ employees, currentUser, can }) {
     setLoading(true);
     setError("");
     try {
+      if (!companyId) {
+        setItems([]);
+        setError("لم يتم تحديد الشركة الحالية");
+        return;
+      }
       setItems(await guaranteesService.list());
     } catch (e) {
-      setError(e.message);
+      console.error("Guarantees page load error:", e);
+      setItems([]);
+      setError(e.message || "تعذر تحميل ضمانات الموظفين");
     } finally {
       setLoading(false);
     }
@@ -4031,26 +4083,33 @@ function EmployeeGuaranteesPage({ employees, currentUser, can }) {
   useEffect(() => {
     load();
     return guaranteesService.subscribe(load);
-  }, []);
-  const filtered = items.filter((g) => {
+  }, [companyId]);
+  if (!canView) {
+    return <div className="panel p-8 text-center font-bold text-slate-500">لا تملك صلاحية عرض ضمانات الموظفين</div>;
+  }
+  const filtered = safeItems.filter((g = {}) => {
     const q = filters.q.trim();
     const textOk =
       !q ||
-      g.employee_name.includes(q) ||
-      g.employee_id.includes(q) ||
-      g.guarantor_name.includes(q);
+      String(g.employee_name || "").includes(q) ||
+      String(g.employee_id || "").includes(q) ||
+      String(g.guarantor_name || "").includes(q) ||
+      String(g.guarantee_id || "").includes(q);
     const branchOk = filters.branch === "all" || g.branch === filters.branch;
+    const typeOk = filters.type === "all" || g.guarantee_type === filters.type;
     const statusOk = filters.status === "all" || g.guarantee_status === filters.status;
-    const monthOk = !filters.month || String(g.guarantee_date || "").startsWith(filters.month);
-    return textOk && branchOk && statusOk && monthOk;
+    const date = String(g.guarantee_date || "");
+    const fromOk = !filters.from || date >= filters.from;
+    const toOk = !filters.to || date <= filters.to;
+    return textOk && branchOk && typeOk && statusOk && fromOk && toOk;
   });
-  const activeEmployeeIds = new Set(items.filter((g) => g.guarantee_status === "سارية").map((g) => g.employee_id));
+  const activeEmployeeIds = new Set(safeItems.filter((g) => g?.guarantee_status === "سارية").map((g) => g.employee_id));
   const cards = [
-    ["إجمالي الضمانات", items.length, ShieldCheck],
-    ["الضمانات السارية", items.filter((g) => g.guarantee_status === "سارية").length, BadgeCheck],
-    ["الضمانات المنتهية", items.filter((g) => g.guarantee_status === "منتهية").length, AlertTriangle],
-    ["الضمانات الناقصة", items.filter((g) => g.guarantee_status === "ناقصة").length, FileBarChart],
-    ["الموظفون بدون ضمانة", employees.filter((e) => !activeEmployeeIds.has(e.id)).length, Users],
+    ["إجمالي الضمانات", safeItems.length, ShieldCheck],
+    ["ضمانات نشطة", safeItems.filter((g) => g?.guarantee_status === "سارية").length, BadgeCheck],
+    ["ضمانات منتهية", safeItems.filter((g) => g?.guarantee_status === "منتهية").length, AlertTriangle],
+    ["ضمانات تحتاج مراجعة", safeItems.filter((g) => ["ناقصة", "موقوفة"].includes(g?.guarantee_status) || g?.approval_status === "قيد المراجعة").length, FileBarChart],
+    ["الموظفون بدون ضمانة", safeEmployees.filter((e) => !activeEmployeeIds.has(e.id)).length, Users],
   ];
   const openAdd = () => {
     if (!canCreate) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
@@ -4068,12 +4127,13 @@ function EmployeeGuaranteesPage({ employees, currentUser, can }) {
       commercial_register_number: "",
       guarantee_date: new Date().toISOString().slice(0, 10),
       guarantee_expiry_date: "",
+      guarantee_type: "ضمان تجاري",
       guarantee_status: "سارية",
       notes: "",
     });
   };
   const selectEmployee = (id) => {
-    const employee = employees.find((e) => e.id === id);
+    const employee = safeEmployees.find((e) => e.id === id);
     setDialog((d) => ({
       ...d,
       employee_id: id,
@@ -4084,8 +4144,8 @@ function EmployeeGuaranteesPage({ employees, currentUser, can }) {
   };
   const save = async (event) => {
     event.preventDefault();
-    if (!canEdit && items.some((g) => g.guarantee_id === dialog.guarantee_id)) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
-    if (!canCreate && !items.some((g) => g.guarantee_id === dialog.guarantee_id)) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!canEdit && safeItems.some((g) => g.guarantee_id === dialog.guarantee_id)) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!canCreate && !safeItems.some((g) => g.guarantee_id === dialog.guarantee_id)) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
     const required = [
       ["employee_id", "الموظف"],
       ["guarantor_name", "اسم الضامن"],
@@ -4094,7 +4154,7 @@ function EmployeeGuaranteesPage({ employees, currentUser, can }) {
       ["guarantee_date", "تاريخ الضمانة"],
     ].filter(([key]) => !dialog[key]);
     if (required.length) return alert(`يرجى إدخال الحقول المطلوبة: ${required.map((x) => x[1]).join("، ")}`);
-    const duplicateGuarantor = items.find(
+    const duplicateGuarantor = safeItems.find(
       (g) =>
         g.guarantee_id !== dialog.guarantee_id &&
         g.guarantee_status === "سارية" &&
@@ -4102,7 +4162,7 @@ function EmployeeGuaranteesPage({ employees, currentUser, can }) {
         g.employee_id !== dialog.employee_id,
     );
     if (duplicateGuarantor) return alert("لا يمكن استخدام نفس رقم هوية الضامن لأكثر من موظف نشط.");
-    const duplicateRegister = items.find(
+    const duplicateRegister = safeItems.find(
       (g) =>
         g.guarantee_id !== dialog.guarantee_id &&
         g.guarantee_status === "سارية" &&
@@ -4115,7 +4175,7 @@ function EmployeeGuaranteesPage({ employees, currentUser, can }) {
       auditService.log({
         user_id: currentUser?.user_id || currentUser?.username,
         user_name: currentUser?.username || currentUser?.name,
-        action: items.some((g) => g.guarantee_id === dialog.guarantee_id) ? "تعديل ضمانة" : "إضافة ضمانة",
+        action: safeItems.some((g) => g.guarantee_id === dialog.guarantee_id) ? "تعديل ضمانة" : "إضافة ضمانة",
         module_name: "employee_guarantees",
         record_id: saved.guarantee_id,
         new_data: saved,
@@ -4142,39 +4202,43 @@ function EmployeeGuaranteesPage({ employees, currentUser, can }) {
   const exportRows = reportRowsForExport(filtered, tableColumnsGuarantees);
   return (
     <div className="space-y-5">
-      <PageHead title="ضمانات الموظفين" desc="إدارة الضمانات التجارية للموظفين ومتابعة حالتها" action={<button onClick={openAdd} className="btn-primary"><Plus size={18} /> إضافة ضمانة</button>} />
-      {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
+      <PageHead title="ضمانات الموظفين" desc="إدارة الضمانات التجارية للموظفين ومتابعة حالتها" action={<button disabled={!canCreate} onClick={openAdd} className="btn-primary"><Plus size={18} /> إضافة ضمان</button>} />
+      {error && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-700">{error}</div>}
+      {!error && !safeItems.length && !loading && <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm font-bold text-slate-600">لم يتم ربط بيانات ضمانات الموظفين بقاعدة البيانات بعد، أو لا توجد ضمانات مسجلة لهذه الشركة.</div>}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">{cards.map(([label, value, I]) => <Mini key={label} label={label} value={value} I={I} />)}</div>
       <div className="panel flex flex-wrap gap-3 p-4">
-        <input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="اكتب سبب طلب المراجعة..." />
-        <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branchOptions.map((b) => <option key={b}>{b}</option>)}</select>
+        <input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="الموظف / رقم الضمان / الضامن" />
+        <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{localBranchOptions.map((b) => <option key={b}>{b}</option>)}</select>
+        <select value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })} className="field max-w-[170px]"><option value="all">نوع الضمان</option>{guaranteeTypes.map((s) => <option key={s}>{s}</option>)}</select>
         <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[170px]"><option value="all">كل الحالات</option>{guaranteeStatuses.map((s) => <option key={s}>{s}</option>)}</select>
-        <input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field max-w-[170px]" />
+        <input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} className="field max-w-[170px]" title="من تاريخ" />
+        <input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} className="field max-w-[170px]" title="إلى تاريخ" />
         <button onClick={() => exportExcel(exportRows, "تقرير ضمانات الموظفين")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button>
         <button onClick={() => printDocument("تقرير ضمانات الموظفين", rowsToReportHtml("تقرير ضمانات الموظفين", filtered, tableColumnsGuarantees))} className="btn-secondary"><Printer size={17} /> PDF</button>
         <button onClick={() => exportDocx("تقرير ضمانات الموظفين", exportRows)} className="btn-secondary"><Download size={17} /> Word</button>
       </div>
       <div className="panel p-4">
         {loading ? <LoadingScreen message="جاري تحميل الضمانات..." /> : (
-          <div className="table-wrap"><table><thead><tr>{tableColumnsGuarantees.map((c) => <th key={c.key}>{c.label}</th>)}<th></th></tr></thead><tbody>{filtered.map((g) => <tr key={g.guarantee_id}><td>{g.employee_name}</td><td>{g.employee_id}</td><td>{g.branch}</td><td>{g.guarantor_name}</td><td>{g.commercial_register_number}</td><td>{g.guarantee_date}</td><td><Status>{g.guarantee_status}</Status></td><td><button onClick={() => setViewing(g)} className="p-2 text-slate-600"><Eye size={16} /></button><button onClick={() => setDialog(g)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => remove(g.guarantee_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>
+          <div className="table-wrap"><table><thead><tr>{tableColumnsGuarantees.map((c) => <th key={c.key}>{c.label}</th>)}<th>الإجراءات</th></tr></thead><tbody>{filtered.length ? filtered.map((g) => <tr key={g.guarantee_id}><td>{g.guarantee_id}</td><td>{g.employee_name}</td><td>{g.branch}</td><td>{g.guarantee_type || "ضمان تجاري"}</td><td>{g.guarantor_name}</td><td>{g.guarantor_phone}</td><td>{g.guarantee_date}</td><td>{g.guarantee_expiry_date}</td><td><Status>{g.guarantee_status}</Status></td><td><button onClick={() => setViewing(g)} className="p-2 text-slate-600"><Eye size={16} /></button><button disabled={!canEdit} onClick={() => setDialog(g)} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canDelete} onClick={() => remove(g.guarantee_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>) : <tr><td colSpan={10} className="py-8 text-center text-slate-400">لا توجد بيانات ضمانات مطابقة</td></tr>}</tbody></table></div>
         )}
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <ReportBox title="تقرير حسب الفرع" rows={Object.entries(groupCount(filtered, "branch"))} />
         <ReportBox title="تقرير حسب الحالة" rows={Object.entries(groupCount(filtered, "guarantee_status"))} />
-        <ReportBox title="الموظفون بدون ضمانة سارية" rows={employees.filter((e) => !activeEmployeeIds.has(e.id)).map((e) => [e.name, e.branch])} />
-        <ReportBox title="الضامنون المستخدمون أكثر من مرة" rows={Object.entries(groupCount(items, "guarantor_id_number")).filter(([, n]) => n > 1)} />
+        <ReportBox title="الموظفون بدون ضمانة سارية" rows={safeEmployees.filter((e) => !activeEmployeeIds.has(e.id)).map((e) => [e.name, e.branch])} />
+        <ReportBox title="الضامنون المستخدمون أكثر من مرة" rows={Object.entries(groupCount(safeItems, "guarantor_id_number")).filter(([, n]) => n > 1)} />
       </div>
       {dialog && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
           <form onSubmit={save} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6">
-            <div className="mb-5 flex"><h3 className="text-xl font-extrabold">{items.some((g) => g.guarantee_id === dialog.guarantee_id) ? "تعديل ضمانة" : "إضافة ضمانة"}</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div>
+            <div className="mb-5 flex"><h3 className="text-xl font-extrabold">{safeItems.some((g) => g.guarantee_id === dialog.guarantee_id) ? "تعديل ضمان" : "إضافة ضمان"}</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div>
             <div className="grid gap-4 md:grid-cols-3">
-              <Label t="الموظف"><select required value={dialog.employee_id} onChange={(e) => selectEmployee(e.target.value)} className="field mt-2"><option value="">اختر الموظف</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.name} - {e.id}</option>)}</select></Label>
+              <Label t="الموظف"><select required value={dialog.employee_id} onChange={(e) => selectEmployee(e.target.value)} className="field mt-2"><option value="">اختر الموظف</option>{safeEmployees.map((e) => <option key={e.id} value={e.id}>{e.name} - {e.id}</option>)}</select></Label>
               {["employee_name", "branch", "job"].map((k) => <Label key={k} t={{ employee_name: "اسم الموظف", branch: "الفرع", job: "الوظيفة" }[k]}><input readOnly value={dialog[k]} className="field mt-2 bg-slate-50" /></Label>)}
               <Label t="اسم الضامن"><input required value={dialog.guarantor_name} onChange={(e) => setDialog({ ...dialog, guarantor_name: e.target.value })} className="field mt-2" /></Label>
               <Label t="رقم هوية الضامن"><input required value={dialog.guarantor_id_number} onChange={(e) => setDialog({ ...dialog, guarantor_id_number: e.target.value })} className="field mt-2" /></Label>
               <Label t="هاتف الضامن"><input value={dialog.guarantor_phone} onChange={(e) => setDialog({ ...dialog, guarantor_phone: e.target.value })} className="field mt-2" /></Label>
+              <Label t="نوع الضمان"><select value={dialog.guarantee_type || "ضمان تجاري"} onChange={(e) => setDialog({ ...dialog, guarantee_type: e.target.value })} className="field mt-2">{guaranteeTypes.map((s) => <option key={s}>{s}</option>)}</select></Label>
               <Label t="اسم المحل التجاري"><input value={dialog.commercial_shop_name} onChange={(e) => setDialog({ ...dialog, commercial_shop_name: e.target.value })} className="field mt-2" /></Label>
               <Label t="موقع المحل التجاري"><input value={dialog.commercial_shop_location} onChange={(e) => setDialog({ ...dialog, commercial_shop_location: e.target.value })} className="field mt-2" /></Label>
               <Label t="رقم السجل التجاري"><input required value={dialog.commercial_register_number} onChange={(e) => setDialog({ ...dialog, commercial_register_number: e.target.value })} className="field mt-2" /></Label>
@@ -5130,23 +5194,142 @@ function KpiScoresPage({ employees }) {
   return <div className="space-y-5"><PageHead title="درجات KPI" desc="احتساب تلقائي من العمليات اليومية حسب وظيفة الموظف" action={<button onClick={() => kpiCalculationService.recalculateMonthKpis(employees, month).then(setScores).catch((e) => alert(e.message))} className="btn-primary"><Gauge size={18} /> إعادة حساب الشهر</button>} /><div className="panel flex gap-3 p-4"><input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="field max-w-[180px]" /><button onClick={() => exportExcel(scores, "درجات KPI")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="grid gap-5 xl:grid-cols-2"><Chart title="أفضل الموظفين حسب KPI" sub="المقارنة داخل معايير كل وظيفة"><ResponsiveContainer width="100%" height={280}><BarChart data={grouped.slice(0, 10)}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis /><Tooltip /><Bar dataKey="total" fill="#7f1d1d" radius={[8,8,0,0]} /></BarChart></ResponsiveContainer></Chart><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>الموظف</th><th>الوظيفة</th><th>المعيار</th><th>القيمة</th><th>الدرجة</th><th>الموزونة</th></tr></thead><tbody>{scores.map((r) => <tr key={r.score_id}><td>{r.employee_name}</td><td>{r.job_name}</td><td>{r.criterion_name}</td><td>{r.actual_value}</td><td>{r.score}</td><td>{r.weighted_score.toFixed(2)}</td></tr>)}</tbody></table></div></div></div></div>;
 }
 
-function AIAssistantWidget({ currentUser, page }) {
-  const [open, setOpen] = useState(false), [session, setSession] = useState(null), [messages, setMessages] = useState([]), [input, setInput] = useState(""), [loading, setLoading] = useState(false);
-  const suggestions = ["ما ملخص أداء الموظفين هذا الشهر؟", "ما الأصناف التي تحتاج شراء؟", "ما أكثر فرع نشاطًا؟", "اقترح معايير تقييم لمدير فرع."];
+function AIAssistantWidget({ currentUser, currentCompany, page, setPage, can, employees = [], evaluations = [], settings = {} }) {
+  const [open, setOpen] = useState(false);
+  const [session, setSession] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [mode, setMode] = useState(assistantModes[0]?.id || "navigation");
+  const [filters, setFilters] = useState({ branch: "all", month: "", employee: "", department: "", reportType: "" });
+  const [loading, setLoading] = useState(false);
+  const role = currentUser?.role || "";
+  const canView = isAdminLikeRole(role) || can?.("ai_assistant", "can_view") !== false;
+  const selectedMode = assistantModes.find((item) => item.id === mode) || assistantModes[0];
+  const lastAssistantMessage = [...messages].reverse().find((item) => item.role === "assistant")?.message || "";
+  const branchOptions = [...new Set([...(settings.branches || []), ...employees.map((employee) => employee.branch)].filter(Boolean))];
+
+  if (!canView) return null;
+
   const send = async (text = input) => {
-    if (!text.trim()) return;
+    const question = String(text || "").trim();
+    if (!question) return;
     setLoading(true);
     try {
       let current = session;
-      if (!current) { current = await aiAssistantService.createChatSession(currentUser?.user_id || currentUser?.username || "", "محادثة المساعد"); setSession(current); }
-      const userMsg = { session_id: current.session_id, user_id: currentUser?.user_id || "", role: "user", message: text, context: { page } };
-      setMessages((m) => [...m, userMsg]); setInput(""); await aiAssistantService.saveChatMessage(userMsg);
-      const reply = await aiAssistantService.generateAssistantReply(text);
-      const assistantMsg = { session_id: current.session_id, user_id: currentUser?.user_id || "", role: "assistant", message: reply, context: { page } };
-      await aiAssistantService.saveChatMessage(assistantMsg); setMessages((m) => [...m, assistantMsg]);
-    } catch (e) { alert(e.message); } finally { setLoading(false); }
+      if (!current) {
+        current = await aiAssistantService.createChatSession(currentUser?.user_id || currentUser?.username || "", "محادثة المساعد");
+        setSession(current);
+      }
+      const contextInput = { employees, evaluations, settings, filters, currentUser, currentCompany };
+      const userMsg = { session_id: current.session_id, user_id: currentUser?.user_id || "", role: "user", message: question, context: { page, mode, filters } };
+      setMessages((list) => [...list, userMsg]);
+      setInput("");
+      await aiAssistantService.saveChatMessage(userMsg);
+      const reply = await aiAssistantService.generateAssistantReply(question, contextInput, {
+        canOpenPage: (pageKey) => can?.(pageKey, "can_view") !== false,
+        navigateToPage: (pageKey) => setPage(pageKey),
+      });
+      const assistantMsg = { session_id: current.session_id, user_id: currentUser?.user_id || "", role: "assistant", message: reply, context: { page, mode, filters } };
+      await aiAssistantService.saveChatMessage(assistantMsg);
+      setMessages((list) => [...list, assistantMsg]);
+    } catch (error) {
+      console.error("AI assistant UI error:", error);
+      setMessages((list) => [...list, { role: "assistant", message: error.message || "تعذر تنفيذ طلب المساعد حالياً." }]);
+    } finally {
+      setLoading(false);
+    }
   };
-  return <div className="fixed bottom-5 left-5 z-40 no-print"><button onClick={() => setOpen(!open)} className="grid h-14 w-14 place-items-center rounded-full bg-brand-700 text-white shadow-xl"><MessageSquareWarning /></button>{open && <div className="absolute bottom-16 left-0 w-[360px] overflow-hidden rounded-2xl border bg-white shadow-2xl"><div className="bg-brand-700 p-4 text-white"><div className="flex"><b>المساعد الذكي</b><button onClick={() => setMessages([])} className="mr-auto text-xs">مسح</button></div><p className="mt-1 text-xs opacity-80">يعمل حاليًا بوضع التحليل الداخلي بدون اتصال خارجي.</p></div><div className="h-80 space-y-2 overflow-y-auto p-3">{!messages.length && <div className="space-y-2">{suggestions.map((s) => <button key={s} onClick={() => send(s)} className="w-full rounded-xl bg-slate-50 p-2 text-right text-xs">{s}</button>)}</div>}{messages.map((m, i) => <div key={i} className={`rounded-xl p-3 text-sm ${m.role === "user" ? "bg-brand-50 text-brand-900" : "bg-slate-50"}`}>{m.message}</div>)}{loading && <p className="text-xs text-slate-400">المساعد يكتب...</p>}</div><div className="flex gap-2 border-t p-3"><input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} className="field" placeholder="اكتب سبب طلب المراجعة..." /><button onClick={() => send()} className="btn-primary">إرسال</button></div></div>}</div>;
+
+  const copyLast = () => {
+    if (!lastAssistantMessage) return;
+    navigator.clipboard?.writeText(lastAssistantMessage);
+  };
+  const exportLast = () => {
+    if (!lastAssistantMessage) return;
+    const blob = new Blob([lastAssistantMessage], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "assistant-answer.txt";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="fixed bottom-5 left-5 z-40 no-print">
+      <button onClick={() => setOpen(!open)} className="grid h-14 w-14 place-items-center rounded-full bg-brand-700 text-white shadow-xl">
+        <MessageSquareWarning />
+      </button>
+      {open && (
+        <div className="absolute bottom-16 left-0 flex max-h-[82vh] w-[min(920px,calc(100vw-2rem))] overflow-hidden rounded-3xl border bg-white shadow-2xl">
+          <aside className="hidden w-64 shrink-0 border-l bg-slate-50 p-3 md:block">
+            <b className="mb-3 block text-sm">أوضاع المساعد</b>
+            <div className="space-y-2">
+              {assistantModes.map((item) => (
+                <button key={item.id} onClick={() => setMode(item.id)} className={`w-full rounded-xl px-3 py-2 text-right text-xs font-bold ${mode === item.id ? "bg-brand-700 text-white" : "bg-white text-slate-600"}`}>
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </aside>
+          <section className="flex min-h-[560px] flex-1 flex-col">
+            <div className="bg-brand-700 p-4 text-white">
+              <div className="flex items-center gap-3">
+                <b>المساعد الذكي التشغيلي</b>
+                <button onClick={() => setMessages([])} className="mr-auto rounded-lg bg-white/10 px-3 py-1 text-xs">مسح</button>
+                <button onClick={() => setOpen(false)} className="rounded-lg bg-white/10 px-3 py-1 text-xs">إغلاق</button>
+              </div>
+              <p className="mt-1 text-xs opacity-80">يعمل حالياً بوضع التحليل الداخلي. يمكن ربطه بخدمة ذكاء اصطناعي من الخادم عبر VITE_AI_ASSISTANT_ENDPOINT.</p>
+            </div>
+            <div className="grid gap-2 border-b p-3 md:grid-cols-5">
+              <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field">
+                <option value="all">كل الفروع</option>
+                {branchOptions.map((branch) => <option key={branch}>{branch}</option>)}
+              </select>
+              <input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field" />
+              <select value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field">
+                <option value="">كل الموظفين</option>
+                {employees.slice(0, 200).map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
+              </select>
+              <input value={filters.department} onChange={(e) => setFilters({ ...filters, department: e.target.value })} className="field" placeholder="القسم" />
+              <input value={filters.reportType} onChange={(e) => setFilters({ ...filters, reportType: e.target.value })} className="field" placeholder="نوع التقرير" />
+            </div>
+            <div className="border-b p-3">
+              <p className="mb-2 text-xs font-bold text-slate-500">{selectedMode?.label}</p>
+              <div className="flex flex-wrap gap-2">
+                {(selectedMode?.prompts || []).map((prompt) => (
+                  <button key={prompt} onClick={() => send(prompt)} className="rounded-xl bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-brand-50">
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex-1 space-y-3 overflow-y-auto p-4">
+              {!messages.length && <p className="rounded-2xl bg-slate-50 p-4 text-sm leading-7 text-slate-500">اكتب طلبك مثل: افتح صفحة الضمانات، أنشئ تقرير أداء شهري، ابني خطة تدريب، أو صغ تعميم إداري.</p>}
+              {messages.map((message, index) => (
+                <div key={index} className={`whitespace-pre-wrap rounded-2xl p-4 text-sm leading-7 ${message.role === "user" ? "mr-auto max-w-[80%] bg-brand-50 text-brand-900" : "ml-auto max-w-[92%] bg-slate-50 text-slate-700"}`}>
+                  {message.message}
+                </div>
+              ))}
+              {loading && <p className="text-xs text-slate-400">المساعد يكتب...</p>}
+            </div>
+            <div className="flex flex-wrap gap-2 border-t p-3">
+              <button onClick={() => send("افتح صفحة الموظفين")} className="btn-secondary !h-10">افتح الصفحة</button>
+              <button onClick={() => send("أنشئ تقرير " + (filters.reportType || "إداري"))} className="btn-secondary !h-10">أنشئ تقرير</button>
+              <button onClick={() => send("حوّل الإجابة إلى خطة")} className="btn-secondary !h-10">حوّل إلى خطة</button>
+              <button onClick={() => send("حوّل الإجابة إلى خطاب")} className="btn-secondary !h-10">حوّل إلى خطاب</button>
+              <button onClick={copyLast} className="btn-secondary !h-10">نسخ</button>
+              <button onClick={exportLast} className="btn-secondary !h-10">تصدير</button>
+              <div className="flex min-w-[260px] flex-1 gap-2">
+                <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} className="field" placeholder="اكتب طلبك للمساعد..." />
+                <button disabled={loading} onClick={() => send()} className="btn-primary">إرسال</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
+  );
 }
 
 const recruitmentFieldSets = {

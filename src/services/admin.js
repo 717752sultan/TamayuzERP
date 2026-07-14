@@ -48,7 +48,7 @@ export const systemRoles = [
   "الموظف",
 ];
 
-const isAdminRole = (role = "") => String(role).includes("مدير النظام") || String(role).includes("مشرف النظام العام");
+const isAdminRole = (role = "") => ["مدير النظام", "مدير عام النظام"].some((name) => String(role).includes(name));
 
 const employeeFromDb = (row = {}) => ({
   id: row.id || row.employee_id || row.employeeId || "",

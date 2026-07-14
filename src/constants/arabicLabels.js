@@ -5,7 +5,7 @@ export const ArabicLabels = {
   notifications: "الإشعارات",
   logout: "تسجيل الخروج",
   roles: {
-    platformAdmin: "مشرف النظام العام",
+    platformAdmin: "مدير عام النظام",
     admin: "مدير النظام",
     hr: "الموارد البشرية",
     branchManager: "مدير فرع",

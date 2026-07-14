@@ -16,6 +16,14 @@ export const permissionActions = [
   ["can_override", "تجاوز"],
   ["can_view_financial", "عرض مالي"],
   ["can_view_sensitive", "عرض حساس"],
+  ["can_ask", "استخدام المساعد"],
+  ["can_navigate", "التنقل بالصفحات"],
+  ["can_generate_reports", "إنشاء التقارير"],
+  ["can_generate_plans", "إنشاء الخطط"],
+  ["can_generate_hr_letters", "صياغة الخطابات"],
+  ["can_analyze_inventory", "تحليل المخزون"],
+  ["can_analyze_performance", "تحليل الأداء"],
+  ["can_view_all_company_data", "عرض كل بيانات الشركة"],
 ];
 
 export const dataScopes = [
@@ -112,6 +120,12 @@ export const defaultPermissionTreeNodes = [
   node("ai_assistant", "المساعد الذكي", "", "module", 10),
   node("ai_chat", "المحادثة", "ai_assistant", "page", 1, { page_key: "ai_assistant" }),
   node("ai_reports_analysis", "تحليل التقارير", "ai_assistant", "page", 2, { page_key: "ai_assistant" }),
+  node("ai_navigation", "مساعد التنقل", "ai_assistant", "page", 3, { page_key: "ai_assistant" }),
+  node("ai_report_generator", "إنشاء التقارير", "ai_assistant", "page", 4, { page_key: "ai_assistant" }),
+  node("ai_plan_generator", "إنشاء الخطط والاستراتيجيات", "ai_assistant", "page", 5, { page_key: "ai_assistant" }),
+  node("ai_hr_letters", "صياغة الخطابات الإدارية", "ai_assistant", "page", 6, { page_key: "ai_assistant" }),
+  node("ai_inventory_analysis", "تحليل المخزون", "ai_assistant", "page", 7, { page_key: "ai_assistant" }),
+  node("ai_performance_analysis", "تحليل الأداء", "ai_assistant", "page", 8, { page_key: "ai_assistant" }),
 
   node("recruitment", "طلبات التوظيف", "", "module", 11),
   node("recruitment_job_postings", "قائمة الوظائف", "recruitment", "tab", 1, { page_key: "recruitment" }),
