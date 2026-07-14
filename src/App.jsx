@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   LayoutDashboard,
@@ -95,6 +95,8 @@ import { treePermissionsService, permissionActions, dataScopes, departmentOption
 import { recruitmentService, recruitmentTabs, generateWelcomeMessage } from "./services/recruitment";
 import { generateRecruitmentReports } from "./services/recruitmentReports";
 import { backupService } from "./services/backup";
+import { companiesService } from "./services/companies";
+import { clearTenantSession, getCurrentCompany, getCurrentUser, loadTenantSession, platformSuperAdminRole, setTenantSession } from "./services/tenant";
 const icons = {
   dashboard: LayoutDashboard,
   employees: Users,
@@ -118,85 +120,138 @@ const icons = {
   recruitment: UserPlus,
   reports_center: FileBarChart,
   audit_logs: ClipboardList,
+  companies_admin: Building2,
+  hr_home: LayoutDashboard,
+  hr_employees_full: Users,
+  hr_reports_full: FileBarChart,
+  hr_requests: ClipboardList,
+  hr_performance_full: BadgeCheck,
+  hr_incentives_full: Gift,
+  hr_attendance_payroll: Clock3,
+  hr_salary: Wallet,
+  hr_disciplinary: AlertTriangle,
+  hr_recruitment_full: UserPlus,
+  hr_leaves: CalendarCheck,
+  hr_complaints: MessageSquareWarning,
+  hr_circulars: ClipboardList,
+  hr_termination: LogOut,
+  hr_surveys: ClipboardList,
+  hr_insurance: ShieldCheck,
+  hr_announcements: Bell,
+  hr_files: FileSpreadsheet,
+  hr_training: Star,
+  hr_approvals: BadgeCheck,
+  hr_org_chart: Building2,
+  hr_settings_full: Settings,
+  hr_financial_setup: CircleDollarSign,
+  hr_templates_full: ClipboardList,
 };
+const fullHrNavItems = [
+  ["hr_home", "ط§ظ„ط±ط¦ظٹط³ظٹط©"],
+  ["hr_employees_full", "ظ‚ط§ط¦ظ…ط© ط§ظ„ظ…ظˆط¸ظپظٹظ†"],
+  ["hr_reports_full", "ظ‚ط³ظ… ط§ظ„طھظ‚ط§ط±ظٹط±"],
+  ["hr_requests", "ط§ظ„ط·ظ„ط¨ط§طھ"],
+  ["hr_performance_full", "ظ‚ظٹط§ط³ ط§ظ„ط£ط¯ط§ط،"],
+  ["hr_incentives_full", "ط§ظ„ط­ظˆط§ظپط²"],
+  ["hr_attendance_payroll", "ط­ط³ط§ط¨ ط§ظ„ط¯ظˆط§ظ…"],
+  ["hr_salary", "ط­ط³ط§ط¨ ط§ظ„ط±ط§طھط¨"],
+  ["hr_disciplinary", "ط§ظ„ظ…ط³ط§ط،ظ„ط§طھ ظˆط§ظ„ط¥ظ†ط°ط§ط±ط§طھ"],
+  ["hr_recruitment_full", "ط§ظ„طھظˆط¸ظٹظپ"],
+  ["hr_leaves", "ط§ظ„ط¥ط¬ط§ط²ط§طھ"],
+  ["hr_complaints", "ط§ظ„ط´ظƒط§ظˆظ‰"],
+  ["hr_circulars", "ط§ظ„طھط¹ط§ظ…ظٹظ…"],
+  ["hr_termination", "ط¥ظ†ظ‡ط§ط، ط§ظ„ط®ط¯ظ…ط©"],
+  ["hr_surveys", "ط§ظ„ط§ط³طھط¨ظٹط§ظ†ط§طھ"],
+  ["hr_insurance", "ط§ظ„طھط£ظ…ظٹظ†ط§طھ"],
+  ["hr_announcements", "ظ‚ط³ظ… ط§ظ„ط¥ط¹ظ„ط§ظ†ط§طھ"],
+  ["hr_files", "ط¥ط¯ط§ط±ط© ط§ظ„ظ…ظ„ظپط§طھ"],
+  ["hr_training", "ط§ظ„طھط¯ط±ظٹط¨"],
+  ["hr_approvals", "ط§ظ„ظ…ظˆط§ظپظ‚ط§طھ"],
+  ["hr_org_chart", "ط§ظ„ظ‡ظٹظƒظ„ ط§ظ„طھظ†ط¸ظٹظ…ظٹ"],
+  ["hr_settings_full", "ط¥ط¹ط¯ط§ط¯ط§طھ"],
+  ["hr_financial_setup", "طھظ‡ظٹط¦ط© ط§ظ„ظ…ط¹ظ„ظˆظ…ط§طھ ط§ظ„ظ…ط§ظ„ظٹط©"],
+  ["hr_templates_full", "ط§ظ„ظ‚ظˆط§ظ„ط¨"],
+];
 const navItems = [
+  ["companies_admin", "إدارة الشركات"],
   ...baseNavItems.slice(0, -2),
-  ["guarantees", "ضمانات الموظفين"],
-  ["overtime", "العمل الإضافي"],
-  ["shifts", "شفتات الموظفين"],
-  ["inventory", "إدارة المخزون"],
-  ["daily_operations", "العمليات اليومية"],
-  ["performance_criteria", "معايير الأداء"],
-  ["performance_kpi_scores", "درجات KPI"],
-  ["users_permissions", "المستخدمون والصلاحيات"],
-  ["recruitment", "طلبات التوظيف"],
-  ["reports_center", "مركز التقارير"],
-  ["audit_logs", "سجل العمليات"],
+  ["guarantees", "ط¶ظ…ط§ظ†ط§طھ ط§ظ„ظ…ظˆط¸ظپظٹظ†"],
+  ["overtime", "ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ"],
+  ["shifts", "ط´ظپطھط§طھ ط§ظ„ظ…ظˆط¸ظپظٹظ†"],
+  ["inventory", "ط¥ط¯ط§ط±ط© ط§ظ„ظ…ط®ط²ظˆظ†"],
+  ["daily_operations", "ط§ظ„ط¹ظ…ظ„ظٹط§طھ ط§ظ„ظٹظˆظ…ظٹط©"],
+  ["performance_criteria", "ظ…ط¹ط§ظٹظٹط± ط§ظ„ط£ط¯ط§ط،"],
+  ["performance_kpi_scores", "ط¯ط±ط¬ط§طھ KPI"],
+  ["users_permissions", "ط§ظ„ظ…ط³طھط®ط¯ظ…ظˆظ† ظˆط§ظ„طµظ„ط§ط­ظٹط§طھ"],
+  ["recruitment", "ط·ظ„ط¨ط§طھ ط§ظ„طھظˆط¸ظٹظپ"],
+  ["reports_center", "ظ…ط±ظƒط² ط§ظ„طھظ‚ط§ط±ظٹط±"],
+  ["audit_logs", "ط³ط¬ظ„ ط§ظ„ط¹ظ…ظ„ظٹط§طھ"],
+  ...fullHrNavItems,
   ...baseNavItems.slice(-2),
 ];
 const nf = new Intl.NumberFormat("ar-SA"),
-  money = (n) => `${nf.format(Math.round(n || 0))} ر.س`,
+  money = (n) => `${nf.format(Math.round(n || 0))} ط±.ط³`,
   classify = (n) =>
     n >= 90
-      ? "ممتاز"
+      ? "ظ…ظ…طھط§ط²"
       : n >= 80
-        ? "جيد جدًا"
+        ? "ط¬ظٹط¯ ط¬ط¯ظ‹ط§"
         : n >= 70
-          ? "جيد"
+          ? "ط¬ظٹط¯"
           : n >= 60
-            ? "مقبول"
-            : "ضعيف";
+            ? "ظ…ظ‚ط¨ظˆظ„"
+            : "ط¶ط¹ظٹظپ";
 const weights = [15, 15, 10, 10, 10, 10, 10, 10, 5, 5];
 const defaultSettings = {
   branches: [...branches],
   jobs: [...jobs],
   criteria: [...criteria],
   currencies: [
-    "الريال السعودي (SAR)",
-    "الدولار الأمريكي (USD)",
-    "اليورو (EUR)",
-    "الدرهم الإماراتي (AED)",
+    "ط§ظ„ط±ظٹط§ظ„ ط§ظ„ط³ط¹ظˆط¯ظٹ (SAR)",
+    "ط§ظ„ط¯ظˆظ„ط§ط± ط§ظ„ط£ظ…ط±ظٹظƒظٹ (USD)",
+    "ط§ظ„ظٹظˆط±ظˆ (EUR)",
+    "ط§ظ„ط¯ط±ظ‡ظ… ط§ظ„ط¥ظ…ط§ط±ط§طھظٹ (AED)",
   ],
   permissions: [
-    { name: "مدير النظام", description: "تحكم كامل في جميع أجزاء النظام" },
+    { name: "ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…", description: "طھط­ظƒظ… ظƒط§ظ…ظ„ ظپظٹ ط¬ظ…ظٹط¹ ط£ط¬ط²ط§ط، ط§ظ„ظ†ط¸ط§ظ…" },
     {
-      name: "الموارد البشرية",
-      description: "إدارة الموظفين والتقييمات والتقارير",
+      name: "ط§ظ„ظ…ظˆط§ط±ط¯ ط§ظ„ط¨ط´ط±ظٹط©",
+      description: "ط¥ط¯ط§ط±ط© ط§ظ„ظ…ظˆط¸ظپظٹظ† ظˆط§ظ„طھظ‚ظٹظٹظ…ط§طھ ظˆط§ظ„طھظ‚ط§ط±ظٹط±",
     },
-    { name: "مدير الفرع", description: "تقييم موظفي الفرع ومتابعة الانضباط" },
-    { name: "الموظف", description: "عرض التقييم وتقديم الاعتراض" },
-    { name: "الإدارة العليا", description: "عرض التقارير واعتماد الحوافز" },
+    { name: "ظ…ط¯ظٹط± ط§ظ„ظپط±ط¹", description: "طھظ‚ظٹظٹظ… ظ…ظˆط¸ظپظٹ ط§ظ„ظپط±ط¹ ظˆظ…طھط§ط¨ط¹ط© ط§ظ„ط§ظ†ط¶ط¨ط§ط·" },
+    { name: "ط§ظ„ظ…ظˆط¸ظپ", description: "ط¹ط±ط¶ ط§ظ„طھظ‚ظٹظٹظ… ظˆطھظ‚ط¯ظٹظ… ط§ظ„ط§ط¹طھط±ط§ط¶" },
+    { name: "ط§ظ„ط¥ط¯ط§ط±ط© ط§ظ„ط¹ظ„ظٹط§", description: "ط¹ط±ط¶ ط§ظ„طھظ‚ط§ط±ظٹط± ظˆط§ط¹طھظ…ط§ط¯ ط§ظ„ط­ظˆط§ظپط²" },
   ],
   users: [
     {
-      name: "محمد العتيبي",
+      name: "ظ…ط­ظ…ط¯ ط§ظ„ط¹طھظٹط¨ظٹ",
       username: "admin",
       password: "",
-      role: "مدير النظام",
+      role: "ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…",
       employeeId: "",
     },
     {
-      name: "أحمد محمد السالم",
+      name: "ط£ط­ظ…ط¯ ظ…ط­ظ…ط¯ ط§ظ„ط³ط§ظ„ظ…",
       username: "employee",
       password: "",
-      role: "الموظف",
+      role: "ط§ظ„ظ…ظˆط¸ظپ",
       employeeId: "EMP-001",
     },
   ],
-  manager: { name: "محمد العتيبي", username: "admin", role: "مدير النظام" },
+  manager: { name: "ظ…ط­ظ…ط¯ ط§ظ„ط¹طھظٹط¨ظٹ", username: "admin", role: "ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…" },
 };
 const colors = {
-  ممتاز: "bg-emerald-50 text-emerald-700",
-  "جيد جدًا": "bg-blue-50 text-blue-700",
-  جيد: "bg-sky-50 text-sky-700",
-  مقبول: "bg-amber-50 text-amber-700",
-  ضعيف: "bg-red-50 text-red-700",
-  نشط: "bg-emerald-50 text-emerald-700",
-  إجازة: "bg-amber-50 text-amber-700",
-  موقوف: "bg-red-50 text-red-700",
-  معتمد: "bg-emerald-50 text-emerald-700",
-  "قيد المراجعة": "bg-amber-50 text-amber-700",
-  مرفوض: "bg-red-50 text-red-700",
+  "ظ…ظ…طھط§ط²": "bg-emerald-50 text-emerald-700",
+  "ط¬ظٹط¯ ط¬ط¯ظ‹ط§": "bg-blue-50 text-blue-700",
+  "ط¬ظٹط¯": "bg-sky-50 text-sky-700",
+  "ظ…ظ‚ط¨ظˆظ„": "bg-amber-50 text-amber-700",
+  "ط¶ط¹ظٹظپ": "bg-red-50 text-red-700",
+  "ظ†ط´ط·": "bg-emerald-50 text-emerald-700",
+  "ط¥ط¬ط§ط²ط©": "bg-amber-50 text-amber-700",
+  "ظ…ظˆظ‚ظˆظپ": "bg-red-50 text-red-700",
+  "ظ…ط¹طھظ…ط¯": "bg-emerald-50 text-emerald-700",
+  "ظ‚ظٹط¯ ط§ظ„ظ…ط±ط§ط¬ط¹ط©": "bg-amber-50 text-amber-700",
+  "ظ…ط±ظپظˆط¶": "bg-red-50 text-red-700",
 };
 const Status = ({ children }) => (
   <span
@@ -225,75 +280,75 @@ const makeCriteriaTemplate = (names = criteria) => {
 const includesAny = (value = "", words = []) =>
   words.some((word) => String(value).includes(word));
 const defaultCriteriaForJob = (job = "") => {
-  const isCounter = includesAny(job, ["عداد", "ط¹ط¯ط§ط¯"]);
-  const isTech = includesAny(job, ["دعم فني", "ط¯ط¹ظ… ظپظ†ظٹ"]);
-  const isCustomer = includesAny(job, ["خدمة عملاء", "ط®ط¯ظ…ط© ط¹ظ…ظ„ط§ط،"]);
-  const isOutbound = includesAny(job, ["صادر"]);
-  const isInbound = includesAny(job, ["وارد"]);
+  const isCounter = includesAny(job, ["ط¹ط¯ط§ط¯", "ط·آ¹ط·آ¯ط·آ§ط·آ¯"]);
+  const isTech = includesAny(job, ["ط¯ط¹ظ… ظپظ†ظٹ", "ط·آ¯ط·آ¹ط¸â€¦ ط¸ظ¾ط¸â€ ط¸ظ¹"]);
+  const isCustomer = includesAny(job, ["ط®ط¯ظ…ط© ط¹ظ…ظ„ط§ط،", "ط·آ®ط·آ¯ط¸â€¦ط·آ© ط·آ¹ط¸â€¦ط¸â€‍ط·آ§ط·طŒ"]);
+  const isOutbound = includesAny(job, ["طµط§ط¯ط±"]);
+  const isInbound = includesAny(job, ["ظˆط§ط±ط¯"]);
   const names = isCounter
     ? [
-        "إجمالي المبالغ المعدودة",
-        "إنتاجية فئة 200",
-        "إنتاجية فئة 500",
-        "إنتاجية فئة 1000",
-        "دقة فرز النقد",
-        "كشف العملات التالفة أو المشبوهة",
-        "سرعة التسليم والاستلام",
-        "الالتزام بإجراءات الخزينة",
-        "تصفير العهدة دون فروقات",
-        "الانضباط الوظيفي",
+        "ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظ…ط¨ط§ظ„ط؛ ط§ظ„ظ…ط¹ط¯ظˆط¯ط©",
+        "ط¥ظ†طھط§ط¬ظٹط© ظپط¦ط© 200",
+        "ط¥ظ†طھط§ط¬ظٹط© ظپط¦ط© 500",
+        "ط¥ظ†طھط§ط¬ظٹط© ظپط¦ط© 1000",
+        "ط¯ظ‚ط© ظپط±ط² ط§ظ„ظ†ظ‚ط¯",
+        "ظƒط´ظپ ط§ظ„ط¹ظ…ظ„ط§طھ ط§ظ„طھط§ظ„ظپط© ط£ظˆ ط§ظ„ظ…ط´ط¨ظˆظ‡ط©",
+        "ط³ط±ط¹ط© ط§ظ„طھط³ظ„ظٹظ… ظˆط§ظ„ط§ط³طھظ„ط§ظ…",
+        "ط§ظ„ط§ظ„طھط²ط§ظ… ط¨ط¥ط¬ط±ط§ط،ط§طھ ط§ظ„ط®ط²ظٹظ†ط©",
+        "طھطµظپظٹط± ط§ظ„ط¹ظ‡ط¯ط© ط¯ظˆظ† ظپط±ظˆظ‚ط§طھ",
+        "ط§ظ„ط§ظ†ط¶ط¨ط§ط· ط§ظ„ظˆط¸ظٹظپظٹ",
       ]
     : isTech
       ? [
-          "سرعة إغلاق البلاغات",
-          "جودة الحلول الفنية",
-          "استقرار الأنظمة والأجهزة",
-          "توثيق البلاغات",
-          "دعم الفروع عن بعد",
-          "الالتزام بأولوية البلاغات",
-          "حماية البيانات",
-          "حل المشكلات المتكررة",
-          "التعاون مع الفريق",
-          "الانضباط الوظيفي",
+          "ط³ط±ط¹ط© ط¥ط؛ظ„ط§ظ‚ ط§ظ„ط¨ظ„ط§ط؛ط§طھ",
+          "ط¬ظˆط¯ط© ط§ظ„ط­ظ„ظˆظ„ ط§ظ„ظپظ†ظٹط©",
+          "ط§ط³طھظ‚ط±ط§ط± ط§ظ„ط£ظ†ط¸ظ…ط© ظˆط§ظ„ط£ط¬ظ‡ط²ط©",
+          "طھظˆط«ظٹظ‚ ط§ظ„ط¨ظ„ط§ط؛ط§طھ",
+          "ط¯ط¹ظ… ط§ظ„ظپط±ظˆط¹ ط¹ظ† ط¨ط¹ط¯",
+          "ط§ظ„ط§ظ„طھط²ط§ظ… ط¨ط£ظˆظ„ظˆظٹط© ط§ظ„ط¨ظ„ط§ط؛ط§طھ",
+          "ط­ظ…ط§ظٹط© ط§ظ„ط¨ظٹط§ظ†ط§طھ",
+          "ط­ظ„ ط§ظ„ظ…ط´ظƒظ„ط§طھ ط§ظ„ظ…طھظƒط±ط±ط©",
+          "ط§ظ„طھط¹ط§ظˆظ† ظ…ط¹ ط§ظ„ظپط±ظٹظ‚",
+          "ط§ظ„ط§ظ†ط¶ط¨ط§ط· ط§ظ„ظˆط¸ظٹظپظٹ",
         ]
       : isCustomer && isOutbound
         ? [
-            "سرعة تنفيذ الحوالات الصادرة",
-            "دقة بيانات المستفيد",
-            "الالتزام بحدود وإجراءات التحويل",
-            "جودة التواصل مع العميل",
-            "نسبة إنجاز طلبات الصادر",
-            "خفض أخطاء الإرسال",
-            "الالتزام بإجراءات الامتثال",
-            "التعاون مع الفريق",
-            "تحمل ضغط العمل",
-            "الانضباط الوظيفي",
+            "ط³ط±ط¹ط© طھظ†ظپظٹط° ط§ظ„ط­ظˆط§ظ„ط§طھ ط§ظ„طµط§ط¯ط±ط©",
+            "ط¯ظ‚ط© ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ط³طھظپظٹط¯",
+            "ط§ظ„ط§ظ„طھط²ط§ظ… ط¨ط­ط¯ظˆط¯ ظˆط¥ط¬ط±ط§ط،ط§طھ ط§ظ„طھط­ظˆظٹظ„",
+            "ط¬ظˆط¯ط© ط§ظ„طھظˆط§طµظ„ ظ…ط¹ ط§ظ„ط¹ظ…ظٹظ„",
+            "ظ†ط³ط¨ط© ط¥ظ†ط¬ط§ط² ط·ظ„ط¨ط§طھ ط§ظ„طµط§ط¯ط±",
+            "ط®ظپط¶ ط£ط®ط·ط§ط، ط§ظ„ط¥ط±ط³ط§ظ„",
+            "ط§ظ„ط§ظ„طھط²ط§ظ… ط¨ط¥ط¬ط±ط§ط،ط§طھ ط§ظ„ط§ظ…طھط«ط§ظ„",
+            "ط§ظ„طھط¹ط§ظˆظ† ظ…ط¹ ط§ظ„ظپط±ظٹظ‚",
+            "طھط­ظ…ظ„ ط¶ط؛ط· ط§ظ„ط¹ظ…ظ„",
+            "ط§ظ„ط§ظ†ط¶ط¨ط§ط· ط§ظ„ظˆط¸ظٹظپظٹ",
           ]
         : isCustomer && isInbound
           ? [
-              "سرعة معالجة الحوالات الواردة",
-              "دقة مطابقة بيانات المستلم",
-              "جودة خدمة العميل عند الصرف",
-              "نسبة إنجاز طلبات الوارد",
-              "خفض شكاوى العملاء",
-              "الالتزام بإجراءات التحقق",
-              "الالتزام بإجراءات الامتثال",
-              "التعاون مع الفريق",
-              "تحمل ضغط العمل",
-              "الانضباط الوظيفي",
+              "ط³ط±ط¹ط© ظ…ط¹ط§ظ„ط¬ط© ط§ظ„ط­ظˆط§ظ„ط§طھ ط§ظ„ظˆط§ط±ط¯ط©",
+              "ط¯ظ‚ط© ظ…ط·ط§ط¨ظ‚ط© ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ط³طھظ„ظ…",
+              "ط¬ظˆط¯ط© ط®ط¯ظ…ط© ط§ظ„ط¹ظ…ظٹظ„ ط¹ظ†ط¯ ط§ظ„طµط±ظپ",
+              "ظ†ط³ط¨ط© ط¥ظ†ط¬ط§ط² ط·ظ„ط¨ط§طھ ط§ظ„ظˆط§ط±ط¯",
+              "ط®ظپط¶ ط´ظƒط§ظˆظ‰ ط§ظ„ط¹ظ…ظ„ط§ط،",
+              "ط§ظ„ط§ظ„طھط²ط§ظ… ط¨ط¥ط¬ط±ط§ط،ط§طھ ط§ظ„طھط­ظ‚ظ‚",
+              "ط§ظ„ط§ظ„طھط²ط§ظ… ط¨ط¥ط¬ط±ط§ط،ط§طھ ط§ظ„ط§ظ…طھط«ط§ظ„",
+              "ط§ظ„طھط¹ط§ظˆظ† ظ…ط¹ ط§ظ„ظپط±ظٹظ‚",
+              "طھط­ظ…ظ„ ط¶ط؛ط· ط§ظ„ط¹ظ…ظ„",
+              "ط§ظ„ط§ظ†ط¶ط¨ط§ط· ط§ظ„ظˆط¸ظٹظپظٹ",
             ]
           : isCustomer
             ? [
-                "جودة الرد على العملاء",
-                "سرعة تنفيذ الحوالات",
-                "دقة بيانات العميل",
-                "معالجة طلبات الواتس",
-                "نسبة رضا العملاء",
-                "الالتزام بإجراءات الامتثال",
-                "خفض الشكاوى",
-                "التعاون مع الفريق",
-                "تحمل ضغط العمل",
-                "الانضباط الوظيفي",
+                "ط¬ظˆط¯ط© ط§ظ„ط±ط¯ ط¹ظ„ظ‰ ط§ظ„ط¹ظ…ظ„ط§ط،",
+                "ط³ط±ط¹ط© طھظ†ظپظٹط° ط§ظ„ط­ظˆط§ظ„ط§طھ",
+                "ط¯ظ‚ط© ط¨ظٹط§ظ†ط§طھ ط§ظ„ط¹ظ…ظٹظ„",
+                "ظ…ط¹ط§ظ„ط¬ط© ط·ظ„ط¨ط§طھ ط§ظ„ظˆط§طھط³",
+                "ظ†ط³ط¨ط© ط±ط¶ط§ ط§ظ„ط¹ظ…ظ„ط§ط،",
+                "ط§ظ„ط§ظ„طھط²ط§ظ… ط¨ط¥ط¬ط±ط§ط،ط§طھ ط§ظ„ط§ظ…طھط«ط§ظ„",
+                "ط®ظپط¶ ط§ظ„ط´ظƒط§ظˆظ‰",
+                "ط§ظ„طھط¹ط§ظˆظ† ظ…ط¹ ط§ظ„ظپط±ظٹظ‚",
+                "طھط­ظ…ظ„ ط¶ط؛ط· ط§ظ„ط¹ظ…ظ„",
+                "ط§ظ„ط§ظ†ط¶ط¨ط§ط· ط§ظ„ظˆط¸ظٹظپظٹ",
               ]
             : criteria;
   return makeCriteriaTemplate(names).map((item) =>
@@ -312,44 +367,44 @@ const defaultCriteriaForJob = (job = "") => {
 const buildDefaultJobCriteria = () =>
   Object.fromEntries(
     jobs.map((job) => {
-      const custom = job.includes("عداد")
+      const custom = job.includes("ط¹ط¯ط§ط¯")
         ? [
-            "إجمالي المبالغ المعدودة",
-            "دقة فرز فئة 200",
-            "دقة فرز فئة 500",
-            "دقة فرز فئة 1000",
-            "كشف العملات التالفة أو المشبوهة",
-            "سرعة التسليم والاستلام",
-            "الالتزام بإجراءات الخزينة",
-            "الانضباط الوظيفي",
-            "التعاون مع الفريق",
-            "تصفير العهدة دون فروقات",
+            "ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظ…ط¨ط§ظ„ط؛ ط§ظ„ظ…ط¹ط¯ظˆط¯ط©",
+            "ط¯ظ‚ط© ظپط±ط² ظپط¦ط© 200",
+            "ط¯ظ‚ط© ظپط±ط² ظپط¦ط© 500",
+            "ط¯ظ‚ط© ظپط±ط² ظپط¦ط© 1000",
+            "ظƒط´ظپ ط§ظ„ط¹ظ…ظ„ط§طھ ط§ظ„طھط§ظ„ظپط© ط£ظˆ ط§ظ„ظ…ط´ط¨ظˆظ‡ط©",
+            "ط³ط±ط¹ط© ط§ظ„طھط³ظ„ظٹظ… ظˆط§ظ„ط§ط³طھظ„ط§ظ…",
+            "ط§ظ„ط§ظ„طھط²ط§ظ… ط¨ط¥ط¬ط±ط§ط،ط§طھ ط§ظ„ط®ط²ظٹظ†ط©",
+            "ط§ظ„ط§ظ†ط¶ط¨ط§ط· ط§ظ„ظˆط¸ظٹظپظٹ",
+            "ط§ظ„طھط¹ط§ظˆظ† ظ…ط¹ ط§ظ„ظپط±ظٹظ‚",
+            "طھطµظپظٹط± ط§ظ„ط¹ظ‡ط¯ط© ط¯ظˆظ† ظپط±ظˆظ‚ط§طھ",
           ]
-        : job.includes("دعم فني")
+        : job.includes("ط¯ط¹ظ… ظپظ†ظٹ")
           ? [
-              "سرعة إغلاق البلاغات",
-              "جودة الحلول الفنية",
-              "استقرار الأنظمة والأجهزة",
-              "توثيق البلاغات",
-              "دعم الفروع عن بعد",
-              "الالتزام بأولوية البلاغات",
-              "حماية البيانات",
-              "التعاون مع الفريق",
-              "حل المشكلات المتكررة",
-              "الانضباط الوظيفي",
+              "ط³ط±ط¹ط© ط¥ط؛ظ„ط§ظ‚ ط§ظ„ط¨ظ„ط§ط؛ط§طھ",
+              "ط¬ظˆط¯ط© ط§ظ„ط­ظ„ظˆظ„ ط§ظ„ظپظ†ظٹط©",
+              "ط§ط³طھظ‚ط±ط§ط± ط§ظ„ط£ظ†ط¸ظ…ط© ظˆط§ظ„ط£ط¬ظ‡ط²ط©",
+              "طھظˆط«ظٹظ‚ ط§ظ„ط¨ظ„ط§ط؛ط§طھ",
+              "ط¯ط¹ظ… ط§ظ„ظپط±ظˆط¹ ط¹ظ† ط¨ط¹ط¯",
+              "ط§ظ„ط§ظ„طھط²ط§ظ… ط¨ط£ظˆظ„ظˆظٹط© ط§ظ„ط¨ظ„ط§ط؛ط§طھ",
+              "ط­ظ…ط§ظٹط© ط§ظ„ط¨ظٹط§ظ†ط§طھ",
+              "ط§ظ„طھط¹ط§ظˆظ† ظ…ط¹ ط§ظ„ظپط±ظٹظ‚",
+              "ط­ظ„ ط§ظ„ظ…ط´ظƒظ„ط§طھ ط§ظ„ظ…طھظƒط±ط±ط©",
+              "ط§ظ„ط§ظ†ط¶ط¨ط§ط· ط§ظ„ظˆط¸ظٹظپظٹ",
             ]
-          : job.includes("خدمة عملاء")
+          : job.includes("ط®ط¯ظ…ط© ط¹ظ…ظ„ط§ط،")
             ? [
-                "جودة الرد على العملاء",
-                "سرعة تنفيذ الحوالات",
-                "دقة بيانات العميل",
-                "معالجة طلبات الواتس",
-                "نسبة رضا العملاء",
-                "الالتزام بإجراءات الامتثال",
-                "خفض الشكاوى",
-                "التعاون مع الفريق",
-                "تحمل ضغط العمل",
-                "الانضباط الوظيفي",
+                "ط¬ظˆط¯ط© ط§ظ„ط±ط¯ ط¹ظ„ظ‰ ط§ظ„ط¹ظ…ظ„ط§ط،",
+                "ط³ط±ط¹ط© طھظ†ظپظٹط° ط§ظ„ط­ظˆط§ظ„ط§طھ",
+                "ط¯ظ‚ط© ط¨ظٹط§ظ†ط§طھ ط§ظ„ط¹ظ…ظٹظ„",
+                "ظ…ط¹ط§ظ„ط¬ط© ط·ظ„ط¨ط§طھ ط§ظ„ظˆط§طھط³",
+                "ظ†ط³ط¨ط© ط±ط¶ط§ ط§ظ„ط¹ظ…ظ„ط§ط،",
+                "ط§ظ„ط§ظ„طھط²ط§ظ… ط¨ط¥ط¬ط±ط§ط،ط§طھ ط§ظ„ط§ظ…طھط«ط§ظ„",
+                "ط®ظپط¶ ط§ظ„ط´ظƒط§ظˆظ‰",
+                "ط§ظ„طھط¹ط§ظˆظ† ظ…ط¹ ط§ظ„ظپط±ظٹظ‚",
+                "طھط­ظ…ظ„ ط¶ط؛ط· ط§ظ„ط¹ظ…ظ„",
+                "ط§ظ„ط§ظ†ط¶ط¨ط§ط· ط§ظ„ظˆط¸ظٹظپظٹ",
               ]
             : criteria;
       return [job, makeCriteriaTemplate(custom)];
@@ -371,21 +426,21 @@ const effectiveEvaluationTotal = (ev) =>
     ? scoreTotal(normalizeScores(ev.scores, ev.criteriaSnapshot.length, 0), ev.criteriaSnapshot)
     : Number(ev?.total || 0);
 const defaultProductivityIndicators = [
-  { key: "receive", label: "عدد عمليات قبض الحوالات", type: "positive", weight: 0.2 },
-  { key: "pay", label: "عدد عمليات صرف الحوالات", type: "positive", weight: 0.2 },
-  { key: "sell", label: "عدد عمليات بيع العملات", type: "positive", weight: 0.25 },
-  { key: "buy", label: "عدد عمليات شراء العملات", type: "positive", weight: 0.25 },
-  { key: "errors", label: "عدد الأخطاء", type: "negative", weight: 4 },
-  { key: "complaints", label: "عدد شكاوى العملاء", type: "negative", weight: 5 },
-  { key: "time", label: "متوسط وقت الخدمة", type: "negative", weight: 1 },
+  { key: "receive", label: "ط¹ط¯ط¯ ط¹ظ…ظ„ظٹط§طھ ظ‚ط¨ط¶ ط§ظ„ط­ظˆط§ظ„ط§طھ", type: "positive", weight: 0.2 },
+  { key: "pay", label: "ط¹ط¯ط¯ ط¹ظ…ظ„ظٹط§طھ طµط±ظپ ط§ظ„ط­ظˆط§ظ„ط§طھ", type: "positive", weight: 0.2 },
+  { key: "sell", label: "ط¹ط¯ط¯ ط¹ظ…ظ„ظٹط§طھ ط¨ظٹط¹ ط§ظ„ط¹ظ…ظ„ط§طھ", type: "positive", weight: 0.25 },
+  { key: "buy", label: "ط¹ط¯ط¯ ط¹ظ…ظ„ظٹط§طھ ط´ط±ط§ط، ط§ظ„ط¹ظ…ظ„ط§طھ", type: "positive", weight: 0.25 },
+  { key: "errors", label: "ط¹ط¯ط¯ ط§ظ„ط£ط®ط·ط§ط،", type: "negative", weight: 4 },
+  { key: "complaints", label: "ط¹ط¯ط¯ ط´ظƒط§ظˆظ‰ ط§ظ„ط¹ظ…ظ„ط§ط،", type: "negative", weight: 5 },
+  { key: "time", label: "ظ…طھظˆط³ط· ظˆظ‚طھ ط§ظ„ط®ط¯ظ…ط©", type: "negative", weight: 1 },
 ];
 const defaultDisciplineIndicators = [
-  { key: "present", label: "أيام الحضور", type: "positive", weight: 1 },
-  { key: "absent", label: "أيام الغياب", type: "negative", weight: 7 },
-  { key: "late", label: "التأخير بالدقائق", type: "negative", weight: 0.15 },
-  { key: "early", label: "الانصراف المبكر", type: "negative", weight: 3 },
-  { key: "violations", label: "المخالفات", type: "negative", weight: 8 },
-  { key: "penalties", label: "الجزاءات", type: "negative", weight: 10 },
+  { key: "present", label: "ط£ظٹط§ظ… ط§ظ„ط­ط¶ظˆط±", type: "positive", weight: 1 },
+  { key: "absent", label: "ط£ظٹط§ظ… ط§ظ„ط؛ظٹط§ط¨", type: "negative", weight: 7 },
+  { key: "late", label: "ط§ظ„طھط£ط®ظٹط± ط¨ط§ظ„ط¯ظ‚ط§ط¦ظ‚", type: "negative", weight: 0.15 },
+  { key: "early", label: "ط§ظ„ط§ظ†طµط±ط§ظپ ط§ظ„ظ…ط¨ظƒط±", type: "negative", weight: 3 },
+  { key: "violations", label: "ط§ظ„ظ…ط®ط§ظ„ظپط§طھ", type: "negative", weight: 8 },
+  { key: "penalties", label: "ط§ظ„ط¬ط²ط§ط،ط§طھ", type: "negative", weight: 10 },
 ];
 const scoreIndicators = (values, indicators, base = 0) =>
   Math.max(
@@ -438,7 +493,7 @@ const hydrateSettings = (value) => {
 const printDocument = (title, body) => {
   const activeEvaluationReport =
     typeof window !== "undefined" ? window.__activeEvaluationReport : null;
-  if (activeEvaluationReport && String(title).includes("ظ…ظˆط¸ظپ")) {
+  if (activeEvaluationReport && String(title).includes("ط¸â€¦ط¸ث†ط·آ¸ط¸ظ¾")) {
     title = activeEvaluationReport.title;
     body = activeEvaluationReport.body;
   }
@@ -484,7 +539,7 @@ function syncSettings(s) {
         })),
   );
 }
-function LoadingScreen({ message = "جاري تحميل البيانات..." }) {
+function LoadingScreen({ message = "ط¬ط§ط±ظٹ طھط­ظ…ظٹظ„ ط§ظ„ط¨ظٹط§ظ†ط§طھ..." }) {
   return (
     <div className="grid min-h-screen place-items-center bg-slate-50" dir="rtl">
       <div className="panel p-8 text-center">
@@ -495,7 +550,7 @@ function LoadingScreen({ message = "جاري تحميل البيانات..." }) 
   );
 }
 const isAdminLikeRole = (role = "") =>
-  ["مدير النظام", "الإدارة العليا", "ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…", "ط§ظ„ط¥ط¯ط§ط±ط© ط§ظ„ط¹ظ„ظٹط§", "ط¸â€¦ط·آ¯ط¸ظ¹ط·آ± ط·آ§ط¸â€‍ط¸â€ ط·آ¸ط·آ§ط¸â€¦", "ط·آ§ط¸â€‍ط·آ¥ط·آ¯ط·آ§ط·آ±ط·آ© ط·آ§ط¸â€‍ط·آ¹ط¸â€‍ط¸ظ¹ط·آ§"].some((x) =>
+  ["ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…", "ط§ظ„ط¥ط¯ط§ط±ط© ط§ظ„ط¹ظ„ظٹط§", "ط¸â€¦ط·آ¯ط¸ظ¹ط·آ± ط·آ§ط¸â€‍ط¸â€ ط·آ¸ط·آ§ط¸â€¦", "ط·آ§ط¸â€‍ط·آ¥ط·آ¯ط·آ§ط·آ±ط·آ© ط·آ§ط¸â€‍ط·آ¹ط¸â€‍ط¸ظ¹ط·آ§", "ط·آ¸أ¢â‚¬آ¦ط·آ·ط¢آ¯ط·آ¸ط¸آ¹ط·آ·ط¢آ± ط·آ·ط¢آ§ط·آ¸أ¢â‚¬â€چط·آ¸أ¢â‚¬آ ط·آ·ط¢آ¸ط·آ·ط¢آ§ط·آ¸أ¢â‚¬آ¦", "ط·آ·ط¢آ§ط·آ¸أ¢â‚¬â€چط·آ·ط¢آ¥ط·آ·ط¢آ¯ط·آ·ط¢آ§ط·آ·ط¢آ±ط·آ·ط¢آ© ط·آ·ط¢آ§ط·آ¸أ¢â‚¬â€چط·آ·ط¢آ¹ط·آ¸أ¢â‚¬â€چط·آ¸ط¸آ¹ط·آ·ط¢آ§"].some((x) =>
     String(role).includes(x),
   );
 const canByPermission = (permissions, role, pageKey, action = "can_view") => {
@@ -543,13 +598,14 @@ const getFirstAllowedPageForUser = (currentUser, treeRows = [], legacyRows = [],
   return allowed || "";
 };
 export default function App() {
+  const restoredTenant = loadTenantSession();
   const [logged, setLogged] = useState(
       () => localStorage.getItem("ep_logged") === "1",
     ),
     [page, setPage] = useState("dashboard"),
     [sidebar, setSidebar] = useState(false),
     [role, setRole] = useState(
-      () => localStorage.getItem("ep_role") || "مدير النظام",
+      () => localStorage.getItem("ep_role") || "ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…",
     ),
     [employees, setEmployeesState] = useState([]),
     [evaluations, setEvaluationsState] = useState([]),
@@ -560,7 +616,9 @@ export default function App() {
 	    [treeRolePermissions, setTreeRolePermissions] = useState([]),
 	    [permissionsLoading, setPermissionsLoading] = useState(false),
 	    [notifications, setNotifications] = useState([]),
-	    [notificationsOpen, setNotificationsOpen] = useState(false);
+	    [notificationsOpen, setNotificationsOpen] = useState(false),
+      [currentCompany, setCurrentCompany] = useState(restoredTenant.currentCompany || null),
+      [currentUserState, setCurrentUserState] = useState(restoredTenant.currentUser || null);
   const setEmployees = (updater) =>
     setEmployeesState((prev) => {
       const next = typeof updater === "function" ? updater(prev) : updater;
@@ -591,6 +649,7 @@ export default function App() {
   }, [settings]);
 	  useEffect(() => {
 	    if (!logged) return;
+      if (!currentCompany?.company_id) return;
 	    let alive = true;
     setDataLoading(true);
     setDataError("");
@@ -634,11 +693,11 @@ export default function App() {
       unsubEvaluations?.();
 	      unsubSettings?.();
 	    };
-	  }, [logged]);
+	  }, [logged, currentCompany?.company_id]);
   useEffect(() => {
     if (!logged) return;
     let alive = true;
-    const currentUser = JSON.parse(localStorage.getItem("ep_current_user") || "{}");
+    const currentUser = currentUserState || getCurrentUser() || {};
     const loadAdminData = async () => {
       try {
         setPermissionsLoading(true);
@@ -676,16 +735,25 @@ export default function App() {
       unsubTreePermissions?.();
       unsubNotifications?.();
     };
-  }, [logged, role]);
+  }, [logged, role, currentUserState?.user_id, currentCompany?.company_id]);
   if (!logged)
     return (
       <Login
         settings={settings}
         onLogin={(user) => {
+          const company = getCurrentCompany() || {
+            company_id: user.company_id,
+            company_code: user.company_code,
+            company_name: user.company_name,
+            logo_url: user.logo_url,
+            primary_color: user.primary_color,
+          };
+          setTenantSession({ company, user });
+          setCurrentCompany(company);
+          setCurrentUserState(user);
           setRole(user.role);
           localStorage.setItem("ep_role", user.role);
           localStorage.setItem("ep_employee_id", user.employeeId || "");
-          localStorage.setItem("ep_current_user", JSON.stringify(user));
           localStorage.setItem("ep_logged", "1");
           setLogged(true);
         }}
@@ -697,13 +765,13 @@ export default function App() {
       <div className="grid min-h-screen place-items-center bg-slate-50 p-5" dir="rtl">
         <div className="panel max-w-xl p-6 text-center">
           <AlertTriangle className="mx-auto mb-3 text-red-600" />
-          <h2 className="text-xl font-extrabold">تعذر تحميل بيانات Supabase</h2>
+          <h2 className="text-xl font-extrabold">طھط¹ط°ط± طھط­ظ…ظٹظ„ ط¨ظٹط§ظ†ط§طھ Supabase</h2>
           <p className="mt-2 text-sm text-slate-500">{dataError}</p>
-          <button onClick={() => location.reload()} className="btn-primary mt-5">إعادة المحاولة</button>
+          <button onClick={() => location.reload()} className="btn-primary mt-5">ط¥ط¹ط§ط¯ط© ط§ظ„ظ…ط­ط§ظˆظ„ط©</button>
         </div>
       </div>
     );
-  if (role === "الموظف")
+  if (role === "ط§ظ„ظ…ظˆط¸ظپ")
     return (
       <EmployeePortal
         employees={employees}
@@ -714,17 +782,20 @@ export default function App() {
           localStorage.removeItem("ep_logged");
           localStorage.removeItem("ep_role");
           localStorage.removeItem("ep_employee_id");
-          localStorage.removeItem("ep_current_user");
+          clearTenantSession();
+          setCurrentCompany(null);
+          setCurrentUserState(null);
           setLogged(false);
         }}
       />
     );
-	  const currentUser = JSON.parse(localStorage.getItem("ep_current_user") || "{}"),
+	  const currentUser = currentUserState || getCurrentUser() || {},
 	    roleMatrix = settings.rolePermissions?.[role] || {},
 	    hasRoleMatrix = Object.keys(roleMatrix).length > 0,
 	    canNode = (nodeKey, action = "can_view") => hasTreePermission(treeRolePermissions, role, nodeKey, action),
 	    canPage = (pageKey, action = "can_view") => pageAllowedByTree(treeRolePermissions, role, pageKey, action) || canByPermission(appPermissions, role, pageKey, action),
 	    visibleNavItems = navItems.filter(([id]) => {
+        if (id === "companies_admin") return currentUser?.is_platform_admin === true || role === platformSuperAdminRole;
 	      if (id === "dashboard") return hasAnyPermission(treeRolePermissions, role, dashboardPermissionNodes, "can_view");
 	      if (treeRolePermissions.length) return pageAllowedByTree(treeRolePermissions, role, id, "can_view");
 	      if (appPermissions.length) return canByPermission(appPermissions, role, id === "reports" ? "reports" : id, "can_view");
@@ -733,7 +804,10 @@ export default function App() {
 	    firstAllowedPage = getFirstAllowedPageForUser({ ...currentUser, role }, treeRolePermissions, appPermissions, visibleNavItems),
 	    activePage = visibleNavItems.some(([id]) => id === page) ? page : firstAllowedPage,
     title = navItems.find((x) => x[0] === activePage)?.[1],
-    manager = settings.manager || defaultSettings.manager,
+    company = currentCompany || getCurrentCompany() || {},
+    companyName = company.company_name || currentUser.company_name || "Pure Money",
+    companyLogo = company.logo_url || currentUser.logo_url || "",
+    manager = { ...(settings.manager || defaultSettings.manager), name: currentUser.name || currentUser.username || (settings.manager || defaultSettings.manager).name },
     initials = manager.name
       .split(" ")
       .slice(0, 2)
@@ -749,15 +823,16 @@ export default function App() {
 	      setSettings,
 	      role,
 	      currentUser,
+        currentCompany: company,
 	      can: (pageKey, action = "can_view") => canPage(pageKey, action),
 	      canNode,
 	    };
   if (visibleNavItems.length && activePage && activePage !== page) {
     setTimeout(() => setPage(activePage), 0);
   }
-  if (permissionsLoading) return <LoadingScreen message="جاري تحميل الصلاحيات..." />;
+  if (permissionsLoading) return <LoadingScreen message="ط¬ط§ط±ظٹ طھط­ظ…ظٹظ„ ط§ظ„طµظ„ط§ط­ظٹط§طھ..." />;
   if (!visibleNavItems.length) {
-    return <div className="grid min-h-screen place-items-center bg-slate-50 p-5" dir="rtl"><div className="panel max-w-xl p-6 text-center"><ShieldCheck className="mx-auto mb-3 text-brand-700" /><h2 className="text-xl font-extrabold">لا توجد صلاحيات مفعلة لهذا المستخدم</h2><button onClick={() => { localStorage.removeItem("ep_logged"); localStorage.removeItem("ep_role"); localStorage.removeItem("ep_current_user"); setLogged(false); }} className="btn-primary mt-5">تسجيل الخروج</button></div></div>;
+    return <div className="grid min-h-screen place-items-center bg-slate-50 p-5" dir="rtl"><div className="panel max-w-xl p-6 text-center"><ShieldCheck className="mx-auto mb-3 text-brand-700" /><h2 className="text-xl font-extrabold">ظ„ط§ طھظˆط¬ط¯ طµظ„ط§ط­ظٹط§طھ ظ…ظپط¹ظ„ط© ظ„ظ‡ط°ط§ ط§ظ„ظ…ط³طھط®ط¯ظ…</h2><button onClick={() => { localStorage.removeItem("ep_logged"); localStorage.removeItem("ep_role"); clearTenantSession(); setCurrentCompany(null); setCurrentUserState(null); setLogged(false); }} className="btn-primary mt-5">طھط³ط¬ظٹظ„ ط§ظ„ط®ط±ظˆط¬</button></div></div>;
   }
   return (
     <div className="min-h-screen" dir="rtl">
@@ -771,13 +846,13 @@ export default function App() {
         className={`no-print fixed inset-y-0 right-0 z-40 flex w-[270px] flex-col bg-[#171a21] text-white transition-transform lg:translate-x-0 ${sidebar ? "translate-x-0" : "translate-x-full"}`}
       >
         <div className="flex h-[86px] items-center gap-3 border-b border-white/10 px-6">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-brand-700">
-            <Banknote />
+          <div className="grid h-11 w-11 place-items-center overflow-hidden rounded-xl bg-brand-700">
+            {companyLogo ? <img src={companyLogo} alt={companyName} className="h-full w-full object-cover" /> : <Banknote />}
           </div>
           <div>
-            <b>نظام تقييم الموظفين</b>
+            <b>ظ†ط¸ط§ظ… طھظ‚ظٹظٹظ… ط§ظ„ظ…ظˆط¸ظپظٹظ†</b>
             <p className="mt-1 text-[11px] text-slate-400">
-              شركة الصرافة والتحويلات
+              {companyName}
             </p>
           </div>
           <button
@@ -821,12 +896,14 @@ export default function App() {
               localStorage.removeItem("ep_logged");
               localStorage.removeItem("ep_role");
               localStorage.removeItem("ep_employee_id");
-              localStorage.removeItem("ep_current_user");
+              clearTenantSession();
+              setCurrentCompany(null);
+              setCurrentUserState(null);
               setLogged(false);
             }}
             className="flex items-center gap-2 text-sm text-slate-400"
           >
-            <LogOut size={17} /> تسجيل الخروج
+            <LogOut size={17} /> طھط³ط¬ظٹظ„ ط§ظ„ط®ط±ظˆط¬
           </button>
         </div>
       </aside>
@@ -841,7 +918,7 @@ export default function App() {
           <div>
             <h1 className="text-xl font-extrabold">{title}</h1>
             <p className="mt-1 hidden text-xs text-slate-500 sm:block">
-              نظرة شاملة تساعدك على اتخاذ قرارات أفضل
+              ظ†ط¸ط±ط© ط´ط§ظ…ظ„ط© طھط³ط§ط¹ط¯ظƒ ط¹ظ„ظ‰ ط§طھط®ط§ط° ظ‚ط±ط§ط±ط§طھ ط£ظپط¶ظ„
             </p>
           </div>
           <div className="mr-auto flex items-center gap-3">
@@ -849,7 +926,7 @@ export default function App() {
               <Search size={17} />
               <input
                 className="w-40 bg-transparent text-sm outline-none"
-                placeholder="بحث سريع..."
+                placeholder="ط¨ط­ط« ط³ط±ظٹط¹..."
               />
             </label>
 		            <div className="relative">
@@ -863,7 +940,7 @@ export default function App() {
 	              </button>
 	              {notificationsOpen && (
 	                <div className="absolute left-0 top-12 z-50 w-80 rounded-2xl border bg-white p-3 shadow-xl">
-	                  <div className="mb-2 flex items-center"><b className="text-sm">الإشعارات</b><span className="mr-auto text-xs text-slate-400">{notifications.length}</span></div>
+	                  <div className="mb-2 flex items-center"><b className="text-sm">ط§ظ„ط¥ط´ط¹ط§ط±ط§طھ</b><span className="mr-auto text-xs text-slate-400">{notifications.length}</span></div>
 	                  <div className="max-h-80 space-y-2 overflow-y-auto">
 	                    {notifications.length ? notifications.slice(0, 10).map((n) => (
 	                      <button
@@ -881,7 +958,7 @@ export default function App() {
 	                        <b>{n.title}</b>
 	                        <p className="mt-1 text-xs text-slate-500">{n.message}</p>
 	                      </button>
-	                    )) : <p className="p-4 text-center text-sm text-slate-400">لا توجد إشعارات</p>}
+	                    )) : <p className="p-4 text-center text-sm text-slate-400">ظ„ط§ طھظˆط¬ط¯ ط¥ط´ط¹ط§ط±ط§طھ</p>}
 	                  </div>
 	                </div>
 	              )}
@@ -898,6 +975,7 @@ export default function App() {
           </div>
         </header>
         <main className="p-4 md:p-7">
+          {activePage === "companies_admin" && <CompaniesAdminPage {...p} />}{" "}
           {activePage === "dashboard" && <Dashboard {...p} />}{" "}
           {activePage === "employees" && <EnhancedEmployees {...p} />}{" "}
           {activePage === "templates" && <EnhancedTemplates {...p} />}{" "}
@@ -920,6 +998,7 @@ export default function App() {
 	          {activePage === "audit_logs" && <AuditLogsPage {...p} />}{" "}
 	          {activePage === "reports" && <EnhancedReports {...p} />}{" "}
 	          {activePage === "settings" && <SettingsPage {...p} />}
+          {fullHrNavItems.some(([id]) => id === activePage) && <HRModulePage pageKey={activePage} currentCompany={company} can={p.can} />}
         </main>
         <AIAssistantWidget currentUser={p.currentUser} page={activePage} />
       </div>
@@ -927,7 +1006,8 @@ export default function App() {
   );
 }
 function Login({ onLogin }) {
-  const [u, setU] = useState(""),
+  const [companyCode, setCompanyCode] = useState("PUREMONEY"),
+    [u, setU] = useState(""),
     [pw, setPw] = useState(""),
     [employeeNo, setEmployeeNo] = useState(""),
     [err, setErr] = useState(""),
@@ -935,16 +1015,20 @@ function Login({ onLogin }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErr("");
-    if (!u.trim() || !pw || !employeeNo.trim()) {
-      setErr("يرجى إدخال اسم المستخدم وكلمة المرور والرقم الوظيفي.");
+    if (!companyCode.trim()) {
+      setErr("يجب إدخال كود الشركة");
+      return;
+    }
+    if (!u.trim() || !pw) {
+      setErr("يرجى إدخال اسم المستخدم وكلمة المرور.");
       return;
     }
     setLoading(true);
     try {
-      const user = await cloudLoginWithSupabase(u.trim(), pw, employeeNo.trim());
+      const user = await cloudLoginWithSupabase(u.trim(), pw, employeeNo.trim(), companyCode.trim());
       onLogin(user);
     } catch (error) {
-      setErr(error.message || "تعذر تسجيل الدخول. تحقق من البيانات وحاول مرة أخرى.");
+      setErr(error.message || "طھط¹ط°ط± طھط³ط¬ظٹظ„ ط§ظ„ط¯ط®ظˆظ„. طھط­ظ‚ظ‚ ظ…ظ† ط§ظ„ط¨ظٹط§ظ†ط§طھ ظˆط­ط§ظˆظ„ ظ…ط±ط© ط£ط®ط±ظ‰.");
     } finally {
       setLoading(false);
     }
@@ -958,57 +1042,66 @@ function Login({ onLogin }) {
             <div className="grid h-12 w-12 place-items-center rounded-xl bg-white/10">
               <Banknote />
             </div>
-            <b>شركة الصرافة والتحويلات</b>
+            <b>ط´ط±ظƒط© ط§ظ„طµط±ط§ظپط© ظˆط§ظ„طھط­ظˆظٹظ„ط§طھ</b>
           </div>
           <div>
             <div className="mb-5 h-1 w-12 bg-white/30" />
             <h2 className="text-4xl font-extrabold leading-[1.35]">
-              نحو ثقافة أداء
+              ظ†ط­ظˆ ط«ظ‚ط§ظپط© ط£ط¯ط§ط،
               <br />
-              تكافئ التميّز
+              طھظƒط§ظپط¦ ط§ظ„طھظ…ظٹظ‘ط²
             </h2>
             <p className="mt-5 leading-7 text-red-100/75">
-              منصة موحّدة لقياس الأداء وربط الإنجاز بالحوافز بشفافية.
+              ظ…ظ†طµط© ظ…ظˆط­ظ‘ط¯ط© ظ„ظ‚ظٹط§ط³ ط§ظ„ط£ط¯ط§ط، ظˆط±ط¨ط· ط§ظ„ط¥ظ†ط¬ط§ط² ط¨ط§ظ„ط­ظˆط§ظپط² ط¨ط´ظپط§ظپظٹط©.
             </p>
           </div>
           <div className="flex gap-2 text-xs text-red-100/60">
-            <ShieldCheck size={17} /> بياناتك محفوظة وآمنة داخل المتصفح
+            <ShieldCheck size={17} /> ط¨ظٹط§ظ†ط§طھظƒ ظ…ط­ظپظˆط¸ط© ظˆط¢ظ…ظ†ط© ط¯ط§ط®ظ„ ط§ظ„ظ…طھطµظپط­
           </div>
         </div>
         <form onSubmit={handleSubmit} className="p-8 sm:p-14">
           <span className="text-sm font-bold text-brand-700">
-            مرحبًا بعودتك
+            ظ…ط±ط­ط¨ظ‹ط§ ط¨ط¹ظˆط¯طھظƒ
           </span>
-          <h1 className="mt-2 text-3xl font-extrabold">تسجيل الدخول</h1>
+          <h1 className="mt-2 text-3xl font-extrabold">طھط³ط¬ظٹظ„ ط§ظ„ط¯ط®ظˆظ„</h1>
           <p className="mt-2 text-sm text-slate-500">
-            أدخل بياناتك للوصول إلى لوحة التحكم
+            ط£ط¯ط®ظ„ ط¨ظٹط§ظ†ط§طھظƒ ظ„ظ„ظˆطµظˆظ„ ط¥ظ„ظ‰ ظ„ظˆط­ط© ط§ظ„طھط­ظƒظ…
           </p>
           <div className="mt-8 space-y-5">
-            <Label t="اسم المستخدم">
+            <Label t="كود الشركة">
+              <input
+                value={companyCode}
+                onChange={(e) => setCompanyCode(e.target.value.toUpperCase())}
+                autoComplete="organization"
+                placeholder="PUREMONEY"
+                className="field mt-2"
+              />
+            </Label>
+            <Label t="ط§ط³ظ… ط§ظ„ظ…ط³طھط®ط¯ظ…">
               <input
                 value={u}
                 onChange={(e) => setU(e.target.value)}
                 autoComplete="username"
-                placeholder="أدخل اسم المستخدم"
+                placeholder="ط£ط¯ط®ظ„ ط§ط³ظ… ط§ظ„ظ…ط³طھط®ط¯ظ…"
                 className="field mt-2"
               />
             </Label>
-            <Label t="كلمة المرور">
+            <Label t="ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط±">
               <input
                 type="password"
                 value={pw}
                 onChange={(e) => setPw(e.target.value)}
                 autoComplete="current-password"
-                placeholder="أدخل كلمة المرور"
+                placeholder="ط£ط¯ط®ظ„ ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط±"
                 className="field mt-2"
               />
             </Label>
-            <Label t="الرقم الوظيفي">
+            <Label t="ط§ظ„ط±ظ‚ظ… ط§ظ„ظˆط¸ظٹظپظٹ">
               <input
                 value={employeeNo}
                 onChange={(e) => setEmployeeNo(e.target.value)}
                 autoComplete="off"
-                placeholder="أدخل الرقم الوظيفي"
+                placeholder="ط£ط¯ط®ظ„ ط§ظ„ط±ظ‚ظ… ط§ظ„ظˆط¸ظٹظپظٹ"
                 className="field mt-2"
               />
             </Label>
@@ -1019,13 +1112,134 @@ function Login({ onLogin }) {
             </p>
           )}
           <button disabled={loading} className="btn-primary mt-7 h-12 w-full disabled:cursor-not-allowed disabled:opacity-60">
-            {loading ? "جاري التحقق..." : "دخول إلى النظام"} <ArrowUpLeft size={18} />
+            {loading ? "ط¬ط§ط±ظٹ ط§ظ„طھط­ظ‚ظ‚..." : "ط¯ط®ظˆظ„ ط¥ظ„ظ‰ ط§ظ„ظ†ط¸ط§ظ…"} <ArrowUpLeft size={18} />
           </button>
         </form>
       </div>
     </div>
   );
 }
+
+const uiOnlyMessage = "تم تجهيز العملية في الواجهة، وسيتم ربطها بقاعدة البيانات لاحقًا.";
+
+const hrModuleTabs = {
+  hr_home: ["نظرة عامة", "طلبات قيد الموافقة", "إجازات الشهر", "إنذارات الشهر", "وظائف شاغرة"],
+  hr_employees_full: ["جميع الموظفين", "الموظفون النشطون", "تحت التجربة", "الموقوفون", "المنتهية خدماتهم", "ملفات الموظفين", "عقود الموظفين", "بيانات العهد"],
+  hr_reports_full: ["تقارير الموظفين", "تقارير الحضور", "تقارير الرواتب", "تقارير الأداء", "تقارير الإجازات", "تقارير التوظيف", "تقارير المخالفات", "تقارير الإدارة العليا"],
+  hr_requests: ["طلب إجازة", "طلب سلفة", "طلب تعريف راتب", "طلب تعديل بيانات", "طلب عهدة", "طلب عمل إضافي", "طلب نقل", "طلب استقالة", "كل الطلبات"],
+  hr_performance_full: ["معايير الأداء", "نماذج تقييم الوظائف", "تقييم الموظفين", "درجات KPI", "اعتراضات التقييم", "خطط تحسين الأداء", "تقارير الأداء"],
+  hr_incentives_full: ["إعدادات الحوافز", "شرائح الحوافز", "احتساب الحوافز", "اعتماد الحوافز", "صرف الحوافز", "تقارير الحوافز"],
+  hr_attendance_payroll: ["سجلات الدوام", "التأخير", "الغياب", "الانصراف المبكر", "العمل الإضافي", "ملخص الدوام", "تقارير الدوام"],
+  hr_salary: ["إعداد الراتب", "البدلات", "الخصومات", "السلف", "الإضافي", "صافي الراتب", "كشف الرواتب", "تقارير الرواتب"],
+  hr_disciplinary: ["المساءلات", "الإنذارات", "لفت النظر", "التحقيقات", "الجزاءات", "سجل المخالفات", "تقارير المخالفات"],
+  hr_recruitment_full: ["قائمة الوظائف", "طلبات التوظيف", "تقييم المرشحين", "خطابات عرض العمل", "عروض العمل", "عقود العمل", "خطة الاحتياجات الوظيفية", "اختبارات التوظيف", "الموظفون تحت التجربة", "رسائل الترحيب", "تقارير التوظيف"],
+  hr_leaves: ["طلبات الإجازات", "أرصدة الإجازات", "الإجازات السنوية", "المرضية", "بدون راتب", "إجازات طارئة", "تقارير الإجازات"],
+  hr_complaints: ["شكاوى الموظفين", "شكاوى العملاء", "شكاوى الفروع", "قيد المعالجة", "مغلقة", "تقارير الشكاوى"],
+  hr_circulars: ["كل التعاميم", "تعاميم إدارية", "تعاميم دوام", "تعاميم موارد بشرية", "تعاميم امتثال", "تعاميم فروع", "أرشيف التعاميم"],
+  hr_termination: ["طلبات الاستقالة", "إنهاء التجربة", "إنهاء العقد", "المخالصات", "تسليم العهد", "حساب مستحقات نهاية الخدمة", "تقارير إنهاء الخدمة"],
+  hr_surveys: ["إنشاء استبيان", "استبيانات الموظفين", "استبيانات رضا العملاء", "نتائج الاستبيانات", "تحليل النتائج", "تقارير الاستبيانات"],
+  hr_insurance: ["بيانات التأمين", "اشتراكات الموظفين", "وثائق التأمين", "مطالبات التأمين", "تقارير التأمين"],
+  hr_announcements: ["إعلانات داخلية", "إعلانات الوظائف", "إعلانات الفروع", "الإعلانات النشطة", "أرشيف الإعلانات"],
+  hr_files: ["ملفات الموظفين", "ملفات العقود", "ملفات التعاميم", "ملفات التوظيف", "ملفات المخزون", "الأرشيف", "البحث في الملفات"],
+  hr_training: ["خطة التدريب", "البرامج التدريبية", "المتدربون", "تقييم التدريب", "شهادات التدريب", "تقارير التدريب"],
+  hr_approvals: ["موافقات الإجازات", "موافقات الحوافز", "موافقات التوظيف", "موافقات المخزون", "موافقات الدوام", "كل الموافقات"],
+  hr_org_chart: ["الهيكل العام", "الإدارات", "الفروع", "الوظائف", "خطوط الإشراف", "بطاقات الوظائف"],
+  hr_settings_full: ["إعدادات الفروع", "إعدادات العملات", "إعدادات الوظائف", "إعدادات الأقسام", "إعدادات الحضور", "إعدادات التقييم", "إعدادات الحوافز", "إعدادات النظام"],
+  hr_financial_setup: ["العملات", "الرواتب", "البدلات", "الخصومات", "السلف", "التأمينات", "مراكز التكلفة", "الحسابات المالية"],
+  hr_templates_full: ["قوالب العقود", "قوالب عروض العمل", "قوالب التعاميم", "قوالب الإنذارات", "قوالب خطابات الموارد البشرية", "قوالب التقارير", "قوالب رسائل واتساب"],
+};
+
+function HRModulePage({ pageKey, currentCompany }) {
+  const title = fullHrNavItems.find(([id]) => id === pageKey)?.[1] || "وحدة الموارد البشرية";
+  const tabs = hrModuleTabs[pageKey] || ["نظرة عامة"];
+  const [tab, setTab] = useState(tabs[0]);
+  const [q, setQ] = useState("");
+  const [dialog, setDialog] = useState(null);
+  const rows = tabs.map((name, index) => ({
+    id: `${pageKey}-${index + 1}`,
+    name,
+    company: currentCompany?.company_name || "Pure Money",
+    status: index % 3 === 0 ? "قيد المراجعة" : "نشط",
+    owner: index % 2 === 0 ? "الموارد البشرية" : "مدير الفرع",
+    date: new Date(Date.now() - index * 86400000).toISOString().slice(0, 10),
+  })).filter((row) => !q || row.name.includes(q) || row.status.includes(q) || row.owner.includes(q));
+  const stats = [
+    ["إجمالي السجلات", rows.length],
+    ["النشطة", rows.filter((r) => r.status === "نشط").length],
+    ["قيد المراجعة", rows.filter((r) => r.status === "قيد المراجعة").length],
+    ["الشركة", currentCompany?.company_name || "Pure Money"],
+  ];
+  const action = () => {
+    console.error("HRMS UI placeholder error:", { pageKey, tab });
+    alert(uiOnlyMessage);
+  };
+  return (
+    <div className="space-y-5">
+      <PageHead title={title} desc={`واجهة موارد بشرية متعددة الشركات - ${currentCompany?.company_name || "Pure Money"}`} action={<button onClick={() => setDialog({ name: "", status: "نشط" })} className="btn-primary"><Plus size={18} /> إضافة</button>} />
+      <div className="grid gap-4 md:grid-cols-4">
+        {stats.map(([label, value]) => <Mini key={label} label={label} value={value} I={BadgeCheck} />)}
+      </div>
+      <div className="panel flex flex-wrap gap-2 p-3">
+        {tabs.map((item) => <button key={item} onClick={() => setTab(item)} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === item ? "bg-brand-700 text-white" : "bg-slate-100 text-slate-600"}`}>{item}</button>)}
+      </div>
+      <div className="panel flex flex-wrap gap-3 p-4">
+        <input value={q} onChange={(e) => setQ(e.target.value)} className="field min-w-[220px] flex-1" placeholder="بحث..." />
+        <button onClick={() => exportExcel(rows, title)} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button>
+        <button onClick={() => printDocument(title, rowsToReportHtml(title, rows, [{ key: "name", label: "البند" }, { key: "status", label: "الحالة" }, { key: "owner", label: "المسؤول" }, { key: "date", label: "التاريخ" }]))} className="btn-secondary"><Printer size={17} /> طباعة</button>
+      </div>
+      <div className="panel p-4">
+        {rows.length ? <div className="table-wrap"><table><thead><tr><th>البند</th><th>الشركة</th><th>الحالة</th><th>المسؤول</th><th>التاريخ</th><th></th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td>{row.name}</td><td>{row.company}</td><td><Status>{row.status}</Status></td><td>{row.owner}</td><td>{row.date}</td><td><button onClick={() => setDialog(row)} className="p-2 text-slate-600"><Eye size={16} /></button><button onClick={action} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={action} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div> : <div className="p-8 text-center text-sm text-slate-400">لا توجد بيانات للعرض</div>}
+      </div>
+      {dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={(e) => { e.preventDefault(); action(); setDialog(null); }} className="panel w-full max-w-2xl p-6"><DialogTitle title={`${title} - ${tab}`} close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-2"><Label t="الاسم"><input value={dialog.name || ""} onChange={(e) => setDialog({ ...dialog, name: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={dialog.status || "نشط"} onChange={(e) => setDialog({ ...dialog, status: e.target.value })} className="field mt-2"><option>نشط</option><option>قيد المراجعة</option><option>مغلق</option></select></Label><Label t="ملاحظات"><textarea className="field mt-2 !h-auto py-3" placeholder="سيتم ربط هذا النموذج بقاعدة البيانات لاحقًا" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}
+    </div>
+  );
+}
+
+function CompaniesAdminPage({ currentUser }) {
+  const [rows, setRows] = useState([]);
+  const [tab, setTab] = useState("الشركات");
+  const [loading, setLoading] = useState(true);
+  const [dialog, setDialog] = useState(null);
+  const canManage = currentUser?.is_platform_admin === true || currentUser?.role === platformSuperAdminRole;
+  const load = async () => {
+    if (!canManage) return;
+    setLoading(true);
+    try {
+      setRows(await companiesService.loadCompanies());
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { load(); }, [canManage]);
+  if (!canManage) return <div className="panel p-6 text-center font-bold text-red-600">لا تملك صلاحية الوصول إلى بيانات هذه الشركة</div>;
+  const save = async (e) => {
+    e.preventDefault();
+    try {
+      const saved = dialog.company_id
+        ? await companiesService.saveCompany(dialog)
+        : await companiesService.createCompanyWithDefaults(dialog, { username: dialog.admin_username || "admin", password: dialog.admin_password || "123456", email: dialog.email });
+      setRows((list) => list.some((x) => x.company_id === saved.company_id) ? list.map((x) => x.company_id === saved.company_id ? saved : x) : [saved, ...list]);
+      setDialog(null);
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+  const tabs = ["الشركات", "اشتراكات الشركات", "مستخدمو الشركات", "نسخ احتياطية الشركات", "إعدادات المنصة"];
+  return (
+    <div className="space-y-5">
+      <PageHead title="إدارة الشركات" desc="إدارة منصة SaaS متعددة الشركات والاشتراكات والمستخدمين" action={<button onClick={() => setDialog({ company_code: "", company_name: "", subscription_plan: "standard", subscription_status: "active", max_users: 25, max_branches: 5, primary_color: "#7f1d1d", is_active: true })} className="btn-primary"><Plus size={18} /> إضافة شركة</button>} />
+      <div className="panel flex flex-wrap gap-2 p-3">{tabs.map((item) => <button key={item} onClick={() => setTab(item)} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === item ? "bg-brand-700 text-white" : "bg-slate-100 text-slate-600"}`}>{item}</button>)}</div>
+      <div className="grid gap-4 md:grid-cols-4"><Mini label="عدد الشركات" value={rows.length} I={Building2} /><Mini label="النشطة" value={rows.filter((r) => r.is_active).length} I={BadgeCheck} /><Mini label="اشتراكات فعالة" value={rows.filter((r) => ["active", "trial"].includes(r.subscription_status)).length} I={Wallet} /><Mini label="المشرف" value={currentUser?.username || ""} I={UserRoundCog} /></div>
+      <div className="panel p-4">
+        {loading ? <p className="text-sm text-slate-400">جاري التحميل...</p> : <div className="table-wrap"><table><thead><tr><th>كود الشركة</th><th>اسم الشركة</th><th>الباقة</th><th>حالة الاشتراك</th><th>المستخدمون</th><th>الفروع</th><th>الحالة</th><th></th></tr></thead><tbody>{rows.map((row) => <tr key={row.company_id}><td>{row.company_code}</td><td>{row.company_name}</td><td>{row.subscription_plan}</td><td><Status>{row.subscription_status}</Status></td><td>{row.max_users}</td><td>{row.max_branches}</td><td><Status>{row.is_active ? "نشط" : "معطل"}</Status></td><td><button onClick={() => setDialog(row)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => companiesService.deleteOrDeactivateCompany(row).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>}
+      </div>
+      {dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6"><DialogTitle title="بيانات الشركة" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="اسم الشركة"><input required value={dialog.company_name || ""} onChange={(e) => setDialog({ ...dialog, company_name: e.target.value })} className="field mt-2" /></Label><Label t="كود الشركة"><input required value={dialog.company_code || ""} onChange={(e) => setDialog({ ...dialog, company_code: e.target.value.toUpperCase() })} className="field mt-2" /></Label><Label t="البريد"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label><Label t="الهاتف"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label><Label t="الباقة"><input value={dialog.subscription_plan || ""} onChange={(e) => setDialog({ ...dialog, subscription_plan: e.target.value })} className="field mt-2" /></Label><Label t="حالة الاشتراك"><select value={dialog.subscription_status || "active"} onChange={(e) => setDialog({ ...dialog, subscription_status: e.target.value })} className="field mt-2"><option value="active">active</option><option value="trial">trial</option><option value="inactive">inactive</option></select></Label><Label t="الحد الأقصى للمستخدمين"><input type="number" value={dialog.max_users || 0} onChange={(e) => setDialog({ ...dialog, max_users: e.target.value })} className="field mt-2" /></Label><Label t="الحد الأقصى للفروع"><input type="number" value={dialog.max_branches || 0} onChange={(e) => setDialog({ ...dialog, max_branches: e.target.value })} className="field mt-2" /></Label><Label t="رابط الشعار"><input value={dialog.logo_url || ""} onChange={(e) => setDialog({ ...dialog, logo_url: e.target.value })} className="field mt-2" /></Label><Label t="اللون الأساسي"><input type="color" value={dialog.primary_color || "#7f1d1d"} onChange={(e) => setDialog({ ...dialog, primary_color: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label><Label t="اسم مستخدم مدير الشركة"><input value={dialog.admin_username || "admin"} onChange={(e) => setDialog({ ...dialog, admin_username: e.target.value })} className="field mt-2" /></Label><Label t="كلمة مرور مدير الشركة"><input value={dialog.admin_password || "123456"} onChange={(e) => setDialog({ ...dialog, admin_password: e.target.value })} className="field mt-2" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}
+    </div>
+  );
+}
+
 function EmployeePortal({ employees, evaluations, settings, setSettings, onLogout }) {
   const employeeId = localStorage.getItem("ep_employee_id");
   const employee = employees.find((item) => item.id === employeeId);
@@ -1040,12 +1254,12 @@ function EmployeePortal({ employees, evaluations, settings, setSettings, onLogou
       <div dir="rtl" className="grid min-h-screen place-items-center p-6">
         <div className="panel max-w-md p-8 text-center">
           <AlertTriangle className="mx-auto text-amber-500" size={40} />
-          <h1 className="mt-4 text-xl font-extrabold">الحساب غير مرتبط بموظف</h1>
+          <h1 className="mt-4 text-xl font-extrabold">ط§ظ„ط­ط³ط§ط¨ ط؛ظٹط± ظ…ط±طھط¨ط· ط¨ظ…ظˆط¸ظپ</h1>
           <p className="mt-2 text-sm text-slate-500">
-            اطلب من مدير النظام ربط الحساب برقم الموظف.
+            ط§ط·ظ„ط¨ ظ…ظ† ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ… ط±ط¨ط· ط§ظ„ط­ط³ط§ط¨ ط¨ط±ظ‚ظ… ط§ظ„ظ…ظˆط¸ظپ.
           </p>
           <button onClick={onLogout} className="btn-primary mt-5">
-            تسجيل الخروج
+            طھط³ط¬ظٹظ„ ط§ظ„ط®ط±ظˆط¬
           </button>
         </div>
       </div>
@@ -1062,7 +1276,7 @@ function EmployeePortal({ employees, evaluations, settings, setSettings, onLogou
           employeeId,
           evaluationId: latest?.id,
           text: objection.trim(),
-          status: "قيد المراجعة",
+          status: "ظ‚ظٹط¯ ط§ظ„ظ…ط±ط§ط¬ط¹ط©",
           createdAt: new Date().toISOString(),
         },
       ],
@@ -1077,11 +1291,11 @@ function EmployeePortal({ employees, evaluations, settings, setSettings, onLogou
           <Banknote />
         </div>
         <div className="mr-3">
-          <h1 className="font-extrabold">بوابة الموظف</h1>
-          <p className="text-xs text-slate-500">عرض فقط — لا يمكن تعديل البيانات</p>
+          <h1 className="font-extrabold">ط¨ظˆط§ط¨ط© ط§ظ„ظ…ظˆط¸ظپ</h1>
+          <p className="text-xs text-slate-500">ط¹ط±ط¶ ظپظ‚ط· â€” ظ„ط§ ظٹظ…ظƒظ† طھط¹ط¯ظٹظ„ ط§ظ„ط¨ظٹط§ظ†ط§طھ</p>
         </div>
         <button onClick={onLogout} className="btn-secondary mr-auto">
-          <LogOut size={17} /> تسجيل الخروج
+          <LogOut size={17} /> طھط³ط¬ظٹظ„ ط§ظ„ط®ط±ظˆط¬
         </button>
       </header>
       <main className="mx-auto max-w-5xl space-y-5 p-5 md:p-8">
@@ -1096,36 +1310,36 @@ function EmployeePortal({ employees, evaluations, settings, setSettings, onLogou
           <div>
             <h2 className="text-xl font-extrabold">{employee.name}</h2>
             <p className="mt-1 text-sm text-slate-500">
-              {employee.id} • {employee.job} • {employee.branch}
+              {employee.id} â€¢ {employee.job} â€¢ {employee.branch}
             </p>
           </div>
           <Status>{employee.status}</Status>
         </div>
         <div className="grid gap-5 md:grid-cols-3">
           <Mini
-            label="آخر تقييم"
-            value={latest ? `${latest.total}%` : "—"}
+            label="ط¢ط®ط± طھظ‚ظٹظٹظ…"
+            value={latest ? `${latest.total}%` : "â€”"}
             I={Star}
           />
           <Mini
-            label="تصنيف الأداء"
-            value={latest ? classify(latest.total) : "—"}
+            label="طھطµظ†ظٹظپ ط§ظ„ط£ط¯ط§ط،"
+            value={latest ? classify(latest.total) : "â€”"}
             I={BadgeCheck}
           />
           <Mini
-            label="شهر التقييم"
-            value={latest?.month || "—"}
+            label="ط´ظ‡ط± ط§ظ„طھظ‚ظٹظٹظ…"
+            value={latest?.month || "â€”"}
             I={CalendarCheck}
           />
         </div>
         <div className="panel p-6">
-          <h3 className="font-extrabold">ملاحظات التقييم</h3>
+          <h3 className="font-extrabold">ظ…ظ„ط§ط­ط¸ط§طھ ط§ظ„طھظ‚ظٹظٹظ…</h3>
           <p className="mt-3 rounded-xl bg-slate-50 p-4 text-sm leading-7 text-slate-600">
-            {latest?.notes || "لا توجد ملاحظات مسجلة."}
+            {latest?.notes || "ظ„ط§ طھظˆط¬ط¯ ظ…ظ„ط§ط­ط¸ط§طھ ظ…ط³ط¬ظ„ط©."}
           </p>
         </div>
         <div className="panel p-6">
-          <h3 className="font-extrabold">تقديم اعتراض أو طلب مراجعة</h3>
+          <h3 className="font-extrabold">طھظ‚ط¯ظٹظ… ط§ط¹طھط±ط§ط¶ ط£ظˆ ط·ظ„ط¨ ظ…ط±ط§ط¬ط¹ط©</h3>
           <textarea
             value={objection}
             onChange={(e) => {
@@ -1134,15 +1348,15 @@ function EmployeePortal({ employees, evaluations, settings, setSettings, onLogou
             }}
             rows="4"
             className="field mt-4 !h-auto py-3"
-            placeholder="اكتب سبب طلب المراجعة..."
+            placeholder="ط§ظƒطھط¨ ط³ط¨ط¨ ط·ظ„ط¨ ط§ظ„ظ…ط±ط§ط¬ط¹ط©..."
           />
           <div className="mt-3 flex items-center gap-3">
             <button onClick={submitObjection} className="btn-primary">
-              إرسال الطلب
+              ط¥ط±ط³ط§ظ„ ط§ظ„ط·ظ„ط¨
             </button>
             {sent && (
               <span className="text-sm font-bold text-emerald-600">
-                تم إرسال طلب المراجعة.
+                طھظ… ط¥ط±ط³ط§ظ„ ط·ظ„ط¨ ط§ظ„ظ…ط±ط§ط¬ط¹ط©.
               </span>
             )}
           </div>
@@ -1161,39 +1375,39 @@ function Dashboard({ employees, evaluations, setPage, settings }) {
       const ids = employees.filter((e) => e.branch === b).map((e) => e.id),
         ev = evaluations.filter((x) => ids.includes(x.employeeId));
       return {
-        name: b.replace("فرع ", ""),
+        name: b.replace("ظپط±ط¹ ", ""),
         value: Math.round(
           ev.reduce((s, x) => s + x.total, 0) / (ev.length || 1),
         ),
       };
     }),
-    dist = ["ممتاز", "جيد جدًا", "جيد", "مقبول", "ضعيف"].map((name) => ({
+    dist = ["ظ…ظ…طھط§ط²", "ط¬ظٹط¯ ط¬ط¯ظ‹ط§", "ط¬ظٹط¯", "ظ…ظ‚ط¨ظˆظ„", "ط¶ط¹ظٹظپ"].map((name) => ({
       name,
       value: evaluations.filter((e) => classify(e.total) === name).length,
     })),
     cards = [
-      ["إجمالي الموظفين", employees.length, Users, "bg-blue-50 text-blue-600"],
+      ["ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظ…ظˆط¸ظپظٹظ†", employees.length, Users, "bg-blue-50 text-blue-600"],
       [
-        "الموظفون النشطون",
-        employees.filter((e) => e.status === "نشط").length,
+        "ط§ظ„ظ…ظˆط¸ظپظˆظ† ط§ظ„ظ†ط´ط·ظˆظ†",
+        employees.filter((e) => e.status === "ظ†ط´ط·").length,
         UserCheck,
         "bg-emerald-50 text-emerald-600",
       ],
-      ["متوسط تقييم الشركة", `${avg}%`, Star, "bg-amber-50 text-amber-600"],
+      ["ظ…طھظˆط³ط· طھظ‚ظٹظٹظ… ط§ظ„ط´ط±ظƒط©", `${avg}%`, Star, "bg-amber-50 text-amber-600"],
       [
-        "مستحقو الحافز",
+        "ظ…ط³طھط­ظ‚ظˆ ط§ظ„ط­ط§ظپط²",
         evaluations.filter((e) => e.total >= 70).length,
         Gift,
         "bg-violet-50 text-violet-600",
       ],
       [
-        "الموظفون الضعفاء",
+        "ط§ظ„ظ…ظˆط¸ظپظˆظ† ط§ظ„ط¶ط¹ظپط§ط،",
         evaluations.filter((e) => e.total < 60).length,
         AlertTriangle,
         "bg-red-50 text-red-600",
       ],
       [
-        "إجمالي الحوافز",
+        "ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ط­ظˆط§ظپط²",
         money(
           calcIncentives(employees, evaluations).reduce(
             (s, x) => s + x.amount,
@@ -1204,21 +1418,21 @@ function Dashboard({ employees, evaluations, setPage, settings }) {
         "bg-brand-50 text-brand-700",
       ],
       [
-        "عدد المخالفات",
+        "ط¹ط¯ط¯ ط§ظ„ظ…ط®ط§ظ„ظپط§طھ",
         "8",
         MessageSquareWarning,
         "bg-orange-50 text-orange-600",
       ],
-      ["نسبة الانضباط", "94%", CalendarCheck, "bg-teal-50 text-teal-600"],
+      ["ظ†ط³ط¨ط© ط§ظ„ط§ظ†ط¶ط¨ط§ط·", "94%", CalendarCheck, "bg-teal-50 text-teal-600"],
     ];
   return (
     <div className="space-y-6">
       <PageHead
-        title={`صباح الخير، ${settings.manager.name.split(" ")[0]} 👋`}
-        desc="هذا ملخص أداء الشركة لشهر يونيو 2026"
+        title={`طµط¨ط§ط­ ط§ظ„ط®ظٹط±طŒ ${settings.manager.name.split(" ")[0]} ًں‘‹`}
+        desc="ظ‡ط°ط§ ظ…ظ„ط®طµ ط£ط¯ط§ط، ط§ظ„ط´ط±ظƒط© ظ„ط´ظ‡ط± ظٹظˆظ†ظٹظˆ 2026"
         action={
           <button onClick={() => setPage("reports")} className="btn-primary">
-            <FileBarChart size={17} /> التقرير الشهري
+            <FileBarChart size={17} /> ط§ظ„طھظ‚ط±ظٹط± ط§ظ„ط´ظ‡ط±ظٹ
           </button>
         }
       />
@@ -1240,8 +1454,8 @@ function Dashboard({ employees, evaluations, setPage, settings }) {
 	      <EnterpriseDashboardWidgets employees={employees} evaluations={evaluations} />
 	      <div className="grid gap-5 xl:grid-cols-[1.45fr_.8fr]">
         <Chart
-          title="متوسط تقييم الموظفين حسب الفروع"
-          sub="مقارنة النتائج المعتمدة"
+          title="ظ…طھظˆط³ط· طھظ‚ظٹظٹظ… ط§ظ„ظ…ظˆط¸ظپظٹظ† ط­ط³ط¨ ط§ظ„ظپط±ظˆط¹"
+          sub="ظ…ظ‚ط§ط±ظ†ط© ط§ظ„ظ†طھط§ط¦ط¬ ط§ظ„ظ…ط¹طھظ…ط¯ط©"
         >
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={branchData}>
@@ -1258,7 +1472,7 @@ function Dashboard({ employees, evaluations, setPage, settings }) {
             </BarChart>
           </ResponsiveContainer>
         </Chart>
-        <Chart title="توزيع تصنيفات الأداء" sub="إجمالي الموظفين المقيمين">
+        <Chart title="طھظˆط²ظٹط¹ طھطµظ†ظٹظپط§طھ ط§ظ„ط£ط¯ط§ط،" sub="ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظ…ظˆط¸ظپظٹظ† ط§ظ„ظ…ظ‚ظٹظ…ظٹظ†">
           <ResponsiveContainer width="100%" height={220}>
             <PieChart>
               <Pie
@@ -1300,16 +1514,16 @@ function Dashboard({ employees, evaluations, setPage, settings }) {
         </Chart>
       </div>
       <div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
-        <Chart title="تطور الأداء الشهري" sub="آخر ستة أشهر">
+        <Chart title="طھط·ظˆط± ط§ظ„ط£ط¯ط§ط، ط§ظ„ط´ظ‡ط±ظٹ" sub="ط¢ط®ط± ط³طھط© ط£ط´ظ‡ط±">
           <ResponsiveContainer width="100%" height={250}>
             <AreaChart
               data={[
-                ["يناير", 76],
-                ["فبراير", 79],
-                ["مارس", 78],
-                ["أبريل", 82],
-                ["مايو", 84],
-                ["يونيو", avg],
+                ["ظٹظ†ط§ظٹط±", 76],
+                ["ظپط¨ط±ط§ظٹط±", 79],
+                ["ظ…ط§ط±ط³", 78],
+                ["ط£ط¨ط±ظٹظ„", 82],
+                ["ظ…ط§ظٹظˆ", 84],
+                ["ظٹظˆظ†ظٹظˆ", avg],
               ].map(([month, value]) => ({ month, value }))}
             >
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -1329,7 +1543,7 @@ function Dashboard({ employees, evaluations, setPage, settings }) {
         <div className="panel overflow-hidden">
           <div className="bg-gradient-to-l from-brand-800 to-brand-700 p-6 text-white">
             <div className="flex justify-between">
-              <span>موظف الشهر</span>
+              <span>ظ…ظˆط¸ظپ ط§ظ„ط´ظ‡ط±</span>
               <Trophy className="text-amber-300" />
             </div>
             <div className="mt-5 flex items-center gap-4">
@@ -1348,7 +1562,7 @@ function Dashboard({ employees, evaluations, setPage, settings }) {
           </div>
           <div className="p-5">
             <div className="flex justify-between">
-              <span>التقييم النهائي</span>
+              <span>ط§ظ„طھظ‚ظٹظٹظ… ط§ظ„ظ†ظ‡ط§ط¦ظٹ</span>
               <b className="text-2xl text-brand-700">{top?.total}%</b>
             </div>
             <div className="mt-3 h-2 rounded-full bg-slate-100">
@@ -1361,7 +1575,7 @@ function Dashboard({ employees, evaluations, setPage, settings }) {
               onClick={() => setPage("top")}
               className="mt-5 w-full text-sm font-bold text-brand-700"
             >
-              عرض تفاصيل التكريم
+              ط¹ط±ط¶ طھظپط§طµظٹظ„ ط§ظ„طھظƒط±ظٹظ…
             </button>
           </div>
         </div>
@@ -1390,7 +1604,7 @@ function EnterpriseDashboardWidgets({ employees, evaluations }) {
     const u3 = overtimeService.subscribeAssignmentEmployees(load);
     return () => { u1?.(); u2?.(); u3?.(); };
   }, []);
-  const validGuaranteeEmployeeIds = new Set(guarantees.filter((g) => g.guarantee_status === "سارية").map((g) => g.employee_id));
+  const validGuaranteeEmployeeIds = new Set(guarantees.filter((g) => g.guarantee_status === "ط³ط§ط±ظٹط©").map((g) => g.employee_id));
   const overtimeRows = assignmentEmployees.map((row) => ({ ...assignments.find((a) => a.assignment_id === row.assignment_id), ...row }));
   const overtimeHours = overtimeRows.reduce((sum, row) => {
     if (!row.start_time || !row.end_time) return sum;
@@ -1398,22 +1612,22 @@ function EnterpriseDashboardWidgets({ employees, evaluations }) {
     const [eh, em] = row.end_time.split(":").map(Number);
     return sum + Math.max(0, (eh * 60 + em - (sh * 60 + sm)) / 60);
   }, 0);
-  const mostBranch = Object.entries(groupCount(overtimeRows, "branch")).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
-  const mostEmployee = Object.entries(groupCount(overtimeRows, "employee_name")).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
+  const mostBranch = Object.entries(groupCount(overtimeRows, "branch")).sort((a, b) => b[1] - a[1])[0]?.[0] || "â€”";
+  const mostEmployee = Object.entries(groupCount(overtimeRows, "employee_name")).sort((a, b) => b[1] - a[1])[0]?.[0] || "â€”";
   const guaranteeStatusChart = Object.entries(groupCount(guarantees, "guarantee_status")).map(([name, value]) => ({ name, value }));
   const overtimeBranchChart = Object.entries(groupCount(overtimeRows, "branch")).map(([name, value]) => ({ name, value }));
   const overtimeMonthChart = Object.entries(groupCount(overtimeRows.map((r) => ({ ...r, month: String(r.assignment_date || "").slice(0, 7) })), "month")).map(([name, value]) => ({ name, value }));
   const extraCards = [
-    ["الموظفون الموقوفون", employees.filter((e) => e.status === "موقوف" || e.status === "ظ…ظˆظ‚ظˆظپ").length, AlertTriangle],
-    ["الموظفون بدون ضمانة", employees.filter((e) => !validGuaranteeEmployeeIds.has(e.id)).length, ShieldCheck],
-    ["إجمالي الضمانات", guarantees.length, ShieldCheck],
-    ["ضمانات تحتاج مراجعة", guarantees.filter((g) => ["ناقصة", "منتهية"].includes(g.guarantee_status) || g.approval_status === "قيد المراجعة").length, AlertTriangle],
-    ["تكليفات العمل الإضافي", assignments.length, Clock3],
-    ["ساعات العمل الإضافي", overtimeHours.toFixed(1), Gauge],
-    ["أكثر فرع لديه عمل إضافي", mostBranch, Building2],
-    ["أكثر موظف تم تكليفه", mostEmployee, UserCheck],
-    ["تكليفات قيد الاعتماد", assignments.filter((a) => a.approval_status === "قيد المراجعة").length, BadgeCheck],
-    ["أصحاب الأداء الضعيف", evaluations.filter((e) => e.total < 60).length, AlertTriangle],
+    ["ط§ظ„ظ…ظˆط¸ظپظˆظ† ط§ظ„ظ…ظˆظ‚ظˆظپظˆظ†", employees.filter((e) => e.status === "ظ…ظˆظ‚ظˆظپ" || e.status === "ط¸â€¦ط¸ث†ط¸â€ڑط¸ث†ط¸ظ¾").length, AlertTriangle],
+    ["ط§ظ„ظ…ظˆط¸ظپظˆظ† ط¨ط¯ظˆظ† ط¶ظ…ط§ظ†ط©", employees.filter((e) => !validGuaranteeEmployeeIds.has(e.id)).length, ShieldCheck],
+    ["ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ط¶ظ…ط§ظ†ط§طھ", guarantees.length, ShieldCheck],
+    ["ط¶ظ…ط§ظ†ط§طھ طھط­طھط§ط¬ ظ…ط±ط§ط¬ط¹ط©", guarantees.filter((g) => ["ظ†ط§ظ‚طµط©", "ظ…ظ†طھظ‡ظٹط©"].includes(g.guarantee_status) || g.approval_status === "ظ‚ظٹط¯ ط§ظ„ظ…ط±ط§ط¬ط¹ط©").length, AlertTriangle],
+    ["طھظƒظ„ظٹظپط§طھ ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ", assignments.length, Clock3],
+    ["ط³ط§ط¹ط§طھ ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ", overtimeHours.toFixed(1), Gauge],
+    ["ط£ظƒط«ط± ظپط±ط¹ ظ„ط¯ظٹظ‡ ط¹ظ…ظ„ ط¥ط¶ط§ظپظٹ", mostBranch, Building2],
+    ["ط£ظƒط«ط± ظ…ظˆط¸ظپ طھظ… طھظƒظ„ظٹظپظ‡", mostEmployee, UserCheck],
+    ["طھظƒظ„ظٹظپط§طھ ظ‚ظٹط¯ ط§ظ„ط§ط¹طھظ…ط§ط¯", assignments.filter((a) => a.approval_status === "ظ‚ظٹط¯ ط§ظ„ظ…ط±ط§ط¬ط¹ط©").length, BadgeCheck],
+    ["ط£طµط­ط§ط¨ ط§ظ„ط£ط¯ط§ط، ط§ظ„ط¶ط¹ظٹظپ", evaluations.filter((e) => e.total < 60).length, AlertTriangle],
   ];
   return (
     <div className="space-y-5">
@@ -1421,13 +1635,13 @@ function EnterpriseDashboardWidgets({ employees, evaluations }) {
         {extraCards.map(([label, value, I]) => <Mini key={label} label={label} value={value} I={I} />)}
       </div>
       <div className="grid gap-5 xl:grid-cols-3">
-        <Chart title="العمل الإضافي حسب الفرع" sub="عدد التكليفات المسجلة">
+        <Chart title="ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ ط­ط³ط¨ ط§ظ„ظپط±ط¹" sub="ط¹ط¯ط¯ ط§ظ„طھظƒظ„ظٹظپط§طھ ط§ظ„ظ…ط³ط¬ظ„ط©">
           <ResponsiveContainer width="100%" height={220}><BarChart data={overtimeBranchChart}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer>
         </Chart>
-        <Chart title="العمل الإضافي حسب الشهر" sub="مقارنة شهرية للتكليفات">
+        <Chart title="ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ ط­ط³ط¨ ط§ظ„ط´ظ‡ط±" sub="ظ…ظ‚ط§ط±ظ†ط© ط´ظ‡ط±ظٹط© ظ„ظ„طھظƒظ„ظٹظپط§طھ">
           <ResponsiveContainer width="100%" height={220}><BarChart data={overtimeMonthChart}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#991b1b" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer>
         </Chart>
-        <Chart title="الضمانات حسب الحالة" sub="توزيع حالات الضمانات">
+        <Chart title="ط§ظ„ط¶ظ…ط§ظ†ط§طھ ط­ط³ط¨ ط§ظ„ط­ط§ظ„ط©" sub="طھظˆط²ظٹط¹ ط­ط§ظ„ط§طھ ط§ظ„ط¶ظ…ط§ظ†ط§طھ">
           <ResponsiveContainer width="100%" height={220}><PieChart><Pie data={guaranteeStatusChart} dataKey="value" innerRadius={55} outerRadius={85}>{["#059669", "#dc2626", "#f59e0b", "#64748b"].map((c) => <Cell key={c} fill={c} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer>
         </Chart>
       </div>
@@ -1450,19 +1664,19 @@ function Chart({ title, sub, children }) {
 }
 function Employees({ employees, setEmployees }) {
   const [q, setQ] = useState(""),
-    [branch, setBranch] = useState("الكل"),
+    [branch, setBranch] = useState("ط§ظ„ظƒظ„"),
     [modal, setModal] = useState(false),
     [editing, setEditing] = useState(null),
     filtered = employees.filter(
       (e) =>
         (e.name.includes(q) || e.id.toLowerCase().includes(q.toLowerCase())) &&
-        (branch === "الكل" || e.branch === branch),
+        (branch === "ط§ظ„ظƒظ„" || e.branch === branch),
     );
   return (
     <div className="space-y-5">
       <PageHead
-        title="سجل الموظفين"
-        desc={`إدارة بيانات ${employees.length} موظف في جميع الفروع`}
+        title="ط³ط¬ظ„ ط§ظ„ظ…ظˆط¸ظپظٹظ†"
+        desc={`ط¥ط¯ط§ط±ط© ط¨ظٹط§ظ†ط§طھ ${employees.length} ظ…ظˆط¸ظپ ظپظٹ ط¬ظ…ظٹط¹ ط§ظ„ظپط±ظˆط¹`}
         action={
           <button
             onClick={() => {
@@ -1471,7 +1685,7 @@ function Employees({ employees, setEmployees }) {
             }}
             className="btn-primary"
           >
-            <Plus size={18} /> إضافة موظف
+            <Plus size={18} /> ط¥ط¶ط§ظپط© ظ…ظˆط¸ظپ
           </button>
         }
       />
@@ -1483,7 +1697,7 @@ function Employees({ employees, setEmployees }) {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               className="w-full outline-none"
-              placeholder="ابحث بالاسم أو الرقم..."
+              placeholder="ط§ط¨ط­ط« ط¨ط§ظ„ط§ط³ظ… ط£ظˆ ط§ظ„ط±ظ‚ظ…..."
             />
           </label>
           <select
@@ -1491,19 +1705,19 @@ function Employees({ employees, setEmployees }) {
             onChange={(e) => setBranch(e.target.value)}
             className="field max-w-[190px]"
           >
-            <option>الكل</option>
+            <option>ط§ظ„ظƒظ„</option>
             {branches.map((x) => (
               <option key={x}>{x}</option>
             ))}
           </select>
           <button
-            onClick={() => exportExcel(filtered, "الموظفون")}
+            onClick={() => exportExcel(filtered, "ط§ظ„ظ…ظˆط¸ظپظˆظ†")}
             className="btn-secondary"
           >
-            <FileSpreadsheet size={17} /> تصدير Excel
+            <FileSpreadsheet size={17} /> طھطµط¯ظٹط± Excel
           </button>
           <label className="btn-secondary cursor-pointer">
-            <Upload size={17} /> استيراد
+            <Upload size={17} /> ط§ط³طھظٹط±ط§ط¯
             <input
               type="file"
               accept=".xlsx,.xls"
@@ -1518,13 +1732,13 @@ function Employees({ employees, setEmployees }) {
           <table>
             <thead>
               <tr>
-                <th>الموظف</th>
-                <th>الفرع</th>
-                <th>الوظيفة</th>
-                <th>تاريخ التعيين</th>
-                <th>الراتب</th>
-                <th>الحالة</th>
-                <th>المدير المباشر</th>
+                <th>ط§ظ„ظ…ظˆط¸ظپ</th>
+                <th>ط§ظ„ظپط±ط¹</th>
+                <th>ط§ظ„ظˆط¸ظٹظپط©</th>
+                <th>طھط§ط±ظٹط® ط§ظ„طھط¹ظٹظٹظ†</th>
+                <th>ط§ظ„ط±ط§طھط¨</th>
+                <th>ط§ظ„ط­ط§ظ„ط©</th>
+                <th>ط§ظ„ظ…ط¯ظٹط± ط§ظ„ظ…ط¨ط§ط´ط±</th>
                 <th></th>
               </tr>
             </thead>
@@ -1543,7 +1757,7 @@ function Employees({ employees, setEmployees }) {
                       <div>
                         <b>{e.name}</b>
                         <p className="text-xs text-slate-400">
-                          {e.id} • {e.phone}
+                          {e.id} â€¢ {e.phone}
                         </p>
                       </div>
                     </div>
@@ -1568,7 +1782,7 @@ function Employees({ employees, setEmployees }) {
                     </button>
                     <button
                       onClick={() =>
-                        confirm("هل تريد حذف الموظف؟") &&
+                        confirm("ظ‡ظ„ طھط±ظٹط¯ ط­ط°ظپ ط§ظ„ظ…ظˆط¸ظپطں") &&
                         setEmployees((x) => x.filter((v) => v.id !== e.id))
                       }
                       className="p-2 text-red-600"
@@ -1582,7 +1796,7 @@ function Employees({ employees, setEmployees }) {
           </table>
         </div>
         <p className="mt-4 text-xs text-slate-500">
-          عرض {filtered.length} من {employees.length} موظف
+          ط¹ط±ط¶ {filtered.length} ظ…ظ† {employees.length} ظ…ظˆط¸ظپ
         </p>
       </div>
       {modal && (
@@ -1614,7 +1828,7 @@ function EmployeeModal({ employee, editing, close, save, setEmployees }) {
       hireDate: new Date().toISOString().slice(0, 10),
       salary: 5000,
       phone: "05",
-      status: "نشط",
+      status: "ظ†ط´ط·",
       manager: "",
     },
   );
@@ -1643,7 +1857,7 @@ function EmployeeModal({ employee, editing, close, save, setEmployees }) {
               return;
             }
             if (!data) {
-              throw new Error("لم يرجع Supabase بيانات الموظف بعد الحفظ");
+              throw new Error("ظ„ظ… ظٹط±ط¬ط¹ Supabase ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ظˆط¸ظپ ط¨ط¹ط¯ ط§ظ„ط­ظپط¸");
             }
             const savedEmployee = {
               id: data.id,
@@ -1653,7 +1867,7 @@ function EmployeeModal({ employee, editing, close, save, setEmployees }) {
               hireDate: data.hire_date,
               salary: Number(data.salary || 0),
               phone: data.phone || "",
-              status: data.status || "نشط",
+              status: data.status || "ظ†ط´ط·",
               manager: data.manager || "",
             };
             if (save) {
@@ -1669,7 +1883,7 @@ function EmployeeModal({ employee, editing, close, save, setEmployees }) {
           }
         } catch (error) {
             console.error("Supabase employees load/save error:", error);
-            alert(error.message || "تعذر حفظ بيانات الموظف");
+            alert(error.message || "طھط¹ط°ط± ط­ظپط¸ ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ظˆط¸ظپ");
           } finally {
             setSaving(false);
           }
@@ -1678,7 +1892,7 @@ function EmployeeModal({ employee, editing, close, save, setEmployees }) {
       >
         <div className="mb-6 flex">
           <h3 className="text-xl font-extrabold">
-            {currentEmployee ? "تعديل بيانات الموظف" : "إضافة موظف جديد"}
+            {currentEmployee ? "طھط¹ط¯ظٹظ„ ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ظˆط¸ظپ" : "ط¥ط¶ط§ظپط© ظ…ظˆط¸ظپ ط¬ط¯ظٹط¯"}
           </h3>
           <button type="button" onClick={close} className="mr-auto">
             <X />
@@ -1686,12 +1900,12 @@ function EmployeeModal({ employee, editing, close, save, setEmployees }) {
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           {[
-            ["id", "رقم الموظف"],
-            ["name", "اسم الموظف"],
-            ["hireDate", "تاريخ التعيين", "date"],
-            ["salary", "الراتب", "number"],
-            ["phone", "رقم الهاتف"],
-            ["manager", "المدير المباشر"],
+            ["id", "ط±ظ‚ظ… ط§ظ„ظ…ظˆط¸ظپ"],
+            ["name", "ط§ط³ظ… ط§ظ„ظ…ظˆط¸ظپ"],
+            ["hireDate", "طھط§ط±ظٹط® ط§ظ„طھط¹ظٹظٹظ†", "date"],
+            ["salary", "ط§ظ„ط±ط§طھط¨", "number"],
+            ["phone", "ط±ظ‚ظ… ط§ظ„ظ‡ط§طھظپ"],
+            ["manager", "ط§ظ„ظ…ط¯ظٹط± ط§ظ„ظ…ط¨ط§ط´ط±"],
           ].map(([k, l, t]) => (
             <Label key={k} t={l}>
               <input
@@ -1703,7 +1917,7 @@ function EmployeeModal({ employee, editing, close, save, setEmployees }) {
               />
             </Label>
           ))}
-          <Label t="الفرع">
+          <Label t="ط§ظ„ظپط±ط¹">
             <select
               value={f.branch}
               onChange={(e) => setF({ ...f, branch: e.target.value })}
@@ -1714,7 +1928,7 @@ function EmployeeModal({ employee, editing, close, save, setEmployees }) {
               ))}
             </select>
           </Label>
-          <Label t="الوظيفة">
+          <Label t="ط§ظ„ظˆط¸ظٹظپط©">
             <select
               value={f.job}
               onChange={(e) => setF({ ...f, job: e.target.value })}
@@ -1725,24 +1939,24 @@ function EmployeeModal({ employee, editing, close, save, setEmployees }) {
               ))}
             </select>
           </Label>
-          <Label t="الحالة">
+          <Label t="ط§ظ„ط­ط§ظ„ط©">
             <select
               value={f.status}
               onChange={(e) => setF({ ...f, status: e.target.value })}
               className="field mt-2"
             >
-              <option>نشط</option>
-              <option>إجازة</option>
-              <option>موقوف</option>
+              <option>ظ†ط´ط·</option>
+              <option>ط¥ط¬ط§ط²ط©</option>
+              <option>ظ…ظˆظ‚ظˆظپ</option>
             </select>
           </Label>
         </div>
         <div className="mt-7 flex justify-end gap-2">
           <button type="button" onClick={close} className="btn-secondary">
-            إلغاء
+            ط¥ظ„ط؛ط§ط،
           </button>
           <button disabled={saving} className="btn-primary">
-            <Save size={17} /> حفظ البيانات
+            <Save size={17} /> ط­ظپط¸ ط§ظ„ط¨ظٹط§ظ†ط§طھ
           </button>
         </div>
       </form>
@@ -1754,11 +1968,11 @@ function Templates() {
   return (
     <div className="space-y-5">
       <PageHead
-        title="نماذج التقييم"
-        desc="نماذج مرنة ومخصصة لكل وظيفة"
+        title="ظ†ظ…ط§ط°ط¬ ط§ظ„طھظ‚ظٹظٹظ…"
+        desc="ظ†ظ…ط§ط°ط¬ ظ…ط±ظ†ط© ظˆظ…ط®طµطµط© ظ„ظƒظ„ ظˆط¸ظٹظپط©"
         action={
           <button className="btn-primary">
-            <Plus size={17} /> نموذج جديد
+            <Plus size={17} /> ظ†ظ…ظˆط°ط¬ ط¬ط¯ظٹط¯
           </button>
         }
       />
@@ -1776,7 +1990,7 @@ function Templates() {
             </div>
             <b className="text-sm">{x}</b>
             <p className="mt-1 text-[11px] text-slate-400">
-              10 معايير • 100 نقطة
+              10 ظ…ط¹ط§ظٹظٹط± â€¢ 100 ظ†ظ‚ط·ط©
             </p>
           </button>
         ))}
@@ -1784,13 +1998,13 @@ function Templates() {
       <div className="panel p-5">
         <div className="mb-5 flex justify-between">
           <div>
-            <h3 className="text-lg font-extrabold">نموذج تقييم: {job}</h3>
+            <h3 className="text-lg font-extrabold">ظ†ظ…ظˆط°ط¬ طھظ‚ظٹظٹظ…: {job}</h3>
             <p className="text-xs text-slate-500">
-              الأوزان موزعة على معايير الأداء الأساسية
+              ط§ظ„ط£ظˆط²ط§ظ† ظ…ظˆط²ط¹ط© ط¹ظ„ظ‰ ظ…ط¹ط§ظٹظٹط± ط§ظ„ط£ط¯ط§ط، ط§ظ„ط£ط³ط§ط³ظٹط©
             </p>
           </div>
           <button className="btn-secondary">
-            <Pencil size={16} /> تعديل الأوزان
+            <Pencil size={16} /> طھط¹ط¯ظٹظ„ ط§ظ„ط£ظˆط²ط§ظ†
           </button>
         </div>
         <div className="table-wrap">
@@ -1798,10 +2012,10 @@ function Templates() {
             <thead>
               <tr>
                 <th>#</th>
-                <th>معيار التقييم</th>
-                <th>الوزن النسبي</th>
-                <th>الدرجة القصوى</th>
-                <th>الحالة</th>
+                <th>ظ…ط¹ظٹط§ط± ط§ظ„طھظ‚ظٹظٹظ…</th>
+                <th>ط§ظ„ظˆط²ظ† ط§ظ„ظ†ط³ط¨ظٹ</th>
+                <th>ط§ظ„ط¯ط±ط¬ط© ط§ظ„ظ‚طµظˆظ‰</th>
+                <th>ط§ظ„ط­ط§ظ„ط©</th>
               </tr>
             </thead>
             <tbody>
@@ -1810,9 +2024,9 @@ function Templates() {
                   <td>{i + 1}</td>
                   <td className="font-bold">{c}</td>
                   <td>{weights[i]}%</td>
-                  <td>5 درجات</td>
+                  <td>5 ط¯ط±ط¬ط§طھ</td>
                   <td>
-                    <Status>نشط</Status>
+                    <Status>ظ†ط´ط·</Status>
                   </td>
                 </tr>
               ))}
@@ -1849,27 +2063,27 @@ function Evaluations({ employees, evaluations, setEvaluations }) {
         month,
         scores,
         total,
-        status: old?.status || "قيد المراجعة",
+        status: old?.status || "ظ‚ظٹط¯ ط§ظ„ظ…ط±ط§ط¬ط¹ط©",
         notes,
       };
     setEvaluations((list) =>
       old ? list.map((e) => (e.id === old.id ? record : e)) : [record, ...list],
     );
-    alert(old ? "تم تعديل التقييم السابق" : "تم حفظ التقييم");
+    alert(old ? "طھظ… طھط¹ط¯ظٹظ„ ط§ظ„طھظ‚ظٹظٹظ… ط§ظ„ط³ط§ط¨ظ‚" : "طھظ… ط­ظپط¸ ط§ظ„طھظ‚ظٹظٹظ…");
   };
   return (
     <div className="space-y-5">
       <PageHead
-        title="تقييم أداء الموظفين"
-        desc="إدخال الدرجات واحتساب النتيجة تلقائيًا"
+        title="طھظ‚ظٹظٹظ… ط£ط¯ط§ط، ط§ظ„ظ…ظˆط¸ظپظٹظ†"
+        desc="ط¥ط¯ط®ط§ظ„ ط§ظ„ط¯ط±ط¬ط§طھ ظˆط§ط­طھط³ط§ط¨ ط§ظ„ظ†طھظٹط¬ط© طھظ„ظ‚ط§ط¦ظٹظ‹ط§"
         action={
           <button onClick={() => window.print()} className="btn-secondary">
-            <Printer size={17} /> طباعة / PDF
+            <Printer size={17} /> ط·ط¨ط§ط¹ط© / PDF
           </button>
         }
       />
       <div className="panel grid gap-4 p-5 md:grid-cols-3">
-        <Label t="الموظف">
+        <Label t="ط§ظ„ظ…ظˆط¸ظپ">
           <select
             value={empId}
             onChange={(e) => setEmpId(e.target.value)}
@@ -1882,7 +2096,7 @@ function Evaluations({ employees, evaluations, setEvaluations }) {
             ))}
           </select>
         </Label>
-        <Label t="شهر التقييم">
+        <Label t="ط´ظ‡ط± ط§ظ„طھظ‚ظٹظٹظ…">
           <input
             type="month"
             value={month}
@@ -1890,7 +2104,7 @@ function Evaluations({ employees, evaluations, setEvaluations }) {
             className="field mt-2"
           />
         </Label>
-        <Label t="الوظيفة">
+        <Label t="ط§ظ„ظˆط¸ظٹظپط©">
           <input
             value={emp?.job || ""}
             disabled
@@ -1904,10 +2118,10 @@ function Evaluations({ employees, evaluations, setEvaluations }) {
             <table>
               <thead>
                 <tr>
-                  <th>المعيار</th>
-                  <th>الوزن</th>
-                  <th>الدرجة من 5</th>
-                  <th>النتيجة</th>
+                  <th>ط§ظ„ظ…ط¹ظٹط§ط±</th>
+                  <th>ط§ظ„ظˆط²ظ†</th>
+                  <th>ط§ظ„ط¯ط±ط¬ط© ظ…ظ† 5</th>
+                  <th>ط§ظ„ظ†طھظٹط¬ط©</th>
                 </tr>
               </thead>
               <tbody>
@@ -1940,7 +2154,7 @@ function Evaluations({ employees, evaluations, setEvaluations }) {
               </tbody>
             </table>
           </div>
-          <Label t="ملاحظات المدير">
+          <Label t="ظ…ظ„ط§ط­ط¸ط§طھ ط§ظ„ظ…ط¯ظٹط±">
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
@@ -1956,15 +2170,15 @@ function Evaluations({ employees, evaluations, setEvaluations }) {
             </div>
             <Status>{classify(total)}</Status>
             <p className="mt-4 text-xs leading-5 text-slate-500">
-              محسوب حسب نموذج وظيفة {emp?.job}
+              ظ…ط­ط³ظˆط¨ ط­ط³ط¨ ظ†ظ…ظˆط°ط¬ ظˆط¸ظٹظپط© {emp?.job}
             </p>
           </div>
           <button onClick={save} className="btn-primary h-12 w-full">
-            <Save size={18} /> حفظ التقييم
+            <Save size={18} /> ط­ظپط¸ ط§ظ„طھظ‚ظٹظٹظ…
           </button>
           <p className="rounded-xl bg-blue-50 p-3 text-xs text-blue-700">
-            وجود تقييم لنفس الشهر يؤدي إلى تعديل السجل السابق، لا إنشاء نسخة
-            مكررة.
+            ظˆط¬ظˆط¯ طھظ‚ظٹظٹظ… ظ„ظ†ظپط³ ط§ظ„ط´ظ‡ط± ظٹط¤ط¯ظٹ ط¥ظ„ظ‰ طھط¹ط¯ظٹظ„ ط§ظ„ط³ط¬ظ„ ط§ظ„ط³ط§ط¨ظ‚طŒ ظ„ط§ ط¥ظ†ط´ط§ط، ظ†ط³ط®ط©
+            ظ…ظƒط±ط±ط©.
           </p>
         </div>
       </div>
@@ -1973,7 +2187,7 @@ function Evaluations({ employees, evaluations, setEvaluations }) {
 }
 function Productivity({ employees }) {
   const list = employees.filter((e) =>
-      ["كاشير", "خدمة عملاء وتحويلات واتس", "عمليات مصرفية"].includes(e.job),
+      ["ظƒط§ط´ظٹط±", "ط®ط¯ظ…ط© ط¹ظ…ظ„ط§ط، ظˆطھط­ظˆظٹظ„ط§طھ ظˆط§طھط³", "ط¹ظ…ظ„ظٹط§طھ ظ…طµط±ظپظٹط©"].includes(e.job),
     ),
     [v, setV] = useState({
       receive: 142,
@@ -1998,14 +2212,14 @@ function Productivity({ employees }) {
     );
   return (
     <Entry
-      title="مؤشرات الإنتاجية"
-      desc="قياس حجم العمليات وجودتها وسرعة الإنجاز"
+      title="ظ…ط¤ط´ط±ط§طھ ط§ظ„ط¥ظ†طھط§ط¬ظٹط©"
+      desc="ظ‚ظٹط§ط³ ط­ط¬ظ… ط§ظ„ط¹ظ…ظ„ظٹط§طھ ظˆط¬ظˆط¯طھظ‡ط§ ظˆط³ط±ط¹ط© ط§ظ„ط¥ظ†ط¬ط§ط²"
     >
-      <Label t="الموظف">
+      <Label t="ط§ظ„ظ…ظˆط¸ظپ">
         <select className="field mt-2 max-w-md">
           {list.map((e) => (
             <option key={e.id}>
-              {e.name} — {e.job}
+              {e.name} â€” {e.job}
             </option>
           ))}
         </select>
@@ -2014,18 +2228,18 @@ function Productivity({ employees }) {
         values={v}
         set={setV}
         items={[
-          ["receive", "عمليات قبض الحوالات"],
-          ["pay", "عمليات صرف الحوالات"],
-          ["sell", "عمليات بيع العملات"],
-          ["buy", "عمليات شراء العملات"],
-          ["errors", "عدد الأخطاء"],
-          ["complaints", "شكاوى العملاء"],
-          ["time", "متوسط وقت الخدمة (دقيقة)"],
+          ["receive", "ط¹ظ…ظ„ظٹط§طھ ظ‚ط¨ط¶ ط§ظ„ط­ظˆط§ظ„ط§طھ"],
+          ["pay", "ط¹ظ…ظ„ظٹط§طھ طµط±ظپ ط§ظ„ط­ظˆط§ظ„ط§طھ"],
+          ["sell", "ط¹ظ…ظ„ظٹط§طھ ط¨ظٹط¹ ط§ظ„ط¹ظ…ظ„ط§طھ"],
+          ["buy", "ط¹ظ…ظ„ظٹط§طھ ط´ط±ط§ط، ط§ظ„ط¹ظ…ظ„ط§طھ"],
+          ["errors", "ط¹ط¯ط¯ ط§ظ„ط£ط®ط·ط§ط،"],
+          ["complaints", "ط´ظƒط§ظˆظ‰ ط§ظ„ط¹ظ…ظ„ط§ط،"],
+          ["time", "ظ…طھظˆط³ط· ظˆظ‚طھ ط§ظ„ط®ط¯ظ…ط© (ط¯ظ‚ظٹظ‚ط©)"],
         ]}
       />
-      <Score n={score} label="نقاط الإنتاجية" />
+      <Score n={score} label="ظ†ظ‚ط§ط· ط§ظ„ط¥ظ†طھط§ط¬ظٹط©" />
       <button className="btn-primary">
-        <Save size={17} /> حفظ مؤشرات الشهر
+        <Save size={17} /> ط­ظپط¸ ظ…ط¤ط´ط±ط§طھ ط§ظ„ط´ظ‡ط±
       </button>
     </Entry>
   );
@@ -2049,8 +2263,8 @@ function Discipline({ employees }) {
         v.penalties * 10,
     );
   return (
-    <Entry title="الانضباط الوظيفي" desc="متابعة الحضور والتأخير والمخالفات">
-      <Label t="الموظف">
+    <Entry title="ط§ظ„ط§ظ†ط¶ط¨ط§ط· ط§ظ„ظˆط¸ظٹظپظٹ" desc="ظ…طھط§ط¨ط¹ط© ط§ظ„ط­ط¶ظˆط± ظˆط§ظ„طھط£ط®ظٹط± ظˆط§ظ„ظ…ط®ط§ظ„ظپط§طھ">
+      <Label t="ط§ظ„ظ…ظˆط¸ظپ">
         <select className="field mt-2 max-w-md">
           {employees.map((e) => (
             <option key={e.id}>{e.name}</option>
@@ -2061,20 +2275,20 @@ function Discipline({ employees }) {
         values={v}
         set={setV}
         items={[
-          ["present", "أيام الحضور"],
-          ["absent", "أيام الغياب"],
-          ["late", "التأخير بالدقائق"],
-          ["early", "الانصراف المبكر"],
-          ["violations", "المخالفات"],
-          ["penalties", "الجزاءات"],
+          ["present", "ط£ظٹط§ظ… ط§ظ„ط­ط¶ظˆط±"],
+          ["absent", "ط£ظٹط§ظ… ط§ظ„ط؛ظٹط§ط¨"],
+          ["late", "ط§ظ„طھط£ط®ظٹط± ط¨ط§ظ„ط¯ظ‚ط§ط¦ظ‚"],
+          ["early", "ط§ظ„ط§ظ†طµط±ط§ظپ ط§ظ„ظ…ط¨ظƒط±"],
+          ["violations", "ط§ظ„ظ…ط®ط§ظ„ظپط§طھ"],
+          ["penalties", "ط§ظ„ط¬ط²ط§ط،ط§طھ"],
         ]}
       />
-      <Label t="ملاحظات الموارد البشرية">
+      <Label t="ظ…ظ„ط§ط­ط¸ط§طھ ط§ظ„ظ…ظˆط§ط±ط¯ ط§ظ„ط¨ط´ط±ظٹط©">
         <textarea className="field mt-2 !h-auto py-3" rows="3" />
       </Label>
-      <Score n={score} label="درجة الانضباط" />
+      <Score n={score} label="ط¯ط±ط¬ط© ط§ظ„ط§ظ†ط¶ط¨ط§ط·" />
       <button className="btn-primary">
-        <Save size={17} /> حفظ سجل الانضباط
+        <Save size={17} /> ط­ظپط¸ ط³ط¬ظ„ ط§ظ„ط§ظ†ط¶ط¨ط§ط·
       </button>
     </Entry>
   );
@@ -2112,7 +2326,7 @@ function Score({ n, label }) {
       <div>
         <b>{label}</b>
         <p className="text-xs text-slate-500">
-          يتم تحديثها تلقائيًا حسب البيانات المدخلة
+          ظٹطھظ… طھط­ط¯ظٹط«ظ‡ط§ طھظ„ظ‚ط§ط¦ظٹظ‹ط§ ط­ط³ط¨ ط§ظ„ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ط¯ط®ظ„ط©
         </p>
       </div>
       <Status>{classify(n)}</Status>
@@ -2124,11 +2338,11 @@ function calcIncentives(employees, evaluations) {
     const e = employees.find((x) => x.id === ev.employeeId),
       cat = classify(ev.total),
       rate =
-        cat === "ممتاز"
+        cat === "ظ…ظ…طھط§ط²"
           ? 0.1
-          : cat === "جيد جدًا"
+          : cat === "ط¬ظٹط¯ ط¬ط¯ظ‹ط§"
             ? 0.07
-            : cat === "جيد"
+            : cat === "ط¬ظٹط¯"
               ? 0.04
               : 0;
     return {
@@ -2145,7 +2359,7 @@ function calcIncentivesSafe(employees, evaluations) {
     const employee = employees.find((x) => x.id === ev.employeeId) || {};
     const total = effectiveEvaluationTotal(ev);
     const cat = classify(total);
-    const rate = cat === "ممتاز" ? 0.1 : cat === "جيد جدًا" ? 0.07 : cat === "جيد" ? 0.04 : 0;
+    const rate = cat === "ظ…ظ…طھط§ط²" ? 0.1 : cat === "ط¬ظٹط¯ ط¬ط¯ظ‹ط§" ? 0.07 : cat === "ط¬ظٹط¯" ? 0.04 : 0;
     return {
       ...employee,
       evaluation: ev,
@@ -2161,31 +2375,31 @@ function Incentives({ employees, evaluations, setEvaluations }) {
   return (
     <div className="space-y-5">
       <PageHead
-        title="الحوافز والمكافآت"
-        desc="احتساب آلي وفق الراتب والتقييم ونسبة الحافز"
+        title="ط§ظ„ط­ظˆط§ظپط² ظˆط§ظ„ظ…ظƒط§ظپط¢طھ"
+        desc="ط§ط­طھط³ط§ط¨ ط¢ظ„ظٹ ظˆظپظ‚ ط§ظ„ط±ط§طھط¨ ظˆط§ظ„طھظ‚ظٹظٹظ… ظˆظ†ط³ط¨ط© ط§ظ„ط­ط§ظپط²"
         action={
           <button
-            onClick={() => exportExcel(data, "الحوافز")}
+            onClick={() => exportExcel(data, "ط§ظ„ط­ظˆط§ظپط²")}
             className="btn-primary"
           >
-            <Download size={17} /> تصدير الكشف
+            <Download size={17} /> طھطµط¯ظٹط± ط§ظ„ظƒط´ظپ
           </button>
         }
       />
       <div className="grid gap-4 sm:grid-cols-3">
         <Mini
-          label="إجمالي الحوافز"
+          label="ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ط­ظˆط§ظپط²"
           value={money(data.reduce((s, x) => s + x.amount, 0))}
           I={CircleDollarSign}
         />
         <Mini
-          label="المستحقون"
+          label="ط§ظ„ظ…ط³طھط­ظ‚ظˆظ†"
           value={data.filter((x) => x.rate > 0).length}
           I={UserCheck}
         />
         <Mini
-          label="بانتظار الاعتماد"
-          value={evaluations.filter((x) => x.status === "قيد المراجعة").length}
+          label="ط¨ط§ظ†طھط¸ط§ط± ط§ظ„ط§ط¹طھظ…ط§ط¯"
+          value={evaluations.filter((x) => x.status === "ظ‚ظٹط¯ ط§ظ„ظ…ط±ط§ط¬ط¹ط©").length}
           I={Clock3}
         />
       </div>
@@ -2194,14 +2408,14 @@ function Incentives({ employees, evaluations, setEvaluations }) {
           <table>
             <thead>
               <tr>
-                <th>الموظف</th>
-                <th>الفرع</th>
-                <th>الوظيفة</th>
-                <th>الراتب</th>
-                <th>التقييم</th>
-                <th>النسبة</th>
-                <th>الحافز المقترح</th>
-                <th>الاعتماد</th>
+                <th>ط§ظ„ظ…ظˆط¸ظپ</th>
+                <th>ط§ظ„ظپط±ط¹</th>
+                <th>ط§ظ„ظˆط¸ظٹظپط©</th>
+                <th>ط§ظ„ط±ط§طھط¨</th>
+                <th>ط§ظ„طھظ‚ظٹظٹظ…</th>
+                <th>ط§ظ„ظ†ط³ط¨ط©</th>
+                <th>ط§ظ„ط­ط§ظپط² ط§ظ„ظ…ظ‚طھط±ط­</th>
+                <th>ط§ظ„ط§ط¹طھظ…ط§ط¯</th>
               </tr>
             </thead>
             <tbody>
@@ -2232,9 +2446,9 @@ function Incentives({ employees, evaluations, setEvaluations }) {
                       }
                       className="field !h-9 !w-32"
                     >
-                      <option>قيد المراجعة</option>
-                      <option>معتمد</option>
-                      <option>مرفوض</option>
+                      <option>ظ‚ظٹط¯ ط§ظ„ظ…ط±ط§ط¬ط¹ط©</option>
+                      <option>ظ…ط¹طھظ…ط¯</option>
+                      <option>ظ…ط±ظپظˆط¶</option>
                     </select>
                   </td>
                 </tr>
@@ -2261,11 +2475,11 @@ function TopEmployees({ employees, evaluations }) {
   return (
     <div className="space-y-5">
       <PageHead
-        title="موظف الشهر"
-        desc="تكريم أصحاب الأداء الأعلى"
+        title="ظ…ظˆط¸ظپ ط§ظ„ط´ظ‡ط±"
+        desc="طھظƒط±ظٹظ… ط£طµط­ط§ط¨ ط§ظ„ط£ط¯ط§ط، ط§ظ„ط£ط¹ظ„ظ‰"
         action={
           <button onClick={() => window.print()} className="btn-secondary">
-            <Printer size={17} /> طباعة شهادة
+            <Printer size={17} /> ط·ط¨ط§ط¹ط© ط´ظ‡ط§ط¯ط©
           </button>
         }
       />
@@ -2280,14 +2494,14 @@ function TopEmployees({ employees, evaluations }) {
           </div>
           <div>
             <span className="rounded-full bg-amber-300 px-3 py-1 text-xs font-bold text-amber-950">
-              الأفضل على مستوى الشركة
+              ط§ظ„ط£ظپط¶ظ„ ط¹ظ„ظ‰ ظ…ط³طھظˆظ‰ ط§ظ„ط´ط±ظƒط©
             </span>
             <h2 className="mt-4 text-3xl font-extrabold">{best.name}</h2>
             <p className="mt-2 text-red-100/70">
-              {best.job} • {best.branch}
+              {best.job} â€¢ {best.branch}
             </p>
             <p className="mt-4 text-sm text-red-100/80">
-              لتميزه في دقة العمل والالتزام وتقديم تجربة استثنائية للعملاء.
+              ظ„طھظ…ظٹط²ظ‡ ظپظٹ ط¯ظ‚ط© ط§ظ„ط¹ظ…ظ„ ظˆط§ظ„ط§ظ„طھط²ط§ظ… ظˆطھظ‚ط¯ظٹظ… طھط¬ط±ط¨ط© ط§ط³طھط«ظ†ط§ط¦ظٹط© ظ„ظ„ط¹ظ…ظ„ط§ط،.
             </p>
           </div>
           <b className="sm:mr-auto text-5xl text-amber-300">{best.total}%</b>
@@ -2303,13 +2517,13 @@ function TopEmployees({ employees, evaluations }) {
               <div>
                 <b>{x.name}</b>
                 <p className="text-xs text-slate-500">
-                  {x.branch} • {x.job}
+                  {x.branch} â€¢ {x.job}
                 </p>
               </div>
               <b className="mr-auto text-xl text-brand-700">{x.total}%</b>
             </div>
             <div className="mt-4 flex gap-2">
-              {["دقة عالية", "خدمة مميزة", "انضباط"].map((t) => (
+              {["ط¯ظ‚ط© ط¹ط§ظ„ظٹط©", "ط®ط¯ظ…ط© ظ…ظ…ظٹط²ط©", "ط§ظ†ط¶ط¨ط§ط·"].map((t) => (
                 <span
                   key={t}
                   className="rounded-full bg-slate-100 px-2 py-1 text-xs"
@@ -2334,11 +2548,11 @@ function Plans({ employees, evaluations }) {
   return (
     <div className="space-y-5">
       <PageHead
-        title="خطط تحسين الأداء"
-        desc="متابعة الموظفين الأقل من 70%"
+        title="ط®ط·ط· طھط­ط³ظٹظ† ط§ظ„ط£ط¯ط§ط،"
+        desc="ظ…طھط§ط¨ط¹ط© ط§ظ„ظ…ظˆط¸ظپظٹظ† ط§ظ„ط£ظ‚ظ„ ظ…ظ† 70%"
         action={
           <button className="btn-primary">
-            <Plus size={17} /> خطة تحسين
+            <Plus size={17} /> ط®ط·ط© طھط­ط³ظٹظ†
           </button>
         }
       />
@@ -2352,18 +2566,18 @@ function Plans({ employees, evaluations }) {
               <div>
                 <b>{e.name}</b>
                 <p className="text-xs text-slate-500">
-                  {e.job} • {e.branch}
+                  {e.job} â€¢ {e.branch}
                 </p>
               </div>
               <b className="mr-auto text-xl text-red-600">{e.total}%</b>
             </div>
             <div className="my-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-4 text-xs">
-              <Info t="سبب الانخفاض" v="الحاجة لرفع الدقة وسرعة الإنجاز" />
-              <Info t="المسؤول" v="مدير الفرع" />
-              <Info t="بداية الخطة" v="01 يوليو 2026" />
-              <Info t="نهاية الخطة" v="31 يوليو 2026" />
+              <Info t="ط³ط¨ط¨ ط§ظ„ط§ظ†ط®ظپط§ط¶" v="ط§ظ„ط­ط§ط¬ط© ظ„ط±ظپط¹ ط§ظ„ط¯ظ‚ط© ظˆط³ط±ط¹ط© ط§ظ„ط¥ظ†ط¬ط§ط²" />
+              <Info t="ط§ظ„ظ…ط³ط¤ظˆظ„" v="ظ…ط¯ظٹط± ط§ظ„ظپط±ط¹" />
+              <Info t="ط¨ط¯ط§ظٹط© ط§ظ„ط®ط·ط©" v="01 ظٹظˆظ„ظٹظˆ 2026" />
+              <Info t="ظ†ظ‡ط§ظٹط© ط§ظ„ط®ط·ط©" v="31 ظٹظˆظ„ظٹظˆ 2026" />
             </div>
-            <Status>قيد المراجعة</Status>
+            <Status>ظ‚ظٹط¯ ط§ظ„ظ…ط±ط§ط¬ط¹ط©</Status>
           </div>
         ))}
       </div>
@@ -2372,32 +2586,32 @@ function Plans({ employees, evaluations }) {
 }
 function Reports({ employees, evaluations }) {
   const reps = [
-    ["التقرير المالي للأداء الشهري", Wallet],
-    ["التقييم الشهري", CalendarCheck],
-    ["التقييم حسب الفرع", Building2],
-    ["التقييم حسب الوظيفة", BriefcaseBusiness],
-    ["تقرير الحوافز", Gift],
-    ["الموظفون الضعفاء", AlertTriangle],
-    ["أفضل الموظفين", Trophy],
-    ["تقرير الانضباط", Clock3],
-    ["تقرير المخالفات", MessageSquareWarning],
-    ["مقارنة الفروع", FileBarChart],
+    ["ط§ظ„طھظ‚ط±ظٹط± ط§ظ„ظ…ط§ظ„ظٹ ظ„ظ„ط£ط¯ط§ط، ط§ظ„ط´ظ‡ط±ظٹ", Wallet],
+    ["ط§ظ„طھظ‚ظٹظٹظ… ط§ظ„ط´ظ‡ط±ظٹ", CalendarCheck],
+    ["ط§ظ„طھظ‚ظٹظٹظ… ط­ط³ط¨ ط§ظ„ظپط±ط¹", Building2],
+    ["ط§ظ„طھظ‚ظٹظٹظ… ط­ط³ط¨ ط§ظ„ظˆط¸ظٹظپط©", BriefcaseBusiness],
+    ["طھظ‚ط±ظٹط± ط§ظ„ط­ظˆط§ظپط²", Gift],
+    ["ط§ظ„ظ…ظˆط¸ظپظˆظ† ط§ظ„ط¶ط¹ظپط§ط،", AlertTriangle],
+    ["ط£ظپط¶ظ„ ط§ظ„ظ…ظˆط¸ظپظٹظ†", Trophy],
+    ["طھظ‚ط±ظٹط± ط§ظ„ط§ظ†ط¶ط¨ط§ط·", Clock3],
+    ["طھظ‚ط±ظٹط± ط§ظ„ظ…ط®ط§ظ„ظپط§طھ", MessageSquareWarning],
+    ["ظ…ظ‚ط§ط±ظ†ط© ط§ظ„ظپط±ظˆط¹", FileBarChart],
   ];
   return (
     <div className="space-y-5">
-      <PageHead title="مركز التقارير" desc="تقارير جاهزة لاتخاذ القرار" />
+      <PageHead title="ظ…ط±ظƒط² ط§ظ„طھظ‚ط§ط±ظٹط±" desc="طھظ‚ط§ط±ظٹط± ط¬ط§ظ‡ط²ط© ظ„ط§طھط®ط§ط° ط§ظ„ظ‚ط±ط§ط±" />
       <div className="panel flex flex-wrap gap-3 p-4">
         <select className="field max-w-[180px]">
-          <option>يونيو 2026</option>
+          <option>ظٹظˆظ†ظٹظˆ 2026</option>
         </select>
         <select className="field max-w-[190px]">
-          <option>جميع الفروع</option>
+          <option>ط¬ظ…ظٹط¹ ط§ظ„ظپط±ظˆط¹</option>
           {branches.map((x) => (
             <option key={x}>{x}</option>
           ))}
         </select>
         <button className="btn-secondary">
-          <Filter size={17} /> تطبيق الفلاتر
+          <Filter size={17} /> طھط·ط¨ظٹظ‚ ط§ظ„ظپظ„ط§طھط±
         </button>
       </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -2408,7 +2622,7 @@ function Reports({ employees, evaluations }) {
             </div>
             <h3 className="mt-4 font-extrabold">{t}</h3>
             <p className="mt-1 text-xs text-slate-500">
-              تقرير تفصيلي جاهز للتصدير والطباعة
+              طھظ‚ط±ظٹط± طھظپطµظٹظ„ظٹ ط¬ط§ظ‡ط² ظ„ظ„طھطµط¯ظٹط± ظˆط§ظ„ط·ط¨ط§ط¹ط©
             </p>
             <div className="mt-5 flex gap-2">
               <button
@@ -2442,20 +2656,20 @@ function Reports({ employees, evaluations }) {
 }
 function LegacySettingsPage({ settings, setSettings, setEmployees }) {
   const tabs = [
-    ["مدير النظام", UserRoundCog],
-    ["الفروع", Building2],
-    ["الوظائف", BriefcaseBusiness],
-    ["معايير التقييم", ClipboardList],
-    ["الصلاحيات", ShieldCheck],
+    ["ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…", UserRoundCog],
+    ["ط§ظ„ظپط±ظˆط¹", Building2],
+    ["ط§ظ„ظˆط¸ط§ط¦ظپ", BriefcaseBusiness],
+    ["ظ…ط¹ط§ظٹظٹط± ط§ظ„طھظ‚ظٹظٹظ…", ClipboardList],
+    ["ط§ظ„طµظ„ط§ط­ظٹط§طھ", ShieldCheck],
   ];
-  const [tab, setTab] = useState("مدير النظام"),
+  const [tab, setTab] = useState("ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…"),
     [edit, setEdit] = useState(null);
   const key =
-    tab === "الفروع"
+    tab === "ط§ظ„ظپط±ظˆط¹"
       ? "branches"
-      : tab === "الوظائف"
+      : tab === "ط§ظ„ظˆط¸ط§ط¦ظپ"
         ? "jobs"
-        : tab === "معايير التقييم"
+        : tab === "ظ…ط¹ط§ظٹظٹط± ط§ظ„طھظ‚ظٹظٹظ…"
           ? "criteria"
           : "permissions";
   const items = settings[key] || [];
@@ -2464,19 +2678,19 @@ function LegacySettingsPage({ settings, setSettings, setEmployees }) {
     const old = items[edit.index],
       next = [...items];
     next[edit.index] =
-      tab === "الصلاحيات"
+      tab === "ط§ظ„طµظ„ط§ط­ظٹط§طھ"
         ? { name: edit.name.trim(), description: edit.description.trim() }
         : edit.value.trim();
-    if (!next[edit.index] || (tab === "الصلاحيات" && !next[edit.index].name))
+    if (!next[edit.index] || (tab === "ط§ظ„طµظ„ط§ط­ظٹط§طھ" && !next[edit.index].name))
       return;
     setSettings({ ...settings, [key]: next });
-    if (tab === "الفروع")
+    if (tab === "ط§ظ„ظپط±ظˆط¹")
       setEmployees((list) =>
         list.map((e) =>
           e.branch === old ? { ...e, branch: next[edit.index] } : e,
         ),
       );
-    if (tab === "الوظائف")
+    if (tab === "ط§ظ„ظˆط¸ط§ط¦ظپ")
       setEmployees((list) =>
         list.map((e) => (e.job === old ? { ...e, job: next[edit.index] } : e)),
       );
@@ -2485,8 +2699,8 @@ function LegacySettingsPage({ settings, setSettings, setEmployees }) {
   return (
     <div className="space-y-5">
       <PageHead
-        title="إعدادات النظام"
-        desc="تعديل بيانات النظام والصلاحيات مع الحفظ التلقائي"
+        title="ط¥ط¹ط¯ط§ط¯ط§طھ ط§ظ„ظ†ط¸ط§ظ…"
+        desc="طھط¹ط¯ظٹظ„ ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ†ط¸ط§ظ… ظˆط§ظ„طµظ„ط§ط­ظٹط§طھ ظ…ط¹ ط§ظ„ط­ظپط¸ ط§ظ„طھظ„ظ‚ط§ط¦ظٹ"
       />
       <div className="grid gap-5 lg:grid-cols-[250px_1fr]">
         <div className="panel h-fit p-3">
@@ -2502,7 +2716,7 @@ function LegacySettingsPage({ settings, setSettings, setEmployees }) {
           ))}
         </div>
         <div className="panel p-5">
-          {tab === "مدير النظام" ? (
+          {tab === "ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…" ? (
             <div>
               <div className="mb-6 flex items-center gap-4 border-b pb-5">
                 <div className="grid h-14 w-14 place-items-center rounded-2xl bg-brand-700 text-lg font-extrabold text-white">
@@ -2513,14 +2727,14 @@ function LegacySettingsPage({ settings, setSettings, setEmployees }) {
                     .join("")}
                 </div>
                 <div>
-                  <h3 className="text-lg font-extrabold">بيانات مدير النظام</h3>
+                  <h3 className="text-lg font-extrabold">ط¨ظٹط§ظ†ط§طھ ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…</h3>
                   <p className="text-xs text-slate-500">
-                    تظهر هذه البيانات في الشريط العلوي والقائمة الجانبية
+                    طھط¸ظ‡ط± ظ‡ط°ظ‡ ط§ظ„ط¨ظٹط§ظ†ط§طھ ظپظٹ ط§ظ„ط´ط±ظٹط· ط§ظ„ط¹ظ„ظˆظٹ ظˆط§ظ„ظ‚ط§ط¦ظ…ط© ط§ظ„ط¬ط§ظ†ط¨ظٹط©
                   </p>
                 </div>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
-                <Label t="اسم مدير النظام">
+                <Label t="ط§ط³ظ… ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…">
                   <input
                     value={settings.manager.name}
                     onChange={(e) =>
@@ -2532,7 +2746,7 @@ function LegacySettingsPage({ settings, setSettings, setEmployees }) {
                     className="field mt-2"
                   />
                 </Label>
-                <Label t="اسم المستخدم">
+                <Label t="ط§ط³ظ… ط§ظ„ظ…ط³طھط®ط¯ظ…">
                   <input
                     value={settings.manager.username}
                     onChange={(e) =>
@@ -2547,7 +2761,7 @@ function LegacySettingsPage({ settings, setSettings, setEmployees }) {
                     className="field mt-2"
                   />
                 </Label>
-                <Label t="المسمى / الصلاحية">
+                <Label t="ط§ظ„ظ…ط³ظ…ظ‰ / ط§ظ„طµظ„ط§ط­ظٹط©">
                   <input
                     value={settings.manager.role}
                     onChange={(e) =>
@@ -2562,7 +2776,7 @@ function LegacySettingsPage({ settings, setSettings, setEmployees }) {
               </div>
               <div className="mt-6 flex items-center justify-between rounded-xl bg-emerald-50 p-4 text-sm text-emerald-700">
                 <span>
-                  يتم حفظ التعديلات تلقائيًا في قاعدة البيانات المحلية.
+                  ظٹطھظ… ط­ظپط¸ ط§ظ„طھط¹ط¯ظٹظ„ط§طھ طھظ„ظ‚ط§ط¦ظٹظ‹ط§ ظپظٹ ظ‚ط§ط¹ط¯ط© ط§ظ„ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ط­ظ„ظٹط©.
                 </span>
                 <Save size={18} />
               </div>
@@ -2572,16 +2786,16 @@ function LegacySettingsPage({ settings, setSettings, setEmployees }) {
           ) : (
             <div>
               <div className="mb-5">
-                <h3 className="text-lg font-extrabold">إدارة {tab}</h3>
+                <h3 className="text-lg font-extrabold">ط¥ط¯ط§ط±ط© {tab}</h3>
                 <p className="mt-1 text-xs text-slate-500">
-                  اضغط على زر التعديل لتغيير البيانات، وسيُطبّق التغيير في بقية
-                  النظام.
+                  ط§ط¶ط؛ط· ط¹ظ„ظ‰ ط²ط± ط§ظ„طھط¹ط¯ظٹظ„ ظ„طھط؛ظٹظٹط± ط§ظ„ط¨ظٹط§ظ†ط§طھطŒ ظˆط³ظٹظڈط·ط¨ظ‘ظ‚ ط§ظ„طھط؛ظٹظٹط± ظپظٹ ط¨ظ‚ظٹط©
+                  ط§ظ„ظ†ط¸ط§ظ….
                 </p>
               </div>
               <div className="space-y-2">
                 {items.map((item, i) => {
-                  const name = tab === "الصلاحيات" ? item.name : item,
-                    description = tab === "الصلاحيات" ? item.description : null;
+                  const name = tab === "ط§ظ„طµظ„ط§ط­ظٹط§طھ" ? item.name : item,
+                    description = tab === "ط§ظ„طµظ„ط§ط­ظٹط§طھ" ? item.description : null;
                   return (
                     <div
                       key={`${name}-${i}`}
@@ -2599,10 +2813,10 @@ function LegacySettingsPage({ settings, setSettings, setEmployees }) {
                         )}
                       </div>
                       <button
-                        aria-label={`تعديل ${name}`}
+                        aria-label={`طھط¹ط¯ظٹظ„ ${name}`}
                         onClick={() =>
                           setEdit(
-                            tab === "الصلاحيات"
+                            tab === "ط§ظ„طµظ„ط§ط­ظٹط§طھ"
                               ? {
                                   index: i,
                                   name: item.name,
@@ -2627,21 +2841,21 @@ function LegacySettingsPage({ settings, setSettings, setEmployees }) {
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
           <div className="panel w-full max-w-md p-6">
             <div className="mb-5 flex items-center">
-              <h3 className="text-lg font-extrabold">تعديل {tab}</h3>
+              <h3 className="text-lg font-extrabold">طھط¹ط¯ظٹظ„ {tab}</h3>
               <button onClick={() => setEdit(null)} className="mr-auto">
                 <X />
               </button>
             </div>
-            {tab === "الصلاحيات" ? (
+            {tab === "ط§ظ„طµظ„ط§ط­ظٹط§طھ" ? (
               <div className="space-y-4">
-                <Label t="اسم الصلاحية">
+                <Label t="ط§ط³ظ… ط§ظ„طµظ„ط§ط­ظٹط©">
                   <input
                     value={edit.name}
                     onChange={(e) => setEdit({ ...edit, name: e.target.value })}
                     className="field mt-2"
                   />
                 </Label>
-                <Label t="وصف الصلاحية">
+                <Label t="ظˆطµظپ ط§ظ„طµظ„ط§ط­ظٹط©">
                   <textarea
                     value={edit.description}
                     onChange={(e) =>
@@ -2655,11 +2869,11 @@ function LegacySettingsPage({ settings, setSettings, setEmployees }) {
             ) : (
               <Label
                 t={
-                  tab === "الفروع"
-                    ? "اسم الفرع"
-                    : tab === "الوظائف"
-                      ? "اسم الوظيفة"
-                      : "اسم معيار التقييم"
+                  tab === "ط§ظ„ظپط±ظˆط¹"
+                    ? "ط§ط³ظ… ط§ظ„ظپط±ط¹"
+                    : tab === "ط§ظ„ظˆط¸ط§ط¦ظپ"
+                      ? "ط§ط³ظ… ط§ظ„ظˆط¸ظٹظپط©"
+                      : "ط§ط³ظ… ظ…ط¹ظٹط§ط± ط§ظ„طھظ‚ظٹظٹظ…"
                 }
               >
                 <input
@@ -2672,10 +2886,10 @@ function LegacySettingsPage({ settings, setSettings, setEmployees }) {
             )}
             <div className="mt-6 flex justify-end gap-2">
               <button onClick={() => setEdit(null)} className="btn-secondary">
-                إلغاء
+                ط¥ظ„ط؛ط§ط،
               </button>
               <button onClick={updateItem} className="btn-primary">
-                <Save size={17} /> حفظ التعديل
+                <Save size={17} /> ط­ظپط¸ ط§ظ„طھط¹ط¯ظٹظ„
               </button>
             </div>
           </div>
@@ -2694,32 +2908,32 @@ function SettingsPage({
   canNode,
 }) {
   const tabs = [
-    ["مدير النظام", UserRoundCog],
-    ["الفروع", Building2],
-    ["العملات", CircleDollarSign],
-    ["الوظائف", BriefcaseBusiness],
-    ["معايير التقييم", ClipboardList],
-    ["المستخدمون", Users],
-    ["الصلاحيات", ShieldCheck],
+    ["ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…", UserRoundCog],
+    ["ط§ظ„ظپط±ظˆط¹", Building2],
+    ["ط§ظ„ط¹ظ…ظ„ط§طھ", CircleDollarSign],
+    ["ط§ظ„ظˆط¸ط§ط¦ظپ", BriefcaseBusiness],
+    ["ظ…ط¹ط§ظٹظٹط± ط§ظ„طھظ‚ظٹظٹظ…", ClipboardList],
+    ["ط§ظ„ظ…ط³طھط®ط¯ظ…ظˆظ†", Users],
+    ["ط§ظ„طµظ„ط§ط­ظٹط§طھ", ShieldCheck],
   ];
-  const [tab, setTab] = useState("مدير النظام"),
+  const [tab, setTab] = useState("ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…"),
     [selected, setSelected] = useState(null),
     [dialog, setDialog] = useState(null);
   const key =
-    tab === "الفروع"
+    tab === "ط§ظ„ظپط±ظˆط¹"
       ? "branches"
-      : tab === "العملات"
+      : tab === "ط§ظ„ط¹ظ…ظ„ط§طھ"
         ? "currencies"
-        : tab === "الوظائف"
+        : tab === "ط§ظ„ظˆط¸ط§ط¦ظپ"
           ? "jobs"
-          : tab === "معايير التقييم"
+          : tab === "ظ…ط¹ط§ظٹظٹط± ط§ظ„طھظ‚ظٹظٹظ…"
             ? "criteria"
-            : tab === "المستخدمون"
+            : tab === "ط§ظ„ظ…ط³طھط®ط¯ظ…ظˆظ†"
               ? "users"
             : "permissions";
   const items = settings[key] || defaultSettings[key] || [];
-  const isPermission = tab === "الصلاحيات";
-  const isUser = tab === "المستخدمون";
+  const isPermission = tab === "ط§ظ„طµظ„ط§ط­ظٹط§طھ";
+  const isUser = tab === "ط§ظ„ظ…ط³طھط®ط¯ظ…ظˆظ†";
   const openAdd = () =>
     setDialog(
       isUser
@@ -2728,7 +2942,7 @@ function SettingsPage({
             name: "",
             username: "",
             password: "",
-            role: "الموظف",
+            role: "ط§ظ„ظ…ظˆط¸ظپ",
             employeeId: "",
           }
         : isPermission
@@ -2775,15 +2989,15 @@ function SettingsPage({
     if (dialog.mode === "add") next.push(value);
     else next[dialog.index] = value;
     setSettings({ ...settings, [key]: next });
-    if (dialog.mode === "edit" && tab === "الفروع")
+    if (dialog.mode === "edit" && tab === "ط§ظ„ظپط±ظˆط¹")
       setEmployees((list) =>
         list.map((e) => (e.branch === old ? { ...e, branch: value } : e)),
       );
-    if (dialog.mode === "edit" && tab === "الوظائف")
+    if (dialog.mode === "edit" && tab === "ط§ظ„ظˆط¸ط§ط¦ظپ")
       setEmployees((list) =>
         list.map((e) => (e.job === old ? { ...e, job: value } : e)),
       );
-    if (tab === "معايير التقييم" && dialog.mode === "add")
+    if (tab === "ظ…ط¹ط§ظٹظٹط± ط§ظ„طھظ‚ظٹظٹظ…" && dialog.mode === "add")
       setEvaluations((list) =>
         list.map((e) => ({ ...e, scores: [...(e.scores || []), 3] })),
       );
@@ -2792,24 +3006,24 @@ function SettingsPage({
   };
   const deleteItem = () => {
     if (selected === null) return;
-    if ((tab === "الفروع" || tab === "الوظائف") && items.length === 1) {
-      alert("يجب الإبقاء على عنصر واحد على الأقل.");
+    if ((tab === "ط§ظ„ظپط±ظˆط¹" || tab === "ط§ظ„ظˆط¸ط§ط¦ظپ") && items.length === 1) {
+      alert("ظٹط¬ط¨ ط§ظ„ط¥ط¨ظ‚ط§ط، ط¹ظ„ظ‰ ط¹ظ†طµط± ظˆط§ط­ط¯ ط¹ظ„ظ‰ ط§ظ„ط£ظ‚ظ„.");
       return;
     }
     const item = items[selected],
       name = isPermission || isUser ? item.name : item;
-    if (!confirm(`هل تريد حذف «${name}»؟`)) return;
+    if (!confirm(`ظ‡ظ„ طھط±ظٹط¯ ط­ط°ظپ آ«${name}آ»طں`)) return;
     const next = items.filter((_, i) => i !== selected);
     setSettings({ ...settings, [key]: next });
-    if (tab === "الفروع")
+    if (tab === "ط§ظ„ظپط±ظˆط¹")
       setEmployees((list) =>
         list.map((e) => (e.branch === item ? { ...e, branch: next[0] } : e)),
       );
-    if (tab === "الوظائف")
+    if (tab === "ط§ظ„ظˆط¸ط§ط¦ظپ")
       setEmployees((list) =>
         list.map((e) => (e.job === item ? { ...e, job: next[0] } : e)),
       );
-    if (tab === "معايير التقييم")
+    if (tab === "ظ…ط¹ط§ظٹظٹط± ط§ظ„طھظ‚ظٹظٹظ…")
       setEvaluations((list) =>
         list.map((e) => ({
           ...e,
@@ -2819,19 +3033,19 @@ function SettingsPage({
     setSelected(null);
   };
   const itemLabel =
-    tab === "الفروع"
-      ? "اسم الفرع"
-      : tab === "العملات"
-        ? "اسم العملة ورمزها"
-        : tab === "الوظائف"
-          ? "اسم الوظيفة"
-          : "اسم معيار التقييم";
+    tab === "ط§ظ„ظپط±ظˆط¹"
+      ? "ط§ط³ظ… ط§ظ„ظپط±ط¹"
+      : tab === "ط§ظ„ط¹ظ…ظ„ط§طھ"
+        ? "ط§ط³ظ… ط§ظ„ط¹ظ…ظ„ط© ظˆط±ظ…ط²ظ‡ط§"
+        : tab === "ط§ظ„ظˆط¸ط§ط¦ظپ"
+          ? "ط§ط³ظ… ط§ظ„ظˆط¸ظٹظپط©"
+          : "ط§ط³ظ… ظ…ط¹ظٹط§ط± ط§ظ„طھظ‚ظٹظٹظ…";
   const exportBackup = async (type = "full") => {
-    if (canNode?.("system_backup", "can_export") === false) return alert("لا تملك صلاحية تصدير النسخ الاحتياطية");
+    if (canNode?.("system_backup", "can_export") === false) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھطµط¯ظٹط± ط§ظ„ظ†ط³ط® ط§ظ„ط§ط­طھظٹط§ط·ظٹط©");
     try {
       const backup = await backupService.createBackup({ type, createdBy: currentUser?.username || "" });
       const emailResult = await backupService.sendBackupToEmail(backup);
-      alert(emailResult.sent ? "تم إنشاء النسخة الاحتياطية وإرسالها للبريد." : emailResult.message);
+      alert(emailResult.sent ? "طھظ… ط¥ظ†ط´ط§ط، ط§ظ„ظ†ط³ط®ط© ط§ظ„ط§ط­طھظٹط§ط·ظٹط© ظˆط¥ط±ط³ط§ظ„ظ‡ط§ ظ„ظ„ط¨ط±ظٹط¯." : emailResult.message);
     } catch (error) {
       alert(error.message);
     }
@@ -2849,9 +3063,9 @@ function SettingsPage({
         setEmployees(backup.employees);
         setEvaluations(backup.evaluations || []);
         setSettings({ ...(backup.settings || {}), objections: backup.objections || [] });
-        alert("تم استيراد النسخة الاحتياطية بنجاح.");
+        alert("طھظ… ط§ط³طھظٹط±ط§ط¯ ط§ظ„ظ†ط³ط®ط© ط§ظ„ط§ط­طھظٹط§ط·ظٹط© ط¨ظ†ط¬ط§ط­.");
       } catch {
-        alert("ملف النسخة الاحتياطية غير صالح.");
+        alert("ظ…ظ„ظپ ط§ظ„ظ†ط³ط®ط© ط§ظ„ط§ط­طھظٹط§ط·ظٹط© ط؛ظٹط± طµط§ظ„ط­.");
       }
     };
     reader.readAsText(file, "utf-8");
@@ -2860,15 +3074,15 @@ function SettingsPage({
   return (
     <div className="space-y-5">
       <PageHead
-        title="إعدادات النظام"
-        desc="إضافة وتعديل وحذف البيانات المرجعية والصلاحيات"
+        title="ط¥ط¹ط¯ط§ط¯ط§طھ ط§ظ„ظ†ط¸ط§ظ…"
+        desc="ط¥ط¶ط§ظپط© ظˆطھط¹ط¯ظٹظ„ ظˆط­ط°ظپ ط§ظ„ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ط±ط¬ط¹ظٹط© ظˆط§ظ„طµظ„ط§ط­ظٹط§طھ"
         action={
           <div className="flex flex-wrap gap-2">
             <button onClick={exportBackup} className="btn-secondary">
-              <Download size={17} /> تصدير نسخة احتياطية
+              <Download size={17} /> طھطµط¯ظٹط± ظ†ط³ط®ط© ط§ط­طھظٹط§ط·ظٹط©
             </button>
             <label className="btn-primary cursor-pointer">
-              <Upload size={17} /> استيراد نسخة
+              <Upload size={17} /> ط§ط³طھظٹط±ط§ط¯ ظ†ط³ط®ط©
               <input
                 type="file"
                 accept="application/json,.json"
@@ -2897,7 +3111,7 @@ function SettingsPage({
           ))}
         </div>
         <div className="panel p-5">
-          {tab === "مدير النظام" ? (
+          {tab === "ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…" ? (
             <div>
               <div className="mb-6 flex items-center gap-4 border-b pb-5">
                 <div className="grid h-14 w-14 place-items-center rounded-2xl bg-brand-700 text-lg font-extrabold text-white">
@@ -2908,14 +3122,14 @@ function SettingsPage({
                     .join("")}
                 </div>
                 <div>
-                  <h3 className="text-lg font-extrabold">بيانات مدير النظام</h3>
+                  <h3 className="text-lg font-extrabold">ط¨ظٹط§ظ†ط§طھ ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…</h3>
                   <p className="text-xs text-slate-500">
-                    يتم حفظ التغييرات تلقائيًا وتظهر في جميع أجزاء النظام
+                    ظٹطھظ… ط­ظپط¸ ط§ظ„طھط؛ظٹظٹط±ط§طھ طھظ„ظ‚ط§ط¦ظٹظ‹ط§ ظˆطھط¸ظ‡ط± ظپظٹ ط¬ظ…ظٹط¹ ط£ط¬ط²ط§ط، ط§ظ„ظ†ط¸ط§ظ…
                   </p>
                 </div>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
-                <Label t="اسم مدير النظام">
+                <Label t="ط§ط³ظ… ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…">
                   <input
                     value={settings.manager.name}
                     onChange={(e) =>
@@ -2927,7 +3141,7 @@ function SettingsPage({
                     className="field mt-2"
                   />
                 </Label>
-                <Label t="اسم المستخدم">
+                <Label t="ط§ط³ظ… ط§ظ„ظ…ط³طھط®ط¯ظ…">
                   <input
                     value={settings.manager.username}
                     onChange={(e) =>
@@ -2942,7 +3156,7 @@ function SettingsPage({
                     className="field mt-2"
                   />
                 </Label>
-                <Label t="المسمى / الصلاحية">
+                <Label t="ط§ظ„ظ…ط³ظ…ظ‰ / ط§ظ„طµظ„ط§ط­ظٹط©">
                   <input
                     value={settings.manager.role}
                     onChange={(e) =>
@@ -2956,7 +3170,7 @@ function SettingsPage({
                 </Label>
               </div>
               <div className="mt-6 flex items-center justify-between rounded-xl bg-emerald-50 p-4 text-sm text-emerald-700">
-                <span>تم تفعيل الحفظ التلقائي لبيانات مدير النظام.</span>
+                <span>طھظ… طھظپط¹ظٹظ„ ط§ظ„ط­ظپط¸ ط§ظ„طھظ„ظ‚ط§ط¦ظٹ ظ„ط¨ظٹط§ظ†ط§طھ ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ….</span>
                 <Save size={18} />
               </div>
             </div>
@@ -2966,29 +3180,29 @@ function SettingsPage({
             <div>
               <div className="mb-5 flex flex-wrap items-center gap-3">
                 <div>
-                  <h3 className="text-lg font-extrabold">إدارة {tab}</h3>
+                  <h3 className="text-lg font-extrabold">ط¥ط¯ط§ط±ط© {tab}</h3>
                   <p className="mt-1 text-xs text-slate-500">
-                    اختر عنصرًا من القائمة، ثم استخدم أزرار الإضافة أو التعديل
-                    أو الحذف.
+                    ط§ط®طھط± ط¹ظ†طµط±ظ‹ط§ ظ…ظ† ط§ظ„ظ‚ط§ط¦ظ…ط©طŒ ط«ظ… ط§ط³طھط®ط¯ظ… ط£ط²ط±ط§ط± ط§ظ„ط¥ط¶ط§ظپط© ط£ظˆ ط§ظ„طھط¹ط¯ظٹظ„
+                    ط£ظˆ ط§ظ„ط­ط°ظپ.
                   </p>
                 </div>
                 <div className="mr-auto flex flex-wrap gap-2">
                   <button onClick={openAdd} className="btn-primary">
-                    <Plus size={16} /> إضافة
+                    <Plus size={16} /> ط¥ط¶ط§ظپط©
                   </button>
                   <button
                     disabled={selected === null}
                     onClick={openEdit}
                     className="btn-secondary disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    <Pencil size={16} /> تعديل
+                    <Pencil size={16} /> طھط¹ط¯ظٹظ„
                   </button>
                   <button
                     disabled={selected === null}
                     onClick={deleteItem}
                     className="inline-flex h-10 items-center gap-2 rounded-xl border border-red-200 bg-white px-4 text-sm font-bold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    <Trash2 size={16} /> حذف
+                    <Trash2 size={16} /> ط­ط°ظپ
                   </button>
                 </div>
               </div>
@@ -2998,7 +3212,7 @@ function SettingsPage({
                     description = isPermission
                       ? item.description
                       : isUser
-                        ? `${item.username} • ${item.role}${item.employeeId ? ` • ${item.employeeId}` : ""}`
+                        ? `${item.username} â€¢ ${item.role}${item.employeeId ? ` â€¢ ${item.employeeId}` : ""}`
                         : null;
                   return (
                     <button
@@ -3021,7 +3235,7 @@ function SettingsPage({
                       </div>
                       {selected === i && (
                         <span className="mr-auto text-xs font-bold text-brand-700">
-                          محدد
+                          ظ…ط­ط¯ط¯
                         </span>
                       )}
                     </button>
@@ -3029,7 +3243,7 @@ function SettingsPage({
                 })}
                 {items.length === 0 && (
                   <div className="rounded-xl border border-dashed p-10 text-center text-sm text-slate-400">
-                    لا توجد بيانات. اضغط «إضافة» لإنشاء أول عنصر.
+                    ظ„ط§ طھظˆط¬ط¯ ط¨ظٹط§ظ†ط§طھ. ط§ط¶ط؛ط· آ«ط¥ط¶ط§ظپط©آ» ظ„ط¥ظ†ط´ط§ط، ط£ظˆظ„ ط¹ظ†طµط±.
                   </div>
                 )}
               </div>
@@ -3042,10 +3256,10 @@ function SettingsPage({
           <div className="panel w-full max-w-md p-6">
             <div className="mb-5 flex items-center">
               <h3 className="text-lg font-extrabold">
-                {dialog.mode === "add" ? "إضافة" : "تعديل"} {tab}
+                {dialog.mode === "add" ? "ط¥ط¶ط§ظپط©" : "طھط¹ط¯ظٹظ„"} {tab}
               </h3>
               <button
-                aria-label="إغلاق"
+                aria-label="ط¥ط؛ظ„ط§ظ‚"
                 onClick={() => setDialog(null)}
                 className="mr-auto"
               >
@@ -3054,7 +3268,7 @@ function SettingsPage({
             </div>
             {isUser ? (
               <div className="grid gap-4 sm:grid-cols-2">
-                <Label t="اسم المستخدم الكامل">
+                <Label t="ط§ط³ظ… ط§ظ„ظ…ط³طھط®ط¯ظ… ط§ظ„ظƒط§ظ…ظ„">
                   <input
                     autoFocus
                     value={dialog.name}
@@ -3064,7 +3278,7 @@ function SettingsPage({
                     className="field mt-2"
                   />
                 </Label>
-                <Label t="اسم الدخول">
+                <Label t="ط§ط³ظ… ط§ظ„ط¯ط®ظˆظ„">
                   <input
                     value={dialog.username}
                     onChange={(e) =>
@@ -3073,7 +3287,7 @@ function SettingsPage({
                     className="field mt-2"
                   />
                 </Label>
-                <Label t="كلمة المرور">
+                <Label t="ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط±">
                   <input
                     type="password"
                     value={dialog.password}
@@ -3083,7 +3297,7 @@ function SettingsPage({
                     className="field mt-2"
                   />
                 </Label>
-                <Label t="الصلاحية">
+                <Label t="ط§ظ„طµظ„ط§ط­ظٹط©">
                   <select
                     value={dialog.role}
                     onChange={(e) =>
@@ -3098,7 +3312,7 @@ function SettingsPage({
                     )}
                   </select>
                 </Label>
-                <Label t="ربط بالموظف">
+                <Label t="ط±ط¨ط· ط¨ط§ظ„ظ…ظˆط¸ظپ">
                   <select
                     value={dialog.employeeId}
                     onChange={(e) =>
@@ -3106,10 +3320,10 @@ function SettingsPage({
                     }
                     className="field mt-2"
                   >
-                    <option value="">غير مرتبط</option>
+                    <option value="">ط؛ظٹط± ظ…ط±طھط¨ط·</option>
                     {employees.map((employee) => (
                       <option key={employee.id} value={employee.id}>
-                        {employee.name} — {employee.id}
+                        {employee.name} â€” {employee.id}
                       </option>
                     ))}
                   </select>
@@ -3117,7 +3331,7 @@ function SettingsPage({
               </div>
             ) : isPermission ? (
               <div className="space-y-4">
-                <Label t="اسم الصلاحية">
+                <Label t="ط§ط³ظ… ط§ظ„طµظ„ط§ط­ظٹط©">
                   <input
                     autoFocus
                     value={dialog.name}
@@ -3127,7 +3341,7 @@ function SettingsPage({
                     className="field mt-2"
                   />
                 </Label>
-                <Label t="وصف الصلاحية">
+                <Label t="ظˆطµظپ ط§ظ„طµظ„ط§ط­ظٹط©">
                   <textarea
                     value={dialog.description}
                     onChange={(e) =>
@@ -3147,16 +3361,16 @@ function SettingsPage({
                     setDialog({ ...dialog, value: e.target.value })
                   }
                   className="field mt-2"
-                  placeholder={`أدخل ${itemLabel}`}
+                  placeholder={`ط£ط¯ط®ظ„ ${itemLabel}`}
                 />
               </Label>
             )}
             <div className="mt-6 flex justify-end gap-2">
               <button onClick={() => setDialog(null)} className="btn-secondary">
-                إلغاء
+                ط¥ظ„ط؛ط§ط،
               </button>
               <button onClick={saveItem} className="btn-primary">
-                <Save size={17} /> حفظ
+                <Save size={17} /> ط­ظپط¸
               </button>
             </div>
           </div>
@@ -3191,7 +3405,7 @@ function EnhancedTemplates({ settings, setSettings }) {
   };
   const deleteCriterion = () => {
     if (selected === null || model.length <= 1) return;
-    if (!confirm("هل تريد حذف معيار التقييم المحدد؟")) return;
+    if (!confirm("ظ‡ظ„ طھط±ظٹط¯ ط­ط°ظپ ظ…ط¹ظٹط§ط± ط§ظ„طھظ‚ظٹظٹظ… ط§ظ„ظ…ط­ط¯ط¯طں")) return;
     updateJobCriteria(
       settings,
       setSettings,
@@ -3212,11 +3426,11 @@ function EnhancedTemplates({ settings, setSettings }) {
   return (
     <div className="space-y-5">
       <PageHead
-        title="نماذج التقييم"
-        desc="معايير وأوزان مستقلة لكل وظيفة"
+        title="ظ†ظ…ط§ط°ط¬ ط§ظ„طھظ‚ظٹظٹظ…"
+        desc="ظ…ط¹ط§ظٹظٹط± ظˆط£ظˆط²ط§ظ† ظ…ط³طھظ‚ظ„ط© ظ„ظƒظ„ ظˆط¸ظٹظپط©"
         action={
           <button onClick={balanceWeights} className="btn-secondary">
-            <Gauge size={17} /> توزيع الأوزان تلقائيًا
+            <Gauge size={17} /> طھظˆط²ظٹط¹ ط§ظ„ط£ظˆط²ط§ظ† طھظ„ظ‚ط§ط¦ظٹظ‹ط§
           </button>
         }
       />
@@ -3237,7 +3451,7 @@ function EnhancedTemplates({ settings, setSettings }) {
             </div>
             <b className="text-sm">{x}</b>
             <p className="mt-1 text-[11px] text-slate-400">
-              {getJobCriteria(settings, x).length} معايير • 100 نقطة
+              {getJobCriteria(settings, x).length} ظ…ط¹ط§ظٹظٹط± â€¢ 100 ظ†ظ‚ط·ط©
             </p>
           </button>
         ))}
@@ -3245,29 +3459,29 @@ function EnhancedTemplates({ settings, setSettings }) {
       <div className="panel p-5">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-lg font-extrabold">نموذج تقييم: {job}</h3>
+            <h3 className="text-lg font-extrabold">ظ†ظ…ظˆط°ط¬ طھظ‚ظٹظٹظ…: {job}</h3>
             <p className="text-xs text-slate-500">
-              مجموع الأوزان الحالي:{" "}
+              ظ…ط¬ظ…ظˆط¹ ط§ظ„ط£ظˆط²ط§ظ† ط§ظ„ط­ط§ظ„ظٹ:{" "}
               <b className={totalWeight === 100 ? "text-emerald-600" : "text-red-600"}>{totalWeight}%</b>
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={() => setDialog({ mode: "add", name: "", weight: 10 })} className="btn-primary">
-              <Plus size={16} /> إضافة
+              <Plus size={16} /> ط¥ط¶ط§ظپط©
             </button>
             <button
               disabled={selected === null}
               onClick={() => setDialog({ mode: "edit", index: selected, ...model[selected] })}
               className="btn-secondary disabled:opacity-40"
             >
-              <Pencil size={16} /> تعديل
+              <Pencil size={16} /> طھط¹ط¯ظٹظ„
             </button>
             <button
               disabled={selected === null}
               onClick={deleteCriterion}
               className="inline-flex h-10 items-center gap-2 rounded-xl border border-red-200 bg-white px-4 text-sm font-bold text-red-600 hover:bg-red-50 disabled:opacity-40"
             >
-              <Trash2 size={16} /> حذف
+              <Trash2 size={16} /> ط­ط°ظپ
             </button>
           </div>
         </div>
@@ -3276,10 +3490,10 @@ function EnhancedTemplates({ settings, setSettings }) {
             <thead>
               <tr>
                 <th>#</th>
-                <th>معيار التقييم</th>
-                <th>الوزن النسبي</th>
-                <th>الدرجة القصوى</th>
-                <th>الحالة</th>
+                <th>ظ…ط¹ظٹط§ط± ط§ظ„طھظ‚ظٹظٹظ…</th>
+                <th>ط§ظ„ظˆط²ظ† ط§ظ„ظ†ط³ط¨ظٹ</th>
+                <th>ط§ظ„ط¯ط±ط¬ط© ط§ظ„ظ‚طµظˆظ‰</th>
+                <th>ط§ظ„ط­ط§ظ„ط©</th>
               </tr>
             </thead>
             <tbody>
@@ -3294,14 +3508,14 @@ function EnhancedTemplates({ settings, setSettings }) {
                         {c.name}
                         {c.subWeights && (
                           <p className="mt-1 text-[11px] font-normal text-slate-500">
-                            فئات النقد: 200 = {c.subWeights.cash200 || 0}% • 500 = {c.subWeights.cash500 || 0}% • 1000 = {c.subWeights.cash1000 || 0}%
+                            ظپط¦ط§طھ ط§ظ„ظ†ظ‚ط¯: 200 = {c.subWeights.cash200 || 0}% â€¢ 500 = {c.subWeights.cash500 || 0}% â€¢ 1000 = {c.subWeights.cash1000 || 0}%
                           </p>
                         )}
                       </td>
                   <td>{c.weight}%</td>
-                  <td>5 درجات</td>
+                  <td>5 ط¯ط±ط¬ط§طھ</td>
                   <td>
-                    <Status>نشط</Status>
+                    <Status>ظ†ط´ط·</Status>
                   </td>
                 </tr>
               ))}
@@ -3321,13 +3535,13 @@ function CriteriaDialog({ dialog, setDialog, onSave }) {
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
       <div className="panel w-full max-w-md p-6">
         <div className="mb-5 flex items-center">
-          <h3 className="text-lg font-extrabold">{dialog.mode === "add" ? "إضافة معيار" : "تعديل معيار"}</h3>
+          <h3 className="text-lg font-extrabold">{dialog.mode === "add" ? "ط¥ط¶ط§ظپط© ظ…ط¹ظٹط§ط±" : "طھط¹ط¯ظٹظ„ ظ…ط¹ظٹط§ط±"}</h3>
           <button onClick={() => setDialog(null)} className="mr-auto">
             <X />
           </button>
         </div>
         <div className="grid gap-4">
-          <Label t="اسم المعيار">
+          <Label t="ط§ط³ظ… ط§ظ„ظ…ط¹ظٹط§ط±">
             <input
               autoFocus
               value={dialog.name}
@@ -3336,12 +3550,12 @@ function CriteriaDialog({ dialog, setDialog, onSave }) {
             />
           </Label>
           <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
-            <b className="text-sm">أوزان الفئات النقدية للعداد</b>
+            <b className="text-sm">ط£ظˆط²ط§ظ† ط§ظ„ظپط¦ط§طھ ط§ظ„ظ†ظ‚ط¯ظٹط© ظ„ظ„ط¹ط¯ط§ط¯</b>
             <div className="mt-3 grid grid-cols-3 gap-3">
               {[
-                ["cash200", "فئة 200"],
-                ["cash500", "فئة 500"],
-                ["cash1000", "فئة 1000"],
+                ["cash200", "ظپط¦ط© 200"],
+                ["cash500", "ظپط¦ط© 500"],
+                ["cash1000", "ظپط¦ط© 1000"],
               ].map(([key, label]) => (
                 <Label key={key} t={label}>
                   <input
@@ -3364,7 +3578,7 @@ function CriteriaDialog({ dialog, setDialog, onSave }) {
               ))}
             </div>
           </div>
-          <Label t="الوزن النسبي %">
+          <Label t="ط§ظ„ظˆط²ظ† ط§ظ„ظ†ط³ط¨ظٹ %">
             <input
               type="number"
               min="0"
@@ -3377,10 +3591,10 @@ function CriteriaDialog({ dialog, setDialog, onSave }) {
         </div>
         <div className="mt-6 flex justify-end gap-2">
           <button onClick={() => setDialog(null)} className="btn-secondary">
-            إلغاء
+            ط¥ظ„ط؛ط§ط،
           </button>
           <button onClick={onSave} className="btn-primary">
-            <Save size={17} /> حفظ
+            <Save size={17} /> ط­ظپط¸
           </button>
         </div>
       </div>
@@ -3432,17 +3646,17 @@ function EnhancedEvaluations({ employees, evaluations, setEvaluations, settings,
       })
       .join("");
     printDocument(
-      `تقييم أداء الموظف - ${emp?.name || empId}`,
-      `<h1>تقرير تقييم أداء موظف</h1>
+      `طھظ‚ظٹظٹظ… ط£ط¯ط§ط، ط§ظ„ظ…ظˆط¸ظپ - ${emp?.name || empId}`,
+      `<h1>طھظ‚ط±ظٹط± طھظ‚ظٹظٹظ… ط£ط¯ط§ط، ظ…ظˆط¸ظپ</h1>
        <div style="margin:14px 0;padding:14px;border:1px solid #d7dce3;border-radius:12px">
-        <h2 style="margin:0 0 8px">اسم الموظف: ${emp?.name || ""}</h2>
+        <h2 style="margin:0 0 8px">ط§ط³ظ… ط§ظ„ظ…ظˆط¸ظپ: ${emp?.name || ""}</h2>
         <p><b>Employee_ID:</b> ${emp?.id || empId || ""}</p>
-        <p><b>الوظيفة:</b> ${emp?.job || ""} &nbsp; <b>الفرع:</b> ${emp?.branch || ""}</p>
-        <p><b>شهر التقييم:</b> ${month}</p>
+        <p><b>ط§ظ„ظˆط¸ظٹظپط©:</b> ${emp?.job || ""} &nbsp; <b>ط§ظ„ظپط±ط¹:</b> ${emp?.branch || ""}</p>
+        <p><b>ط´ظ‡ط± ط§ظ„طھظ‚ظٹظٹظ…:</b> ${month}</p>
        </div>
-       <table><thead><tr><th>المعيار</th><th>الوزن</th><th>الدرجة</th><th>النتيجة</th></tr></thead><tbody>${rows}</tbody></table>
-       <h2>النتيجة النهائية: ${total}% - ${classify(total)}</h2>
-       <p><b>ملاحظات المدير:</b> ${notes || "لا توجد ملاحظات"}</p>`,
+       <table><thead><tr><th>ط§ظ„ظ…ط¹ظٹط§ط±</th><th>ط§ظ„ظˆط²ظ†</th><th>ط§ظ„ط¯ط±ط¬ط©</th><th>ط§ظ„ظ†طھظٹط¬ط©</th></tr></thead><tbody>${rows}</tbody></table>
+       <h2>ط§ظ„ظ†طھظٹط¬ط© ط§ظ„ظ†ظ‡ط§ط¦ظٹط©: ${total}% - ${classify(total)}</h2>
+       <p><b>ظ…ظ„ط§ط­ط¸ط§طھ ط§ظ„ظ…ط¯ظٹط±:</b> ${notes || "ظ„ط§ طھظˆط¬ط¯ ظ…ظ„ط§ط­ط¸ط§طھ"}</p>`,
     );
   };
   useEffect(() => {
@@ -3457,17 +3671,17 @@ function EnhancedEvaluations({ employees, evaluations, setEvaluations, settings,
       .join("");
     window.__activeEvaluationReport = {
       employeeId: emp?.id || empId,
-      title: `تقييم أداء الموظف - ${emp?.name || empId}`,
-      body: `<h1>تقرير تقييم أداء موظف</h1>
+      title: `طھظ‚ظٹظٹظ… ط£ط¯ط§ط، ط§ظ„ظ…ظˆط¸ظپ - ${emp?.name || empId}`,
+      body: `<h1>طھظ‚ط±ظٹط± طھظ‚ظٹظٹظ… ط£ط¯ط§ط، ظ…ظˆط¸ظپ</h1>
        <div style="margin:14px 0;padding:14px;border:1px solid #d7dce3;border-radius:12px">
-        <h2 style="margin:0 0 8px">اسم الموظف: ${emp?.name || ""}</h2>
+        <h2 style="margin:0 0 8px">ط§ط³ظ… ط§ظ„ظ…ظˆط¸ظپ: ${emp?.name || ""}</h2>
         <p><b>Employee_ID:</b> ${emp?.id || empId || ""}</p>
-        <p><b>الوظيفة:</b> ${emp?.job || ""} &nbsp; <b>الفرع:</b> ${emp?.branch || ""}</p>
-        <p><b>شهر التقييم:</b> ${month}</p>
+        <p><b>ط§ظ„ظˆط¸ظٹظپط©:</b> ${emp?.job || ""} &nbsp; <b>ط§ظ„ظپط±ط¹:</b> ${emp?.branch || ""}</p>
+        <p><b>ط´ظ‡ط± ط§ظ„طھظ‚ظٹظٹظ…:</b> ${month}</p>
        </div>
-       <table><thead><tr><th>المعيار</th><th>الوزن</th><th>الدرجة</th><th>النتيجة</th></tr></thead><tbody>${rows}</tbody></table>
-       <h2>النتيجة النهائية: ${total}% - ${classify(total)}</h2>
-       <p><b>ملاحظات المدير:</b> ${notes || "لا توجد ملاحظات"}</p>`,
+       <table><thead><tr><th>ط§ظ„ظ…ط¹ظٹط§ط±</th><th>ط§ظ„ظˆط²ظ†</th><th>ط§ظ„ط¯ط±ط¬ط©</th><th>ط§ظ„ظ†طھظٹط¬ط©</th></tr></thead><tbody>${rows}</tbody></table>
+       <h2>ط§ظ„ظ†طھظٹط¬ط© ط§ظ„ظ†ظ‡ط§ط¦ظٹط©: ${total}% - ${classify(total)}</h2>
+       <p><b>ظ…ظ„ط§ط­ط¸ط§طھ ط§ظ„ظ…ط¯ظٹط±:</b> ${notes || "ظ„ط§ طھظˆط¬ط¯ ظ…ظ„ط§ط­ط¸ط§طھ"}</p>`,
     };
   }, [empId, emp?.name, emp?.job, emp?.branch, month, modelSignature, safeScores.join(","), total, notes]);
   const save = () => {
@@ -3480,13 +3694,13 @@ function EnhancedEvaluations({ employees, evaluations, setEvaluations, settings,
       scores: safeScores,
       criteriaSnapshot: model,
       total,
-      status: old?.status || "قيد المراجعة",
+      status: old?.status || "ظ‚ظٹط¯ ط§ظ„ظ…ط±ط§ط¬ط¹ط©",
       notes,
     };
     setEvaluations((list) =>
       old ? list.map((e) => (e.id === old.id ? record : e)) : [record, ...list],
     );
-    alert(old ? "تم تعديل التقييم السابق" : "تم حفظ التقييم");
+    alert(old ? "طھظ… طھط¹ط¯ظٹظ„ ط§ظ„طھظ‚ظٹظٹظ… ط§ظ„ط³ط§ط¨ظ‚" : "طھظ… ط­ظپط¸ ط§ظ„طھظ‚ظٹظٹظ…");
   };
   const saveCriterion = () => {
     if (!dialog?.name?.trim() || !emp?.job) return;
@@ -3510,7 +3724,7 @@ function EnhancedEvaluations({ employees, evaluations, setEvaluations, settings,
   };
   const deleteCriterion = () => {
     if (selected === null || model.length <= 1 || !emp?.job) return;
-    if (!confirm("هل تريد حذف هذا المعيار من نموذج الوظيفة؟")) return;
+    if (!confirm("ظ‡ظ„ طھط±ظٹط¯ ط­ط°ظپ ظ‡ط°ط§ ط§ظ„ظ…ط¹ظٹط§ط± ظ…ظ† ظ†ظ…ظˆط°ط¬ ط§ظ„ظˆط¸ظٹظپط©طں")) return;
     updateJobCriteria(
       settings,
       setSettings,
@@ -3523,26 +3737,26 @@ function EnhancedEvaluations({ employees, evaluations, setEvaluations, settings,
   return (
     <div className="space-y-5">
       <PageHead
-        title="تقييم أداء الموظفين"
-        desc="يعرض النموذج المناسب تلقائيًا حسب وظيفة الموظف مع إمكانية تعديل المعايير والأوزان"
+        title="طھظ‚ظٹظٹظ… ط£ط¯ط§ط، ط§ظ„ظ…ظˆط¸ظپظٹظ†"
+        desc="ظٹط¹ط±ط¶ ط§ظ„ظ†ظ…ظˆط°ط¬ ط§ظ„ظ…ظ†ط§ط³ط¨ طھظ„ظ‚ط§ط¦ظٹظ‹ط§ ط­ط³ط¨ ظˆط¸ظٹظپط© ط§ظ„ظ…ظˆط¸ظپ ظ…ط¹ ط¥ظ…ظƒط§ظ†ظٹط© طھط¹ط¯ظٹظ„ ط§ظ„ظ…ط¹ط§ظٹظٹط± ظˆط§ظ„ط£ظˆط²ط§ظ†"
         action={
           <button
             onClick={() =>
               printDocument(
-                "تقييم أداء الموظف",
-                `<h1>تقييم أداء الموظف</h1><p>${emp?.name || ""} - ${emp?.job || ""}</p><table><thead><tr><th>المعيار</th><th>الوزن</th><th>الدرجة</th><th>النتيجة</th></tr></thead><tbody>${model
+                "طھظ‚ظٹظٹظ… ط£ط¯ط§ط، ط§ظ„ظ…ظˆط¸ظپ",
+                `<h1>طھظ‚ظٹظٹظ… ط£ط¯ط§ط، ط§ظ„ظ…ظˆط¸ظپ</h1><p>${emp?.name || ""} - ${emp?.job || ""}</p><table><thead><tr><th>ط§ظ„ظ…ط¹ظٹط§ط±</th><th>ط§ظ„ظˆط²ظ†</th><th>ط§ظ„ط¯ط±ط¬ط©</th><th>ط§ظ„ظ†طھظٹط¬ط©</th></tr></thead><tbody>${model
                   .map((c, i) => `<tr><td>${c.name}</td><td>${c.weight}%</td><td>${safeScores[i]}</td><td>${((safeScores[i] * c.weight) / 5).toFixed(1)}</td></tr>`)
-                  .join("")}</tbody></table><h2>النتيجة النهائية: ${total}% - ${classify(total)}</h2><p>${notes || ""}</p>`,
+                  .join("")}</tbody></table><h2>ط§ظ„ظ†طھظٹط¬ط© ط§ظ„ظ†ظ‡ط§ط¦ظٹط©: ${total}% - ${classify(total)}</h2><p>${notes || ""}</p>`,
               )
             }
             className="btn-secondary"
           >
-            <Printer size={17} /> طباعة / PDF
+            <Printer size={17} /> ط·ط¨ط§ط¹ط© / PDF
           </button>
         }
       />
       <div className="panel grid gap-4 p-5 md:grid-cols-3">
-        <Label t="الموظف">
+        <Label t="ط§ظ„ظ…ظˆط¸ظپ">
 	          <select value={empId} onChange={(e) => changeEmployee(e.target.value)} className="field mt-2">
             {employees.map((e) => (
               <option key={e.id} value={e.id}>
@@ -3551,10 +3765,10 @@ function EnhancedEvaluations({ employees, evaluations, setEvaluations, settings,
             ))}
           </select>
         </Label>
-        <Label t="شهر التقييم">
+        <Label t="ط´ظ‡ط± ط§ظ„طھظ‚ظٹظٹظ…">
           <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="field mt-2" />
         </Label>
-        <Label t="الوظيفة">
+        <Label t="ط§ظ„ظˆط¸ظٹظپط©">
           <input value={emp?.job || ""} disabled className="field mt-2 bg-slate-50" />
         </Label>
       </div>
@@ -3562,23 +3776,23 @@ function EnhancedEvaluations({ employees, evaluations, setEvaluations, settings,
         <div className="panel p-5">
           <div className="mb-4 flex flex-wrap gap-2">
             <button onClick={() => setDialog({ mode: "add", name: "", weight: 10 })} className="btn-primary">
-              <Plus size={16} /> إضافة معيار
+              <Plus size={16} /> ط¥ط¶ط§ظپط© ظ…ط¹ظٹط§ط±
             </button>
             <button disabled={selected === null} onClick={() => setDialog({ mode: "edit", index: selected, ...model[selected] })} className="btn-secondary disabled:opacity-40">
-              <Pencil size={16} /> تعديل المعيار/الوزن
+              <Pencil size={16} /> طھط¹ط¯ظٹظ„ ط§ظ„ظ…ط¹ظٹط§ط±/ط§ظ„ظˆط²ظ†
             </button>
             <button disabled={selected === null} onClick={deleteCriterion} className="inline-flex h-10 items-center gap-2 rounded-xl border border-red-200 bg-white px-4 text-sm font-bold text-red-600 hover:bg-red-50 disabled:opacity-40">
-              <Trash2 size={16} /> حذف
+              <Trash2 size={16} /> ط­ط°ظپ
             </button>
           </div>
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>المعيار</th>
-                  <th>الوزن</th>
-                  <th>الدرجة من 5</th>
-                  <th>النتيجة</th>
+                  <th>ط§ظ„ظ…ط¹ظٹط§ط±</th>
+                  <th>ط§ظ„ظˆط²ظ†</th>
+                  <th>ط§ظ„ط¯ط±ط¬ط© ظ…ظ† 5</th>
+                  <th>ط§ظ„ظ†طھظٹط¬ط©</th>
                 </tr>
               </thead>
               <tbody>
@@ -3607,7 +3821,7 @@ function EnhancedEvaluations({ employees, evaluations, setEvaluations, settings,
               </tbody>
             </table>
           </div>
-          <Label t="ملاحظات المدير">
+          <Label t="ظ…ظ„ط§ط­ط¸ط§طھ ط§ظ„ظ…ط¯ظٹط±">
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows="3" className="field mt-2 !h-auto py-3" />
           </Label>
         </div>
@@ -3617,13 +3831,13 @@ function EnhancedEvaluations({ employees, evaluations, setEvaluations, settings,
               <b className="text-4xl text-brand-700">{total}%</b>
             </div>
             <Status>{classify(total)}</Status>
-            <p className="mt-4 text-xs leading-5 text-slate-500">محسوب حسب نموذج وظيفة {emp?.job}</p>
+            <p className="mt-4 text-xs leading-5 text-slate-500">ظ…ط­ط³ظˆط¨ ط­ط³ط¨ ظ†ظ…ظˆط°ط¬ ظˆط¸ظٹظپط© {emp?.job}</p>
           </div>
           <button onClick={save} className="btn-primary h-12 w-full">
-            <Save size={18} /> حفظ التقييم
+            <Save size={18} /> ط­ظپط¸ ط§ظ„طھظ‚ظٹظٹظ…
           </button>
           <p className="rounded-xl bg-blue-50 p-3 text-xs text-blue-700">
-            وجود تقييم لنفس الشهر يؤدي إلى تعديل السجل السابق، لا إنشاء نسخة مكررة.
+            ظˆط¬ظˆط¯ طھظ‚ظٹظٹظ… ظ„ظ†ظپط³ ط§ظ„ط´ظ‡ط± ظٹط¤ط¯ظٹ ط¥ظ„ظ‰ طھط¹ط¯ظٹظ„ ط§ظ„ط³ط¬ظ„ ط§ظ„ط³ط§ط¨ظ‚طŒ ظ„ط§ ط¥ظ†ط´ط§ط، ظ†ط³ط®ط© ظ…ظƒط±ط±ط©.
           </p>
         </div>
       </div>
@@ -3636,7 +3850,7 @@ function EnhancedTopEmployees({ employees, evaluations }) {
   const latestByEmployee = new Map();
   const approved = evaluations.filter((ev) => {
     const status = String(ev.status || "");
-    return status.includes("معتمد") || status.includes("ظ…ط¹طھظ…ط¯");
+    return status.includes("ظ…ط¹طھظ…ط¯") || status.includes("ط¸â€¦ط·آ¹ط·ع¾ط¸â€¦ط·آ¯");
   });
   const sourceEvaluations = approved.length ? approved : evaluations;
   [...sourceEvaluations]
@@ -3656,17 +3870,17 @@ function EnhancedTopEmployees({ employees, evaluations }) {
   const best = ranked[0] || {};
   const printCertificate = (employee) =>
     printDocument(
-      "شهادة موظف الشهر",
-      `<div class="cert"><h1 class="brand">شهادة تقدير</h1><p class="muted">تمنح هذه الشهادة إلى</p><p class="big">${employee.name || ""}</p><p>وذلك لتميزه في الأداء وتحقيقه نتيجة ${employee.total || 0}% خلال الشهر.</p><h3>${employee.job || ""} - ${employee.branch || ""}</h3><p class="muted">نظام تقييم وتحفيز الموظفين</p></div>`,
+      "ط´ظ‡ط§ط¯ط© ظ…ظˆط¸ظپ ط§ظ„ط´ظ‡ط±",
+      `<div class="cert"><h1 class="brand">ط´ظ‡ط§ط¯ط© طھظ‚ط¯ظٹط±</h1><p class="muted">طھظ…ظ†ط­ ظ‡ط°ظ‡ ط§ظ„ط´ظ‡ط§ط¯ط© ط¥ظ„ظ‰</p><p class="big">${employee.name || ""}</p><p>ظˆط°ظ„ظƒ ظ„طھظ…ظٹط²ظ‡ ظپظٹ ط§ظ„ط£ط¯ط§ط، ظˆطھط­ظ‚ظٹظ‚ظ‡ ظ†طھظٹط¬ط© ${employee.total || 0}% ط®ظ„ط§ظ„ ط§ظ„ط´ظ‡ط±.</p><h3>${employee.job || ""} - ${employee.branch || ""}</h3><p class="muted">ظ†ط¸ط§ظ… طھظ‚ظٹظٹظ… ظˆطھط­ظپظٹط² ط§ظ„ظ…ظˆط¸ظپظٹظ†</p></div>`,
     );
   return (
     <div className="space-y-5">
       <PageHead
-        title="موظف الشهر"
-        desc="ترتيب دقيق لأفضل الموظفين حسب أعلى نتيجة تقييم"
+        title="ظ…ظˆط¸ظپ ط§ظ„ط´ظ‡ط±"
+        desc="طھط±طھظٹط¨ ط¯ظ‚ظٹظ‚ ظ„ط£ظپط¶ظ„ ط§ظ„ظ…ظˆط¸ظپظٹظ† ط­ط³ط¨ ط£ط¹ظ„ظ‰ ظ†طھظٹط¬ط© طھظ‚ظٹظٹظ…"
         action={
           <button onClick={() => printCertificate(best)} className="btn-secondary">
-            <Printer size={17} /> طباعة شهادة الموظف الأول
+            <Printer size={17} /> ط·ط¨ط§ط¹ط© ط´ظ‡ط§ط¯ط© ط§ظ„ظ…ظˆط¸ظپ ط§ظ„ط£ظˆظ„
           </button>
         }
       />
@@ -3676,16 +3890,16 @@ function EnhancedTopEmployees({ employees, evaluations }) {
             {best.name?.split(" ").slice(0, 2).map((x) => x[0]).join("")}
           </div>
           <div>
-            <span className="rounded-full bg-amber-300 px-3 py-1 text-xs font-bold text-amber-950">الأفضل على مستوى الشركة</span>
+            <span className="rounded-full bg-amber-300 px-3 py-1 text-xs font-bold text-amber-950">ط§ظ„ط£ظپط¶ظ„ ط¹ظ„ظ‰ ظ…ط³طھظˆظ‰ ط§ظ„ط´ط±ظƒط©</span>
             <h2 className="mt-4 text-3xl font-extrabold">{best.name}</h2>
-            <p className="mt-2 text-red-100/70">{best.job} • {best.branch}</p>
-            <p className="mt-4 text-sm text-red-100/80">سبب الاختيار: أعلى نتيجة تقييم مع الالتزام والانضباط وجودة الأداء.</p>
+            <p className="mt-2 text-red-100/70">{best.job} â€¢ {best.branch}</p>
+            <p className="mt-4 text-sm text-red-100/80">ط³ط¨ط¨ ط§ظ„ط§ط®طھظٹط§ط±: ط£ط¹ظ„ظ‰ ظ†طھظٹط¬ط© طھظ‚ظٹظٹظ… ظ…ط¹ ط§ظ„ط§ظ„طھط²ط§ظ… ظˆط§ظ„ط§ظ†ط¶ط¨ط§ط· ظˆط¬ظˆط¯ط© ط§ظ„ط£ط¯ط§ط،.</p>
           </div>
           <b className="sm:mr-auto text-5xl text-amber-300">{best.total}%</b>
         </div>
       </div>
       <div className="panel p-5">
-        <h3 className="mb-4 text-lg font-extrabold">أفضل موظف في كل فرع</h3>
+        <h3 className="mb-4 text-lg font-extrabold">ط£ظپط¶ظ„ ظ…ظˆط¸ظپ ظپظٹ ظƒظ„ ظپط±ط¹</h3>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {winners.map((x, i) => (
             <div key={`${x.branch}-${x.id}`} className="rounded-2xl border p-4">
@@ -3693,22 +3907,22 @@ function EnhancedTopEmployees({ employees, evaluations }) {
                 <div className="grid h-12 w-12 place-items-center rounded-xl bg-brand-50 font-bold text-brand-700">{i + 1}</div>
                 <div>
                   <b>{x.name}</b>
-                  <p className="text-xs text-slate-500">{x.branch} • {x.job}</p>
+                  <p className="text-xs text-slate-500">{x.branch} â€¢ {x.job}</p>
                 </div>
                 <b className="mr-auto text-xl text-brand-700">{x.total}%</b>
               </div>
               <button onClick={() => printCertificate(x)} className="btn-secondary mt-4 w-full">
-                <Printer size={15} /> طباعة شهادة لهذا الموظف فقط
+                <Printer size={15} /> ط·ط¨ط§ط¹ط© ط´ظ‡ط§ط¯ط© ظ„ظ‡ط°ط§ ط§ظ„ظ…ظˆط¸ظپ ظپظ‚ط·
               </button>
             </div>
           ))}
         </div>
       </div>
       <div className="panel p-5">
-        <h3 className="mb-4 text-lg font-extrabold">ترتيب أفضل 10 موظفين</h3>
+        <h3 className="mb-4 text-lg font-extrabold">طھط±طھظٹط¨ ط£ظپط¶ظ„ 10 ظ…ظˆط¸ظپظٹظ†</h3>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>الترتيب</th><th>الموظف</th><th>الفرع</th><th>الوظيفة</th><th>النتيجة</th></tr></thead>
+            <thead><tr><th>ط§ظ„طھط±طھظٹط¨</th><th>ط§ظ„ظ…ظˆط¸ظپ</th><th>ط§ظ„ظپط±ط¹</th><th>ط§ظ„ظˆط¸ظٹظپط©</th><th>ط§ظ„ظ†طھظٹط¬ط©</th></tr></thead>
             <tbody>
               {ranked.slice(0, 10).map((x, i) => (
                 <tr key={x.id}><td>{i + 1}</td><td className="font-bold">{x.name}</td><td>{x.branch}</td><td>{x.job}</td><td>{x.total}%</td></tr>
@@ -3740,13 +3954,13 @@ function EnhancedPlans({ employees, evaluations, settings, setSettings }) {
         id: `AUTO-${e.id}`,
         employeeId: e.id,
         employee: e,
-        reason: "انخفاض نتيجة التقييم عن 70%",
-        weaknesses: "الدقة وسرعة الإنجاز",
-        plan: "جلسات متابعة أسبوعية وتدريب عملي على نقاط الضعف",
-        owner: "مدير الفرع",
+        reason: "ط§ظ†ط®ظپط§ط¶ ظ†طھظٹط¬ط© ط§ظ„طھظ‚ظٹظٹظ… ط¹ظ† 70%",
+        weaknesses: "ط§ظ„ط¯ظ‚ط© ظˆط³ط±ط¹ط© ط§ظ„ط¥ظ†ط¬ط§ط²",
+        plan: "ط¬ظ„ط³ط§طھ ظ…طھط§ط¨ط¹ط© ط£ط³ط¨ظˆط¹ظٹط© ظˆطھط¯ط±ظٹط¨ ط¹ظ…ظ„ظٹ ط¹ظ„ظ‰ ظ†ظ‚ط§ط· ط§ظ„ط¶ط¹ظپ",
+        owner: "ظ…ط¯ظٹط± ط§ظ„ظپط±ط¹",
         start: "2026-07-01",
         end: "2026-07-31",
-        result: "قيد المتابعة",
+        result: "ظ‚ظٹط¯ ط§ظ„ظ…طھط§ط¨ط¹ط©",
         auto: true,
       })),
   ];
@@ -3762,10 +3976,10 @@ function EnhancedPlans({ employees, evaluations, settings, setSettings }) {
   };
   const deletePlan = (plan) => {
     if (plan.auto) {
-      alert("هذه خطة مقترحة تلقائيًا. أنشئ خطة فعلية أو عدّلها أولًا ثم يمكنك حذفها لاحقًا.");
+      alert("ظ‡ط°ظ‡ ط®ط·ط© ظ…ظ‚طھط±ط­ط© طھظ„ظ‚ط§ط¦ظٹظ‹ط§. ط£ظ†ط´ط¦ ط®ط·ط© ظپط¹ظ„ظٹط© ط£ظˆ ط¹ط¯ظ‘ظ„ظ‡ط§ ط£ظˆظ„ظ‹ط§ ط«ظ… ظٹظ…ظƒظ†ظƒ ط­ط°ظپظ‡ط§ ظ„ط§ط­ظ‚ظ‹ط§.");
       return;
     }
-    if (!confirm("هل تريد حذف خطة التحسين؟")) return;
+    if (!confirm("ظ‡ظ„ طھط±ظٹط¯ ط­ط°ظپ ط®ط·ط© ط§ظ„طھط­ط³ظٹظ†طں")) return;
     setPlans((list) => list.filter((p) => p.id !== plan.id));
   };
   const openPlan = (plan = {}) =>
@@ -3776,20 +3990,20 @@ function EnhancedPlans({ employees, evaluations, settings, setSettings }) {
       reason: plan.reason || "",
       weaknesses: plan.weaknesses || "",
       plan: plan.plan || "",
-      owner: plan.owner || "مدير الفرع",
+      owner: plan.owner || "ظ…ط¯ظٹط± ط§ظ„ظپط±ط¹",
       start: plan.start || "2026-07-01",
       end: plan.end || "2026-07-31",
-      result: plan.result || "قيد المتابعة",
+      result: plan.result || "ظ‚ظٹط¯ ط§ظ„ظ…طھط§ط¨ط¹ط©",
       auto: false,
     });
   return (
     <div className="space-y-5">
       <PageHead
-        title="خطط تحسين الأداء"
-        desc="إضافة وتعديل وحذف خطط تحسين الموظفين الأقل من 70%"
+        title="ط®ط·ط· طھط­ط³ظٹظ† ط§ظ„ط£ط¯ط§ط،"
+        desc="ط¥ط¶ط§ظپط© ظˆطھط¹ط¯ظٹظ„ ظˆط­ط°ظپ ط®ط·ط· طھط­ط³ظٹظ† ط§ظ„ظ…ظˆط¸ظپظٹظ† ط§ظ„ط£ظ‚ظ„ ظ…ظ† 70%"
         action={
           <button onClick={() => openPlan()} className="btn-primary">
-            <Plus size={17} /> خطة تحسين
+            <Plus size={17} /> ط®ط·ط© طھط­ط³ظٹظ†
           </button>
         }
       />
@@ -3800,7 +4014,7 @@ function EnhancedPlans({ employees, evaluations, settings, setSettings }) {
               <div className="grid h-11 w-11 place-items-center rounded-xl bg-red-50 text-red-700"><TrendingUp /></div>
               <div>
                 <b>{p.employee?.name}</b>
-                <p className="text-xs text-slate-500">{p.employee?.job} • {p.employee?.branch}</p>
+                <p className="text-xs text-slate-500">{p.employee?.job} â€¢ {p.employee?.branch}</p>
               </div>
               <div className="mr-auto flex gap-2">
                 <button onClick={() => openPlan(p)} className="btn-secondary !h-9 !px-3"><Pencil size={15} /></button>
@@ -3808,12 +4022,12 @@ function EnhancedPlans({ employees, evaluations, settings, setSettings }) {
               </div>
             </div>
             <div className="my-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-4 text-xs">
-              <Info t="سبب الانخفاض" v={p.reason} />
-              <Info t="المسؤول" v={p.owner} />
-              <Info t="بداية الخطة" v={p.start} />
-              <Info t="نهاية الخطة" v={p.end} />
-              <Info t="نقاط الضعف" v={p.weaknesses} />
-              <Info t="نتيجة المتابعة" v={p.result} />
+              <Info t="ط³ط¨ط¨ ط§ظ„ط§ظ†ط®ظپط§ط¶" v={p.reason} />
+              <Info t="ط§ظ„ظ…ط³ط¤ظˆظ„" v={p.owner} />
+              <Info t="ط¨ط¯ط§ظٹط© ط§ظ„ط®ط·ط©" v={p.start} />
+              <Info t="ظ†ظ‡ط§ظٹط© ط§ظ„ط®ط·ط©" v={p.end} />
+              <Info t="ظ†ظ‚ط§ط· ط§ظ„ط¶ط¹ظپ" v={p.weaknesses} />
+              <Info t="ظ†طھظٹط¬ط© ط§ظ„ظ…طھط§ط¨ط¹ط©" v={p.result} />
             </div>
             <p className="rounded-xl bg-white p-3 text-sm text-slate-600">{p.plan}</p>
           </div>
@@ -3823,22 +4037,22 @@ function EnhancedPlans({ employees, evaluations, settings, setSettings }) {
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
           <div className="panel w-full max-w-3xl p-6">
             <div className="mb-5 flex items-center">
-              <h3 className="text-lg font-extrabold">{dialog.mode === "add" ? "إضافة خطة تحسين" : "تعديل خطة تحسين"}</h3>
+              <h3 className="text-lg font-extrabold">{dialog.mode === "add" ? "ط¥ط¶ط§ظپط© ط®ط·ط© طھط­ط³ظٹظ†" : "طھط¹ط¯ظٹظ„ ط®ط·ط© طھط­ط³ظٹظ†"}</h3>
               <button onClick={() => setDialog(null)} className="mr-auto"><X /></button>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
-              <Label t="الموظف"><select value={dialog.employeeId} onChange={(e) => setDialog({ ...dialog, employeeId: e.target.value })} className="field mt-2">{employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></Label>
-              <Label t="المسؤول عن المتابعة"><input value={dialog.owner} onChange={(e) => setDialog({ ...dialog, owner: e.target.value })} className="field mt-2" /></Label>
-              <Label t="سبب انخفاض الأداء"><input value={dialog.reason} onChange={(e) => setDialog({ ...dialog, reason: e.target.value })} className="field mt-2" /></Label>
-              <Label t="نقاط الضعف"><input value={dialog.weaknesses} onChange={(e) => setDialog({ ...dialog, weaknesses: e.target.value })} className="field mt-2" /></Label>
-              <Label t="تاريخ بداية الخطة"><input type="date" value={dialog.start} onChange={(e) => setDialog({ ...dialog, start: e.target.value })} className="field mt-2" /></Label>
-              <Label t="تاريخ نهاية الخطة"><input type="date" value={dialog.end} onChange={(e) => setDialog({ ...dialog, end: e.target.value })} className="field mt-2" /></Label>
-              <Label t="خطة التحسين"><textarea value={dialog.plan} onChange={(e) => setDialog({ ...dialog, plan: e.target.value })} className="field mt-2 !h-auto py-3" rows="3" /></Label>
-              <Label t="نتيجة المتابعة"><textarea value={dialog.result} onChange={(e) => setDialog({ ...dialog, result: e.target.value })} className="field mt-2 !h-auto py-3" rows="3" /></Label>
+              <Label t="ط§ظ„ظ…ظˆط¸ظپ"><select value={dialog.employeeId} onChange={(e) => setDialog({ ...dialog, employeeId: e.target.value })} className="field mt-2">{employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></Label>
+              <Label t="ط§ظ„ظ…ط³ط¤ظˆظ„ ط¹ظ† ط§ظ„ظ…طھط§ط¨ط¹ط©"><input value={dialog.owner} onChange={(e) => setDialog({ ...dialog, owner: e.target.value })} className="field mt-2" /></Label>
+              <Label t="ط³ط¨ط¨ ط§ظ†ط®ظپط§ط¶ ط§ظ„ط£ط¯ط§ط،"><input value={dialog.reason} onChange={(e) => setDialog({ ...dialog, reason: e.target.value })} className="field mt-2" /></Label>
+              <Label t="ظ†ظ‚ط§ط· ط§ظ„ط¶ط¹ظپ"><input value={dialog.weaknesses} onChange={(e) => setDialog({ ...dialog, weaknesses: e.target.value })} className="field mt-2" /></Label>
+              <Label t="طھط§ط±ظٹط® ط¨ط¯ط§ظٹط© ط§ظ„ط®ط·ط©"><input type="date" value={dialog.start} onChange={(e) => setDialog({ ...dialog, start: e.target.value })} className="field mt-2" /></Label>
+              <Label t="طھط§ط±ظٹط® ظ†ظ‡ط§ظٹط© ط§ظ„ط®ط·ط©"><input type="date" value={dialog.end} onChange={(e) => setDialog({ ...dialog, end: e.target.value })} className="field mt-2" /></Label>
+              <Label t="ط®ط·ط© ط§ظ„طھط­ط³ظٹظ†"><textarea value={dialog.plan} onChange={(e) => setDialog({ ...dialog, plan: e.target.value })} className="field mt-2 !h-auto py-3" rows="3" /></Label>
+              <Label t="ظ†طھظٹط¬ط© ط§ظ„ظ…طھط§ط¨ط¹ط©"><textarea value={dialog.result} onChange={(e) => setDialog({ ...dialog, result: e.target.value })} className="field mt-2 !h-auto py-3" rows="3" /></Label>
             </div>
             <div className="mt-6 flex justify-end gap-2">
-              <button onClick={() => setDialog(null)} className="btn-secondary">إلغاء</button>
-              <button onClick={savePlan} className="btn-primary"><Save size={17} /> حفظ الخطة</button>
+              <button onClick={() => setDialog(null)} className="btn-secondary">ط¥ظ„ط؛ط§ط،</button>
+              <button onClick={savePlan} className="btn-primary"><Save size={17} /> ط­ظپط¸ ط§ظ„ط®ط·ط©</button>
             </div>
           </div>
         </div>
@@ -3849,23 +4063,23 @@ function EnhancedPlans({ employees, evaluations, settings, setSettings }) {
 
 function EnhancedReports({ employees, evaluations }) {
   const reps = [
-    ["التقرير المالي للأداء الشهري", Wallet],
-    ["التقييم الشهري", CalendarCheck],
-    ["التقييم حسب الفرع", Building2],
-    ["التقييم حسب الوظيفة", BriefcaseBusiness],
-    ["تقرير الحوافز", Gift],
-    ["الموظفون الضعفاء", AlertTriangle],
-    ["أفضل الموظفين", Trophy],
-    ["تقرير الانضباط", Clock3],
-    ["تقرير المخالفات", MessageSquareWarning],
-    ["مقارنة الفروع", FileBarChart],
+    ["ط§ظ„طھظ‚ط±ظٹط± ط§ظ„ظ…ط§ظ„ظٹ ظ„ظ„ط£ط¯ط§ط، ط§ظ„ط´ظ‡ط±ظٹ", Wallet],
+    ["ط§ظ„طھظ‚ظٹظٹظ… ط§ظ„ط´ظ‡ط±ظٹ", CalendarCheck],
+    ["ط§ظ„طھظ‚ظٹظٹظ… ط­ط³ط¨ ط§ظ„ظپط±ط¹", Building2],
+    ["ط§ظ„طھظ‚ظٹظٹظ… ط­ط³ط¨ ط§ظ„ظˆط¸ظٹظپط©", BriefcaseBusiness],
+    ["طھظ‚ط±ظٹط± ط§ظ„ط­ظˆط§ظپط²", Gift],
+    ["ط§ظ„ظ…ظˆط¸ظپظˆظ† ط§ظ„ط¶ط¹ظپط§ط،", AlertTriangle],
+    ["ط£ظپط¶ظ„ ط§ظ„ظ…ظˆط¸ظپظٹظ†", Trophy],
+    ["طھظ‚ط±ظٹط± ط§ظ„ط§ظ†ط¶ط¨ط§ط·", Clock3],
+    ["طھظ‚ط±ظٹط± ط§ظ„ظ…ط®ط§ظ„ظپط§طھ", MessageSquareWarning],
+    ["ظ…ظ‚ط§ط±ظ†ط© ط§ظ„ظپط±ظˆط¹", FileBarChart],
   ];
   const [month, setMonth] = useState("2026-06");
   const [branch, setBranch] = useState("all");
   const rowsFor = (title) => {
     const joined = evaluations.map((ev) => ({ ...ev, employee: employees.find((e) => e.id === ev.employeeId) })).filter((x) => x.employee);
     const filtered = joined.filter((x) => (month ? x.month === month : true) && (branch === "all" ? true : x.employee.branch === branch));
-    if (title.includes("المالي"))
+    if (title.includes("ط§ظ„ظ…ط§ظ„ظٹ"))
       return filtered.map((x, i) => ({
         ...x,
         name: x.employee.name,
@@ -3883,9 +4097,9 @@ function EnhancedReports({ employees, evaluations }) {
             1000 * (60 + i * 4),
         ),
       }));
-    if (title === "تقرير الحوافز") return calcIncentivesSafe(employees, filtered);
-    if (title === "الموظفون الضعفاء") return filtered.filter((x) => x.total < 70);
-    if (title === "أفضل الموظفين") return [...filtered].sort((a, b) => effectiveEvaluationTotal(b) - effectiveEvaluationTotal(a)).slice(0, 10);
+    if (title === "طھظ‚ط±ظٹط± ط§ظ„ط­ظˆط§ظپط²") return calcIncentivesSafe(employees, filtered);
+    if (title === "ط§ظ„ظ…ظˆط¸ظپظˆظ† ط§ظ„ط¶ط¹ظپط§ط،") return filtered.filter((x) => x.total < 70);
+    if (title === "ط£ظپط¶ظ„ ط§ظ„ظ…ظˆط¸ظپظٹظ†") return [...filtered].sort((a, b) => effectiveEvaluationTotal(b) - effectiveEvaluationTotal(a)).slice(0, 10);
     return filtered;
   };
   const printableRows = (rows) =>
@@ -3899,26 +4113,26 @@ function EnhancedReports({ employees, evaluations }) {
     const rows = rowsFor(title);
     printDocument(
       title,
-      `<h1>${title}</h1><p>الشهر: ${month} - الفرع: ${branch === "all" ? "جميع الفروع" : branch}</p><table><thead><tr><th>#</th><th>الموظف</th><th>الفرع</th><th>الوظيفة</th><th>الشهر</th><th>القيمة/النتيجة</th></tr></thead><tbody>${printableRows(rows)}</tbody></table>`,
+      `<h1>${title}</h1><p>ط§ظ„ط´ظ‡ط±: ${month} - ط§ظ„ظپط±ط¹: ${branch === "all" ? "ط¬ظ…ظٹط¹ ط§ظ„ظپط±ظˆط¹" : branch}</p><table><thead><tr><th>#</th><th>ط§ظ„ظ…ظˆط¸ظپ</th><th>ط§ظ„ظپط±ط¹</th><th>ط§ظ„ظˆط¸ظٹظپط©</th><th>ط§ظ„ط´ظ‡ط±</th><th>ط§ظ„ظ‚ظٹظ…ط©/ط§ظ„ظ†طھظٹط¬ط©</th></tr></thead><tbody>${printableRows(rows)}</tbody></table>`,
     );
   };
   return (
     <div className="space-y-5">
-      <PageHead title="مركز التقارير" desc="طباعة أو تصدير التقرير المحدد فقط" />
+      <PageHead title="ظ…ط±ظƒط² ط§ظ„طھظ‚ط§ط±ظٹط±" desc="ط·ط¨ط§ط¹ط© ط£ظˆ طھطµط¯ظٹط± ط§ظ„طھظ‚ط±ظٹط± ط§ظ„ظ…ط­ط¯ط¯ ظپظ‚ط·" />
       <div className="panel flex flex-wrap gap-3 p-4">
         <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="field max-w-[180px]" />
         <select value={branch} onChange={(e) => setBranch(e.target.value)} className="field max-w-[190px]">
-          <option value="all">جميع الفروع</option>
+          <option value="all">ط¬ظ…ظٹط¹ ط§ظ„ظپط±ظˆط¹</option>
           {branches.map((x) => <option key={x}>{x}</option>)}
         </select>
-        <span className="rounded-xl bg-blue-50 px-4 py-3 text-xs font-bold text-blue-700">كل زر PDF يطبع التقرير الخاص به فقط</span>
+        <span className="rounded-xl bg-blue-50 px-4 py-3 text-xs font-bold text-blue-700">ظƒظ„ ط²ط± PDF ظٹط·ط¨ط¹ ط§ظ„طھظ‚ط±ظٹط± ط§ظ„ط®ط§طµ ط¨ظ‡ ظپظ‚ط·</span>
       </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {reps.map(([t, I]) => (
           <div key={t} className="panel p-5">
             <div className="grid h-11 w-11 place-items-center rounded-xl bg-slate-100 text-brand-700"><I /></div>
             <h3 className="mt-4 font-extrabold">{t}</h3>
-            <p className="mt-1 text-xs text-slate-500">تقرير تفصيلي جاهز للتصدير والطباعة حسب الفلاتر المختارة</p>
+            <p className="mt-1 text-xs text-slate-500">طھظ‚ط±ظٹط± طھظپطµظٹظ„ظٹ ط¬ط§ظ‡ط² ظ„ظ„طھطµط¯ظٹط± ظˆط§ظ„ط·ط¨ط§ط¹ط© ط­ط³ط¨ ط§ظ„ظپظ„ط§طھط± ط§ظ„ظ…ط®طھط§ط±ط©</p>
             <div className="mt-5 flex gap-2">
               <button onClick={() => exportExcel(rowsFor(t), t)} className="btn-secondary flex-1"><FileSpreadsheet size={15} /> Excel</button>
               <button onClick={() => printReport(t)} className="btn-secondary flex-1"><Printer size={15} /> PDF</button>
@@ -3934,14 +4148,14 @@ function EnhancedReports({ employees, evaluations }) {
 
 function EnhancedEmployees({ employees, setEmployees, setEvaluations }) {
   const [q, setQ] = useState("");
-  const [branch, setBranch] = useState("الكل");
+  const [branch, setBranch] = useState("ط§ظ„ظƒظ„");
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [selected, setSelected] = useState([]);
   const filtered = employees.filter(
     (e) =>
       (e.name.includes(q) || e.id.toLowerCase().includes(q.toLowerCase())) &&
-      (branch === "الكل" || e.branch === branch),
+      (branch === "ط§ظ„ظƒظ„" || e.branch === branch),
   );
   const toggle = (id) =>
     setSelected((list) =>
@@ -3949,7 +4163,7 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations }) {
     );
   const deleteSelected = () => {
     if (!selected.length) return;
-    if (!confirm(`هل تريد حذف ${selected.length} موظف/موظفين من السجل؟`)) return;
+    if (!confirm(`ظ‡ظ„ طھط±ظٹط¯ ط­ط°ظپ ${selected.length} ظ…ظˆط¸ظپ/ظ…ظˆط¸ظپظٹظ† ظ…ظ† ط§ظ„ط³ط¬ظ„طں`)) return;
     setEmployees((list) => list.filter((e) => !selected.includes(e.id)));
     setEvaluations?.((list) => list.filter((e) => !selected.includes(e.employeeId)));
     setSelected([]);
@@ -3957,8 +4171,8 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations }) {
   return (
     <div className="space-y-5">
       <PageHead
-        title="سجل الموظفين"
-        desc={`إدارة بيانات ${employees.length} موظف مع إمكانية الحذف المتعدد`}
+        title="ط³ط¬ظ„ ط§ظ„ظ…ظˆط¸ظپظٹظ†"
+        desc={`ط¥ط¯ط§ط±ط© ط¨ظٹط§ظ†ط§طھ ${employees.length} ظ…ظˆط¸ظپ ظ…ط¹ ط¥ظ…ظƒط§ظ†ظٹط© ط§ظ„ط­ط°ظپ ط§ظ„ظ…طھط¹ط¯ط¯`}
         action={
           <div className="flex flex-wrap gap-2">
             <button
@@ -3966,7 +4180,7 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations }) {
               onClick={deleteSelected}
               className="inline-flex h-10 items-center gap-2 rounded-xl border border-red-200 bg-white px-4 text-sm font-bold text-red-600 hover:bg-red-50 disabled:opacity-40"
             >
-              <Trash2 size={17} /> حذف المحدد ({selected.length})
+              <Trash2 size={17} /> ط­ط°ظپ ط§ظ„ظ…ط­ط¯ط¯ ({selected.length})
             </button>
             <button
               onClick={() => {
@@ -3975,7 +4189,7 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations }) {
               }}
               className="btn-primary"
             >
-              <Plus size={18} /> إضافة موظف
+              <Plus size={18} /> ط¥ط¶ط§ظپط© ظ…ظˆط¸ظپ
             </button>
           </div>
         }
@@ -3988,18 +4202,18 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations }) {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               className="w-full outline-none"
-              placeholder="ابحث بالاسم أو الرقم..."
+              placeholder="ط§ط¨ط­ط« ط¨ط§ظ„ط§ط³ظ… ط£ظˆ ط§ظ„ط±ظ‚ظ…..."
             />
           </label>
           <select value={branch} onChange={(e) => setBranch(e.target.value)} className="field max-w-[190px]">
-            <option>الكل</option>
+            <option>ط§ظ„ظƒظ„</option>
             {branches.map((x) => <option key={x}>{x}</option>)}
           </select>
-          <button onClick={() => exportExcel(filtered, "الموظفون")} className="btn-secondary">
-            <FileSpreadsheet size={17} /> تصدير Excel
+          <button onClick={() => exportExcel(filtered, "ط§ظ„ظ…ظˆط¸ظپظˆظ†")} className="btn-secondary">
+            <FileSpreadsheet size={17} /> طھطµط¯ظٹط± Excel
           </button>
           <label className="btn-secondary cursor-pointer">
-            <Upload size={17} /> استيراد
+            <Upload size={17} /> ط§ط³طھظٹط±ط§ط¯
             <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => importEmployees(e, setEmployees)} />
           </label>
         </div>
@@ -4016,13 +4230,13 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations }) {
                     onChange={(e) => setSelected(e.target.checked ? filtered.map((x) => x.id) : [])}
                   />
                 </th>
-                <th>الموظف</th>
-                <th>الفرع</th>
-                <th>الوظيفة</th>
-                <th>تاريخ التعيين</th>
-                <th>الراتب</th>
-                <th>الحالة</th>
-                <th>المدير المباشر</th>
+                <th>ط§ظ„ظ…ظˆط¸ظپ</th>
+                <th>ط§ظ„ظپط±ط¹</th>
+                <th>ط§ظ„ظˆط¸ظٹظپط©</th>
+                <th>طھط§ط±ظٹط® ط§ظ„طھط¹ظٹظٹظ†</th>
+                <th>ط§ظ„ط±ط§طھط¨</th>
+                <th>ط§ظ„ط­ط§ظ„ط©</th>
+                <th>ط§ظ„ظ…ط¯ظٹط± ط§ظ„ظ…ط¨ط§ط´ط±</th>
                 <th></th>
               </tr>
             </thead>
@@ -4037,7 +4251,7 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations }) {
                       </div>
                       <div>
                         <b>{e.name}</b>
-                        <p className="text-xs text-slate-400">{e.id} • {e.phone}</p>
+                        <p className="text-xs text-slate-400">{e.id} â€¢ {e.phone}</p>
                       </div>
                     </div>
                   </td>
@@ -4051,7 +4265,7 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations }) {
                     <button onClick={() => { setEditing(e); setModal(true); }} className="p-2 text-blue-600"><Pencil size={16} /></button>
                     <button
                       onClick={() => {
-                        if (!confirm(`هل تريد حذف الموظف ${e.name}؟`)) return;
+                        if (!confirm(`ظ‡ظ„ طھط±ظٹط¯ ط­ط°ظپ ط§ظ„ظ…ظˆط¸ظپ ${e.name}طں`)) return;
                         setEmployees((list) => list.filter((item) => item.id !== e.id));
                         setEvaluations?.((list) => list.filter((item) => item.employeeId !== e.id));
                         setSelected((list) => list.filter((id) => id !== e.id));
@@ -4072,42 +4286,42 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations }) {
 	  );
 	}
 	
-const guaranteeStatuses = ["سارية", "منتهية", "ناقصة", "موقوفة"];
-const overtimeStatuses = ["مكلف", "تم الإرسال", "معتذر", "منفذ", "ملغي"];
+const guaranteeStatuses = ["ط³ط§ط±ظٹط©", "ظ…ظ†طھظ‡ظٹط©", "ظ†ط§ظ‚طµط©", "ظ…ظˆظ‚ظˆظپط©"];
+const overtimeStatuses = ["ظ…ظƒظ„ظپ", "طھظ… ط§ظ„ط¥ط±ط³ط§ظ„", "ظ…ط¹طھط°ط±", "ظ…ظ†ظپط°", "ظ…ظ„ط؛ظٹ"];
 const arabicDayName = (date) =>
   date
     ? new Intl.DateTimeFormat("ar-SA", { weekday: "long" }).format(new Date(date))
     : "";
 const normalizeWhatsAppPhone = (phone) => String(phone || "").replace(/[^\d]/g, "").replace(/^0/, "966");
 const makeOvertimeMessage = (assignment, employee) =>
-  `الأخ/ الموظف: ${employee.employee_name}
+  `ط§ظ„ط£ط®/ ط§ظ„ظ…ظˆط¸ظپ: ${employee.employee_name}
 
-تحية طيبة،
+طھط­ظٹط© ط·ظٹط¨ط©طŒ
 
-نحيطكم علماً بأنه تم تكليفكم بالعمل الإضافي يوم ${arabicDayName(assignment.assignment_date)} الموافق ${assignment.assignment_date}م، وذلك في ${assignment.location} من الساعة ${assignment.start_time} حتى الساعة ${assignment.end_time}.
+ظ†ط­ظٹط·ظƒظ… ط¹ظ„ظ…ط§ظ‹ ط¨ط£ظ†ظ‡ طھظ… طھظƒظ„ظٹظپظƒظ… ط¨ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ ظٹظˆظ… ${arabicDayName(assignment.assignment_date)} ط§ظ„ظ…ظˆط§ظپظ‚ ${assignment.assignment_date}ظ…طŒ ظˆط°ظ„ظƒ ظپظٹ ${assignment.location} ظ…ظ† ط§ظ„ط³ط§ط¹ط© ${assignment.start_time} ط­طھظ‰ ط§ظ„ط³ط§ط¹ط© ${assignment.end_time}.
 
-- يرجى الالتزام بإثبات الحضور والانصراف عبر بصمة الجوال 📌.
-- يرجى كذلك رفع العمل الإضافي في النظام حسب الإجراء المعتمد 📌.
+- ظٹط±ط¬ظ‰ ط§ظ„ط§ظ„طھط²ط§ظ… ط¨ط¥ط«ط¨ط§طھ ط§ظ„ط­ط¶ظˆط± ظˆط§ظ„ط§ظ†طµط±ط§ظپ ط¹ط¨ط± ط¨طµظ…ط© ط§ظ„ط¬ظˆط§ظ„ ًں“Œ.
+- ظٹط±ط¬ظ‰ ظƒط°ظ„ظƒ ط±ظپط¹ ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ ظپظٹ ط§ظ„ظ†ط¸ط§ظ… ط­ط³ط¨ ط§ظ„ط¥ط¬ط±ط§ط، ط§ظ„ظ…ط¹طھظ…ط¯ ًں“Œ.
 
-شاكرين لكم تعاونكم والتزامكم.
-إدارة الموارد البشرية`;
+ط´ط§ظƒط±ظٹظ† ظ„ظƒظ… طھط¹ط§ظˆظ†ظƒظ… ظˆط§ظ„طھط²ط§ظ…ظƒظ….
+ط¥ط¯ط§ط±ط© ط§ظ„ظ…ظˆط§ط±ط¯ ط§ظ„ط¨ط´ط±ظٹط©`;
 const tableColumnsGuarantees = [
-  { key: "employee_name", label: "الموظف" },
-  { key: "employee_id", label: "رقم الموظف" },
-  { key: "branch", label: "الفرع" },
-  { key: "guarantor_name", label: "اسم الضامن" },
-  { key: "commercial_register_number", label: "السجل التجاري" },
-  { key: "guarantee_date", label: "تاريخ الضمانة" },
-  { key: "guarantee_status", label: "الحالة" },
+  { key: "employee_name", label: "ط§ظ„ظ…ظˆط¸ظپ" },
+  { key: "employee_id", label: "ط±ظ‚ظ… ط§ظ„ظ…ظˆط¸ظپ" },
+  { key: "branch", label: "ط§ظ„ظپط±ط¹" },
+  { key: "guarantor_name", label: "ط§ط³ظ… ط§ظ„ط¶ط§ظ…ظ†" },
+  { key: "commercial_register_number", label: "ط§ظ„ط³ط¬ظ„ ط§ظ„طھط¬ط§ط±ظٹ" },
+  { key: "guarantee_date", label: "طھط§ط±ظٹط® ط§ظ„ط¶ظ…ط§ظ†ط©" },
+  { key: "guarantee_status", label: "ط§ظ„ط­ط§ظ„ط©" },
 ];
 const tableColumnsOvertime = [
-  { key: "assignment_date", label: "التاريخ" },
-  { key: "employee_name", label: "الموظف" },
-  { key: "branch", label: "الفرع" },
-  { key: "job", label: "الوظيفة" },
-  { key: "start_time", label: "من" },
-  { key: "end_time", label: "إلى" },
-  { key: "status", label: "الحالة" },
+  { key: "assignment_date", label: "ط§ظ„طھط§ط±ظٹط®" },
+  { key: "employee_name", label: "ط§ظ„ظ…ظˆط¸ظپ" },
+  { key: "branch", label: "ط§ظ„ظپط±ط¹" },
+  { key: "job", label: "ط§ظ„ظˆط¸ظٹظپط©" },
+  { key: "start_time", label: "ظ…ظ†" },
+  { key: "end_time", label: "ط¥ظ„ظ‰" },
+  { key: "status", label: "ط§ظ„ط­ط§ظ„ط©" },
 ];
 
 function EmployeeGuaranteesPage({ employees, currentUser, can }) {
@@ -4147,16 +4361,16 @@ function EmployeeGuaranteesPage({ employees, currentUser, can }) {
     const monthOk = !filters.month || String(g.guarantee_date || "").startsWith(filters.month);
     return textOk && branchOk && statusOk && monthOk;
   });
-  const activeEmployeeIds = new Set(items.filter((g) => g.guarantee_status === "سارية").map((g) => g.employee_id));
+  const activeEmployeeIds = new Set(items.filter((g) => g.guarantee_status === "ط³ط§ط±ظٹط©").map((g) => g.employee_id));
   const cards = [
-    ["إجمالي الضمانات", items.length, ShieldCheck],
-    ["الضمانات السارية", items.filter((g) => g.guarantee_status === "سارية").length, BadgeCheck],
-    ["الضمانات المنتهية", items.filter((g) => g.guarantee_status === "منتهية").length, AlertTriangle],
-    ["الضمانات الناقصة", items.filter((g) => g.guarantee_status === "ناقصة").length, FileBarChart],
-    ["الموظفون بدون ضمانة", employees.filter((e) => !activeEmployeeIds.has(e.id)).length, Users],
+    ["ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ط¶ظ…ط§ظ†ط§طھ", items.length, ShieldCheck],
+    ["ط§ظ„ط¶ظ…ط§ظ†ط§طھ ط§ظ„ط³ط§ط±ظٹط©", items.filter((g) => g.guarantee_status === "ط³ط§ط±ظٹط©").length, BadgeCheck],
+    ["ط§ظ„ط¶ظ…ط§ظ†ط§طھ ط§ظ„ظ…ظ†طھظ‡ظٹط©", items.filter((g) => g.guarantee_status === "ظ…ظ†طھظ‡ظٹط©").length, AlertTriangle],
+    ["ط§ظ„ط¶ظ…ط§ظ†ط§طھ ط§ظ„ظ†ط§ظ‚طµط©", items.filter((g) => g.guarantee_status === "ظ†ط§ظ‚طµط©").length, FileBarChart],
+    ["ط§ظ„ظ…ظˆط¸ظپظˆظ† ط¨ط¯ظˆظ† ط¶ظ…ط§ظ†ط©", employees.filter((e) => !activeEmployeeIds.has(e.id)).length, Users],
   ];
   const openAdd = () => {
-    if (!canCreate) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!canCreate) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
     setDialog({
       guarantee_id: `G-${Date.now()}`,
       employee_id: "",
@@ -4171,7 +4385,7 @@ function EmployeeGuaranteesPage({ employees, currentUser, can }) {
       commercial_register_number: "",
       guarantee_date: new Date().toISOString().slice(0, 10),
       guarantee_expiry_date: "",
-      guarantee_status: "سارية",
+      guarantee_status: "ط³ط§ط±ظٹط©",
       notes: "",
     });
   };
@@ -4187,38 +4401,38 @@ function EmployeeGuaranteesPage({ employees, currentUser, can }) {
   };
   const save = async (event) => {
     event.preventDefault();
-    if (!canEdit && items.some((g) => g.guarantee_id === dialog.guarantee_id)) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
-    if (!canCreate && !items.some((g) => g.guarantee_id === dialog.guarantee_id)) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!canEdit && items.some((g) => g.guarantee_id === dialog.guarantee_id)) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
+    if (!canCreate && !items.some((g) => g.guarantee_id === dialog.guarantee_id)) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
     const required = [
-      ["employee_id", "الموظف"],
-      ["guarantor_name", "اسم الضامن"],
-      ["guarantor_id_number", "رقم هوية الضامن"],
-      ["commercial_register_number", "رقم السجل التجاري"],
-      ["guarantee_date", "تاريخ الضمانة"],
+      ["employee_id", "ط§ظ„ظ…ظˆط¸ظپ"],
+      ["guarantor_name", "ط§ط³ظ… ط§ظ„ط¶ط§ظ…ظ†"],
+      ["guarantor_id_number", "ط±ظ‚ظ… ظ‡ظˆظٹط© ط§ظ„ط¶ط§ظ…ظ†"],
+      ["commercial_register_number", "ط±ظ‚ظ… ط§ظ„ط³ط¬ظ„ ط§ظ„طھط¬ط§ط±ظٹ"],
+      ["guarantee_date", "طھط§ط±ظٹط® ط§ظ„ط¶ظ…ط§ظ†ط©"],
     ].filter(([key]) => !dialog[key]);
-    if (required.length) return alert(`يرجى إدخال الحقول المطلوبة: ${required.map((x) => x[1]).join("، ")}`);
+    if (required.length) return alert(`ظٹط±ط¬ظ‰ ط¥ط¯ط®ط§ظ„ ط§ظ„ط­ظ‚ظˆظ„ ط§ظ„ظ…ط·ظ„ظˆط¨ط©: ${required.map((x) => x[1]).join("طŒ ")}`);
     const duplicateGuarantor = items.find(
       (g) =>
         g.guarantee_id !== dialog.guarantee_id &&
-        g.guarantee_status === "سارية" &&
+        g.guarantee_status === "ط³ط§ط±ظٹط©" &&
         g.guarantor_id_number === dialog.guarantor_id_number &&
         g.employee_id !== dialog.employee_id,
     );
-    if (duplicateGuarantor) return alert("لا يمكن استخدام نفس رقم هوية الضامن لأكثر من موظف نشط.");
+    if (duplicateGuarantor) return alert("ظ„ط§ ظٹظ…ظƒظ† ط§ط³طھط®ط¯ط§ظ… ظ†ظپط³ ط±ظ‚ظ… ظ‡ظˆظٹط© ط§ظ„ط¶ط§ظ…ظ† ظ„ط£ظƒط«ط± ظ…ظ† ظ…ظˆط¸ظپ ظ†ط´ط·.");
     const duplicateRegister = items.find(
       (g) =>
         g.guarantee_id !== dialog.guarantee_id &&
-        g.guarantee_status === "سارية" &&
+        g.guarantee_status === "ط³ط§ط±ظٹط©" &&
         g.commercial_register_number === dialog.commercial_register_number &&
         g.employee_id !== dialog.employee_id,
     );
-    if (duplicateRegister && !confirm("رقم السجل التجاري مستخدم لموظف نشط آخر. هل تريد المتابعة؟")) return;
+    if (duplicateRegister && !confirm("ط±ظ‚ظ… ط§ظ„ط³ط¬ظ„ ط§ظ„طھط¬ط§ط±ظٹ ظ…ط³طھط®ط¯ظ… ظ„ظ…ظˆط¸ظپ ظ†ط´ط· ط¢ط®ط±. ظ‡ظ„ طھط±ظٹط¯ ط§ظ„ظ…طھط§ط¨ط¹ط©طں")) return;
     try {
       const saved = await guaranteesService.upsert(dialog);
       auditService.log({
         user_id: currentUser?.user_id || currentUser?.username,
         user_name: currentUser?.username || currentUser?.name,
-        action: items.some((g) => g.guarantee_id === dialog.guarantee_id) ? "تعديل ضمانة" : "إضافة ضمانة",
+        action: items.some((g) => g.guarantee_id === dialog.guarantee_id) ? "طھط¹ط¯ظٹظ„ ط¶ظ…ط§ظ†ط©" : "ط¥ط¶ط§ظپط© ط¶ظ…ط§ظ†ط©",
         module_name: "employee_guarantees",
         record_id: saved.guarantee_id,
         new_data: saved,
@@ -4233,8 +4447,8 @@ function EmployeeGuaranteesPage({ employees, currentUser, can }) {
     }
   };
   const remove = async (id) => {
-    if (!canDelete) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
-    if (!confirm("هل تريد حذف الضمانة؟")) return;
+    if (!canDelete) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
+    if (!confirm("ظ‡ظ„ طھط±ظٹط¯ ط­ط°ظپ ط§ظ„ط¶ظ…ط§ظ†ط©طں")) return;
     try {
       await guaranteesService.remove(id);
       setItems((list) => list.filter((g) => g.guarantee_id !== id));
@@ -4245,52 +4459,52 @@ function EmployeeGuaranteesPage({ employees, currentUser, can }) {
   const exportRows = reportRowsForExport(filtered, tableColumnsGuarantees);
   return (
     <div className="space-y-5">
-      <PageHead title="ضمانات الموظفين" desc="إدارة الضمانات التجارية للموظفين ومتابعة حالتها" action={<button onClick={openAdd} className="btn-primary"><Plus size={18} /> إضافة ضمانة</button>} />
+      <PageHead title="ط¶ظ…ط§ظ†ط§طھ ط§ظ„ظ…ظˆط¸ظپظٹظ†" desc="ط¥ط¯ط§ط±ط© ط§ظ„ط¶ظ…ط§ظ†ط§طھ ط§ظ„طھط¬ط§ط±ظٹط© ظ„ظ„ظ…ظˆط¸ظپظٹظ† ظˆظ…طھط§ط¨ط¹ط© ط­ط§ظ„طھظ‡ط§" action={<button onClick={openAdd} className="btn-primary"><Plus size={18} /> ط¥ط¶ط§ظپط© ط¶ظ…ط§ظ†ط©</button>} />
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">{cards.map(([label, value, I]) => <Mini key={label} label={label} value={value} I={I} />)}</div>
       <div className="panel flex flex-wrap gap-3 p-4">
-        <input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="بحث بالموظف أو الرقم أو الضامن..." />
-        <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branchOptions.map((b) => <option key={b}>{b}</option>)}</select>
-        <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[170px]"><option value="all">كل الحالات</option>{guaranteeStatuses.map((s) => <option key={s}>{s}</option>)}</select>
+        <input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="ط¨ط­ط« ط¨ط§ظ„ظ…ظˆط¸ظپ ط£ظˆ ط§ظ„ط±ظ‚ظ… ط£ظˆ ط§ظ„ط¶ط§ظ…ظ†..." />
+        <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">ظƒظ„ ط§ظ„ظپط±ظˆط¹</option>{branchOptions.map((b) => <option key={b}>{b}</option>)}</select>
+        <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[170px]"><option value="all">ظƒظ„ ط§ظ„ط­ط§ظ„ط§طھ</option>{guaranteeStatuses.map((s) => <option key={s}>{s}</option>)}</select>
         <input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field max-w-[170px]" />
-        <button onClick={() => exportExcel(exportRows, "تقرير ضمانات الموظفين")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button>
-        <button onClick={() => printDocument("تقرير ضمانات الموظفين", rowsToReportHtml("تقرير ضمانات الموظفين", filtered, tableColumnsGuarantees))} className="btn-secondary"><Printer size={17} /> PDF</button>
-        <button onClick={() => exportDocx("تقرير ضمانات الموظفين", exportRows)} className="btn-secondary"><Download size={17} /> Word</button>
+        <button onClick={() => exportExcel(exportRows, "طھظ‚ط±ظٹط± ط¶ظ…ط§ظ†ط§طھ ط§ظ„ظ…ظˆط¸ظپظٹظ†")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button>
+        <button onClick={() => printDocument("طھظ‚ط±ظٹط± ط¶ظ…ط§ظ†ط§طھ ط§ظ„ظ…ظˆط¸ظپظٹظ†", rowsToReportHtml("طھظ‚ط±ظٹط± ط¶ظ…ط§ظ†ط§طھ ط§ظ„ظ…ظˆط¸ظپظٹظ†", filtered, tableColumnsGuarantees))} className="btn-secondary"><Printer size={17} /> PDF</button>
+        <button onClick={() => exportDocx("طھظ‚ط±ظٹط± ط¶ظ…ط§ظ†ط§طھ ط§ظ„ظ…ظˆط¸ظپظٹظ†", exportRows)} className="btn-secondary"><Download size={17} /> Word</button>
       </div>
       <div className="panel p-4">
-        {loading ? <LoadingScreen message="جاري تحميل الضمانات..." /> : (
+        {loading ? <LoadingScreen message="ط¬ط§ط±ظٹ طھط­ظ…ظٹظ„ ط§ظ„ط¶ظ…ط§ظ†ط§طھ..." /> : (
           <div className="table-wrap"><table><thead><tr>{tableColumnsGuarantees.map((c) => <th key={c.key}>{c.label}</th>)}<th></th></tr></thead><tbody>{filtered.map((g) => <tr key={g.guarantee_id}><td>{g.employee_name}</td><td>{g.employee_id}</td><td>{g.branch}</td><td>{g.guarantor_name}</td><td>{g.commercial_register_number}</td><td>{g.guarantee_date}</td><td><Status>{g.guarantee_status}</Status></td><td><button onClick={() => setViewing(g)} className="p-2 text-slate-600"><Eye size={16} /></button><button onClick={() => setDialog(g)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => remove(g.guarantee_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>
         )}
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        <ReportBox title="تقرير حسب الفرع" rows={Object.entries(groupCount(filtered, "branch"))} />
-        <ReportBox title="تقرير حسب الحالة" rows={Object.entries(groupCount(filtered, "guarantee_status"))} />
-        <ReportBox title="الموظفون بدون ضمانة سارية" rows={employees.filter((e) => !activeEmployeeIds.has(e.id)).map((e) => [e.name, e.branch])} />
-        <ReportBox title="الضامنون المستخدمون أكثر من مرة" rows={Object.entries(groupCount(items, "guarantor_id_number")).filter(([, n]) => n > 1)} />
+        <ReportBox title="طھظ‚ط±ظٹط± ط­ط³ط¨ ط§ظ„ظپط±ط¹" rows={Object.entries(groupCount(filtered, "branch"))} />
+        <ReportBox title="طھظ‚ط±ظٹط± ط­ط³ط¨ ط§ظ„ط­ط§ظ„ط©" rows={Object.entries(groupCount(filtered, "guarantee_status"))} />
+        <ReportBox title="ط§ظ„ظ…ظˆط¸ظپظˆظ† ط¨ط¯ظˆظ† ط¶ظ…ط§ظ†ط© ط³ط§ط±ظٹط©" rows={employees.filter((e) => !activeEmployeeIds.has(e.id)).map((e) => [e.name, e.branch])} />
+        <ReportBox title="ط§ظ„ط¶ط§ظ…ظ†ظˆظ† ط§ظ„ظ…ط³طھط®ط¯ظ…ظˆظ† ط£ظƒط«ط± ظ…ظ† ظ…ط±ط©" rows={Object.entries(groupCount(items, "guarantor_id_number")).filter(([, n]) => n > 1)} />
       </div>
       {dialog && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
           <form onSubmit={save} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6">
-            <div className="mb-5 flex"><h3 className="text-xl font-extrabold">{items.some((g) => g.guarantee_id === dialog.guarantee_id) ? "تعديل ضمانة" : "إضافة ضمانة"}</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div>
+            <div className="mb-5 flex"><h3 className="text-xl font-extrabold">{items.some((g) => g.guarantee_id === dialog.guarantee_id) ? "طھط¹ط¯ظٹظ„ ط¶ظ…ط§ظ†ط©" : "ط¥ط¶ط§ظپط© ط¶ظ…ط§ظ†ط©"}</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div>
             <div className="grid gap-4 md:grid-cols-3">
-              <Label t="الموظف"><select required value={dialog.employee_id} onChange={(e) => selectEmployee(e.target.value)} className="field mt-2"><option value="">اختر الموظف</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.name} - {e.id}</option>)}</select></Label>
-              {["employee_name", "branch", "job"].map((k) => <Label key={k} t={{ employee_name: "اسم الموظف", branch: "الفرع", job: "الوظيفة" }[k]}><input readOnly value={dialog[k]} className="field mt-2 bg-slate-50" /></Label>)}
-              <Label t="اسم الضامن"><input required value={dialog.guarantor_name} onChange={(e) => setDialog({ ...dialog, guarantor_name: e.target.value })} className="field mt-2" /></Label>
-              <Label t="رقم هوية الضامن"><input required value={dialog.guarantor_id_number} onChange={(e) => setDialog({ ...dialog, guarantor_id_number: e.target.value })} className="field mt-2" /></Label>
-              <Label t="هاتف الضامن"><input value={dialog.guarantor_phone} onChange={(e) => setDialog({ ...dialog, guarantor_phone: e.target.value })} className="field mt-2" /></Label>
-              <Label t="اسم المحل التجاري"><input value={dialog.commercial_shop_name} onChange={(e) => setDialog({ ...dialog, commercial_shop_name: e.target.value })} className="field mt-2" /></Label>
-              <Label t="موقع المحل التجاري"><input value={dialog.commercial_shop_location} onChange={(e) => setDialog({ ...dialog, commercial_shop_location: e.target.value })} className="field mt-2" /></Label>
-              <Label t="رقم السجل التجاري"><input required value={dialog.commercial_register_number} onChange={(e) => setDialog({ ...dialog, commercial_register_number: e.target.value })} className="field mt-2" /></Label>
-              <Label t="تاريخ الضمانة"><input required type="date" value={dialog.guarantee_date} onChange={(e) => setDialog({ ...dialog, guarantee_date: e.target.value })} className="field mt-2" /></Label>
-              <Label t="تاريخ الانتهاء"><input type="date" value={dialog.guarantee_expiry_date} onChange={(e) => setDialog({ ...dialog, guarantee_expiry_date: e.target.value })} className="field mt-2" /></Label>
-              <Label t="الحالة"><select value={dialog.guarantee_status} onChange={(e) => setDialog({ ...dialog, guarantee_status: e.target.value })} className="field mt-2">{guaranteeStatuses.map((s) => <option key={s}>{s}</option>)}</select></Label>
-              <Label t="ملاحظات"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" rows="3" /></Label>
+              <Label t="ط§ظ„ظ…ظˆط¸ظپ"><select required value={dialog.employee_id} onChange={(e) => selectEmployee(e.target.value)} className="field mt-2"><option value="">ط§ط®طھط± ط§ظ„ظ…ظˆط¸ظپ</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.name} - {e.id}</option>)}</select></Label>
+              {["employee_name", "branch", "job"].map((k) => <Label key={k} t={{ employee_name: "ط§ط³ظ… ط§ظ„ظ…ظˆط¸ظپ", branch: "ط§ظ„ظپط±ط¹", job: "ط§ظ„ظˆط¸ظٹظپط©" }[k]}><input readOnly value={dialog[k]} className="field mt-2 bg-slate-50" /></Label>)}
+              <Label t="ط§ط³ظ… ط§ظ„ط¶ط§ظ…ظ†"><input required value={dialog.guarantor_name} onChange={(e) => setDialog({ ...dialog, guarantor_name: e.target.value })} className="field mt-2" /></Label>
+              <Label t="ط±ظ‚ظ… ظ‡ظˆظٹط© ط§ظ„ط¶ط§ظ…ظ†"><input required value={dialog.guarantor_id_number} onChange={(e) => setDialog({ ...dialog, guarantor_id_number: e.target.value })} className="field mt-2" /></Label>
+              <Label t="ظ‡ط§طھظپ ط§ظ„ط¶ط§ظ…ظ†"><input value={dialog.guarantor_phone} onChange={(e) => setDialog({ ...dialog, guarantor_phone: e.target.value })} className="field mt-2" /></Label>
+              <Label t="ط§ط³ظ… ط§ظ„ظ…ط­ظ„ ط§ظ„طھط¬ط§ط±ظٹ"><input value={dialog.commercial_shop_name} onChange={(e) => setDialog({ ...dialog, commercial_shop_name: e.target.value })} className="field mt-2" /></Label>
+              <Label t="ظ…ظˆظ‚ط¹ ط§ظ„ظ…ط­ظ„ ط§ظ„طھط¬ط§ط±ظٹ"><input value={dialog.commercial_shop_location} onChange={(e) => setDialog({ ...dialog, commercial_shop_location: e.target.value })} className="field mt-2" /></Label>
+              <Label t="ط±ظ‚ظ… ط§ظ„ط³ط¬ظ„ ط§ظ„طھط¬ط§ط±ظٹ"><input required value={dialog.commercial_register_number} onChange={(e) => setDialog({ ...dialog, commercial_register_number: e.target.value })} className="field mt-2" /></Label>
+              <Label t="طھط§ط±ظٹط® ط§ظ„ط¶ظ…ط§ظ†ط©"><input required type="date" value={dialog.guarantee_date} onChange={(e) => setDialog({ ...dialog, guarantee_date: e.target.value })} className="field mt-2" /></Label>
+              <Label t="طھط§ط±ظٹط® ط§ظ„ط§ظ†طھظ‡ط§ط،"><input type="date" value={dialog.guarantee_expiry_date} onChange={(e) => setDialog({ ...dialog, guarantee_expiry_date: e.target.value })} className="field mt-2" /></Label>
+              <Label t="ط§ظ„ط­ط§ظ„ط©"><select value={dialog.guarantee_status} onChange={(e) => setDialog({ ...dialog, guarantee_status: e.target.value })} className="field mt-2">{guaranteeStatuses.map((s) => <option key={s}>{s}</option>)}</select></Label>
+              <Label t="ظ…ظ„ط§ط­ط¸ط§طھ"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" rows="3" /></Label>
             </div>
-            <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ البيانات</button></div>
+            <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">ط¥ظ„ط؛ط§ط،</button><button className="btn-primary"><Save size={17} /> ط­ظپط¸ ط§ظ„ط¨ظٹط§ظ†ط§طھ</button></div>
           </form>
         </div>
       )}
-      {viewing && <DetailsDialog title="تفاصيل الضمانة" row={viewing} close={() => setViewing(null)} />}
+      {viewing && <DetailsDialog title="طھظپط§طµظٹظ„ ط§ظ„ط¶ظ…ط§ظ†ط©" row={viewing} close={() => setViewing(null)} />}
     </div>
   );
 }
@@ -4325,8 +4539,8 @@ function OvertimePage({ employees, role, currentUser, can }) {
   }, []);
   const joinedRows = assignmentEmployees.map((row) => ({ ...assignments.find((a) => a.assignment_id === row.assignment_id), ...row }));
   const visibleRows = joinedRows.filter((r) => {
-    if (role === "الموظف" && currentUser?.employeeId && r.employee_id !== currentUser.employeeId) return false;
-    if (role === "مدير الفرع" && currentUser?.branch && r.branch !== currentUser.branch) return false;
+    if (role === "ط§ظ„ظ…ظˆط¸ظپ" && currentUser?.employeeId && r.employee_id !== currentUser.employeeId) return false;
+    if (role === "ظ…ط¯ظٹط± ط§ظ„ظپط±ط¹" && currentUser?.branch && r.branch !== currentUser.branch) return false;
     return true;
   });
   const filtered = visibleRows.filter((r) =>
@@ -4343,14 +4557,14 @@ function OvertimePage({ employees, role, currentUser, can }) {
     return Math.max(0, (eh * 60 + em - (sh * 60 + sm)) / 60);
   };
   const cards = [
-    ["إجمالي تكليفات العمل الإضافي", assignments.length, Clock3],
-    ["عدد الموظفين المكلفين", assignmentEmployees.length, Users],
-    ["عدد ساعات العمل الإضافي", filtered.reduce((s, r) => s + hours(r), 0).toFixed(1), Gauge],
-    ["تكليفات حسب الفرع", Object.keys(groupCount(filtered, "branch")).length, Building2],
-    ["تكليفات حسب الشهر", Object.keys(groupCount(filtered, "assignment_date")).length, CalendarCheck],
+    ["ط¥ط¬ظ…ط§ظ„ظٹ طھظƒظ„ظٹظپط§طھ ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ", assignments.length, Clock3],
+    ["ط¹ط¯ط¯ ط§ظ„ظ…ظˆط¸ظپظٹظ† ط§ظ„ظ…ظƒظ„ظپظٹظ†", assignmentEmployees.length, Users],
+    ["ط¹ط¯ط¯ ط³ط§ط¹ط§طھ ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ", filtered.reduce((s, r) => s + hours(r), 0).toFixed(1), Gauge],
+    ["طھظƒظ„ظٹظپط§طھ ط­ط³ط¨ ط§ظ„ظپط±ط¹", Object.keys(groupCount(filtered, "branch")).length, Building2],
+    ["طھظƒظ„ظٹظپط§طھ ط­ط³ط¨ ط§ظ„ط´ظ‡ط±", Object.keys(groupCount(filtered, "assignment_date")).length, CalendarCheck],
   ];
   const startCreate = () => {
-    if (!canCreate) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!canCreate) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
     setDialog({ assignment_id: `OT-${Date.now()}`, assignment_date: new Date().toISOString().slice(0, 10), branch: branches[0], location: "", start_time: "16:00", end_time: "20:00", reason: "", notes: "", mode: "branch", selected: [] });
   };
   const selectedEmployees = () => {
@@ -4361,9 +4575,9 @@ function OvertimePage({ employees, role, currentUser, can }) {
   };
   const create = async (event) => {
     event.preventDefault();
-    if (!canCreate) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!canCreate) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
     const selected = selectedEmployees();
-    if (!selected.length) return alert("يرجى اختيار موظف واحد على الأقل.");
+    if (!selected.length) return alert("ظٹط±ط¬ظ‰ ط§ط®طھظٹط§ط± ظ…ظˆط¸ظپ ظˆط§ط­ط¯ ط¹ظ„ظ‰ ط§ظ„ط£ظ‚ظ„.");
     const employeeRows = selected.map((e) => ({
       id: `${dialog.assignment_id}-${e.id}`,
       assignment_id: dialog.assignment_id,
@@ -4372,7 +4586,7 @@ function OvertimePage({ employees, role, currentUser, can }) {
       employee_phone: e.phone,
       branch: e.branch,
       job: e.job,
-      status: "مكلف",
+      status: "ظ…ظƒظ„ظپ",
       whatsapp_message: makeOvertimeMessage(dialog, { employee_name: e.name }),
     }));
     try {
@@ -4380,7 +4594,7 @@ function OvertimePage({ employees, role, currentUser, can }) {
       auditService.log({
         user_id: currentUser?.user_id || currentUser?.username,
         user_name: currentUser?.username || currentUser?.name,
-        action: "إضافة تكليف عمل إضافي",
+        action: "ط¥ط¶ط§ظپط© طھظƒظ„ظٹظپ ط¹ظ…ظ„ ط¥ط¶ط§ظپظٹ",
         module_name: "overtime_assignments",
         record_id: saved.assignment.assignment_id,
         new_data: saved.assignment,
@@ -4388,8 +4602,8 @@ function OvertimePage({ employees, role, currentUser, can }) {
       saved.employees.forEach((employee) => {
         notificationsService.create({
           user_id: employee.employee_id,
-          title: "تكليف عمل إضافي جديد",
-          message: `تم تكليف ${employee.employee_name} بالعمل الإضافي بتاريخ ${saved.assignment.assignment_date}`,
+          title: "طھظƒظ„ظٹظپ ط¹ظ…ظ„ ط¥ط¶ط§ظپظٹ ط¬ط¯ظٹط¯",
+          message: `طھظ… طھظƒظ„ظٹظپ ${employee.employee_name} ط¨ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ ط¨طھط§ط±ظٹط® ${saved.assignment.assignment_date}`,
           type: "overtime",
           related_module: "overtime",
           related_record_id: saved.assignment.assignment_id,
@@ -4403,9 +4617,9 @@ function OvertimePage({ employees, role, currentUser, can }) {
     }
   };
   const updateStatus = async (row, status) => {
-    if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!canEdit) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
     try {
-      const saved = await overtimeService.updateAssignmentEmployee({ ...row, status, sent_at: status === "تم الإرسال" ? new Date().toISOString() : row.sent_at });
+      const saved = await overtimeService.updateAssignmentEmployee({ ...row, status, sent_at: status === "طھظ… ط§ظ„ط¥ط±ط³ط§ظ„" ? new Date().toISOString() : row.sent_at });
       setAssignmentEmployees((list) => list.map((x) => (x.id === saved.id ? saved : x)));
     } catch (e) {
       alert(e.message);
@@ -4413,7 +4627,7 @@ function OvertimePage({ employees, role, currentUser, can }) {
   };
   const copy = async (text) => {
     await navigator.clipboard?.writeText(text);
-    alert("تم نسخ الرسالة");
+    alert("طھظ… ظ†ط³ط® ط§ظ„ط±ط³ط§ظ„ط©");
   };
   const openWhatsApp = (row) => {
     const message = row.whatsapp_message || makeOvertimeMessage(row, row);
@@ -4422,48 +4636,48 @@ function OvertimePage({ employees, role, currentUser, can }) {
   const exportRows = reportRowsForExport(filtered, tableColumnsOvertime);
   return (
     <div className="space-y-5">
-      <PageHead title="العمل الإضافي" desc="إنشاء تكليفات العمل الإضافي وتوليد رسائل واتساب للموظفين" action={<button onClick={startCreate} className="btn-primary"><Plus size={18} /> تكليف جديد</button>} />
+      <PageHead title="ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ" desc="ط¥ظ†ط´ط§ط، طھظƒظ„ظٹظپط§طھ ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ ظˆطھظˆظ„ظٹط¯ ط±ط³ط§ط¦ظ„ ظˆط§طھط³ط§ط¨ ظ„ظ„ظ…ظˆط¸ظپظٹظ†" action={<button onClick={startCreate} className="btn-primary"><Plus size={18} /> طھظƒظ„ظٹظپ ط¬ط¯ظٹط¯</button>} />
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">{cards.map(([label, value, I]) => <Mini key={label} label={label} value={value} I={I} />)}</div>
       <div className="panel flex flex-wrap gap-3 p-4">
         <input type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} className="field max-w-[170px]" />
-        <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select>
-        <input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field min-w-[200px]" placeholder="بحث بالموظف..." />
-        <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[170px]"><option value="all">كل الحالات</option>{overtimeStatuses.map((s) => <option key={s}>{s}</option>)}</select>
+        <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">ظƒظ„ ط§ظ„ظپط±ظˆط¹</option>{branches.map((b) => <option key={b}>{b}</option>)}</select>
+        <input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field min-w-[200px]" placeholder="ط¨ط­ط« ط¨ط§ظ„ظ…ظˆط¸ظپ..." />
+        <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[170px]"><option value="all">ظƒظ„ ط§ظ„ط­ط§ظ„ط§طھ</option>{overtimeStatuses.map((s) => <option key={s}>{s}</option>)}</select>
         <input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field max-w-[170px]" />
-        <button onClick={() => exportExcel(exportRows, "تقرير العمل الإضافي")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button>
-        <button onClick={() => printDocument("تقرير العمل الإضافي", rowsToReportHtml("تقرير العمل الإضافي", filtered, tableColumnsOvertime))} className="btn-secondary"><Printer size={17} /> PDF</button>
-        <button onClick={() => exportDocx("تقرير العمل الإضافي", exportRows)} className="btn-secondary"><Download size={17} /> Word</button>
+        <button onClick={() => exportExcel(exportRows, "طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button>
+        <button onClick={() => printDocument("طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ", rowsToReportHtml("طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ", filtered, tableColumnsOvertime))} className="btn-secondary"><Printer size={17} /> PDF</button>
+        <button onClick={() => exportDocx("طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ", exportRows)} className="btn-secondary"><Download size={17} /> Word</button>
       </div>
       <div className="panel p-4">
-        {loading ? <LoadingScreen message="جاري تحميل تكليفات العمل الإضافي..." /> : (
-          <div className="table-wrap"><table><thead><tr>{tableColumnsOvertime.map((c) => <th key={c.key}>{c.label}</th>)}<th>واتساب</th><th>تحديث</th></tr></thead><tbody>{filtered.map((r) => <tr key={r.id}><td>{r.assignment_date}</td><td>{r.employee_name}</td><td>{r.branch}</td><td>{r.job}</td><td>{r.start_time}</td><td>{r.end_time}</td><td><Status>{r.status}</Status></td><td><button onClick={() => copy(r.whatsapp_message || makeOvertimeMessage(r, r))} className="btn-secondary !h-9 !px-3">نسخ الرسالة</button><button onClick={() => openWhatsApp(r)} className="btn-secondary !h-9 !px-3">فتح واتساب</button></td><td><select value={r.status} onChange={(e) => updateStatus(r, e.target.value)} className="field h-9">{overtimeStatuses.map((s) => <option key={s}>{s}</option>)}</select></td></tr>)}</tbody></table></div>
+        {loading ? <LoadingScreen message="ط¬ط§ط±ظٹ طھط­ظ…ظٹظ„ طھظƒظ„ظٹظپط§طھ ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ..." /> : (
+          <div className="table-wrap"><table><thead><tr>{tableColumnsOvertime.map((c) => <th key={c.key}>{c.label}</th>)}<th>ظˆط§طھط³ط§ط¨</th><th>طھط­ط¯ظٹط«</th></tr></thead><tbody>{filtered.map((r) => <tr key={r.id}><td>{r.assignment_date}</td><td>{r.employee_name}</td><td>{r.branch}</td><td>{r.job}</td><td>{r.start_time}</td><td>{r.end_time}</td><td><Status>{r.status}</Status></td><td><button onClick={() => copy(r.whatsapp_message || makeOvertimeMessage(r, r))} className="btn-secondary !h-9 !px-3">ظ†ط³ط® ط§ظ„ط±ط³ط§ظ„ط©</button><button onClick={() => openWhatsApp(r)} className="btn-secondary !h-9 !px-3">ظپطھط­ ظˆط§طھط³ط§ط¨</button></td><td><select value={r.status} onChange={(e) => updateStatus(r, e.target.value)} className="field h-9">{overtimeStatuses.map((s) => <option key={s}>{s}</option>)}</select></td></tr>)}</tbody></table></div>
         )}
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        <ReportBox title="تقرير حسب الفرع" rows={Object.entries(groupCount(filtered, "branch"))} />
-        <ReportBox title="تقرير حسب الموظف" rows={Object.entries(groupCount(filtered, "employee_name"))} />
-        <ReportBox title="تقرير حسب الشهر" rows={Object.entries(groupCount(filtered.map((r) => ({ ...r, month: String(r.assignment_date || "").slice(0, 7) })), "month"))} />
-        <ReportBox title="مقارنة الموظفين" rows={Object.entries(groupCount(filtered, "employee_name")).sort((a, b) => b[1] - a[1]).slice(0, 10)} />
+        <ReportBox title="طھظ‚ط±ظٹط± ط­ط³ط¨ ط§ظ„ظپط±ط¹" rows={Object.entries(groupCount(filtered, "branch"))} />
+        <ReportBox title="طھظ‚ط±ظٹط± ط­ط³ط¨ ط§ظ„ظ…ظˆط¸ظپ" rows={Object.entries(groupCount(filtered, "employee_name"))} />
+        <ReportBox title="طھظ‚ط±ظٹط± ط­ط³ط¨ ط§ظ„ط´ظ‡ط±" rows={Object.entries(groupCount(filtered.map((r) => ({ ...r, month: String(r.assignment_date || "").slice(0, 7) })), "month"))} />
+        <ReportBox title="ظ…ظ‚ط§ط±ظ†ط© ط§ظ„ظ…ظˆط¸ظپظٹظ†" rows={Object.entries(groupCount(filtered, "employee_name")).sort((a, b) => b[1] - a[1]).slice(0, 10)} />
       </div>
       {dialog && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
           <form onSubmit={create} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6">
-            <div className="mb-5 flex"><h3 className="text-xl font-extrabold">تكليف عمل إضافي</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div>
+            <div className="mb-5 flex"><h3 className="text-xl font-extrabold">طھظƒظ„ظٹظپ ط¹ظ…ظ„ ط¥ط¶ط§ظپظٹ</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div>
             <div className="grid gap-4 md:grid-cols-3">
-              <Label t="التاريخ"><input required type="date" value={dialog.assignment_date} onChange={(e) => setDialog({ ...dialog, assignment_date: e.target.value })} className="field mt-2" /></Label>
-              <Label t="الفرع"><select value={dialog.branch} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className="field mt-2">{branches.map((b) => <option key={b}>{b}</option>)}</select></Label>
-              <Label t="الموقع"><input required value={dialog.location} onChange={(e) => setDialog({ ...dialog, location: e.target.value })} className="field mt-2" /></Label>
-              <Label t="من الساعة"><input required type="time" value={dialog.start_time} onChange={(e) => setDialog({ ...dialog, start_time: e.target.value })} className="field mt-2" /></Label>
-              <Label t="إلى الساعة"><input required type="time" value={dialog.end_time} onChange={(e) => setDialog({ ...dialog, end_time: e.target.value })} className="field mt-2" /></Label>
-              <Label t="سبب التكليف"><input value={dialog.reason} onChange={(e) => setDialog({ ...dialog, reason: e.target.value })} className="field mt-2" /></Label>
-              <Label t="طريقة الاختيار"><select value={dialog.mode} onChange={(e) => setDialog({ ...dialog, mode: e.target.value, selected: [] })} className="field mt-2"><option value="branch">كل موظفي الفرع</option><option value="job">حسب الوظيفة</option><option value="manual">اختيار متعدد</option></select></Label>
-              {dialog.mode === "job" && <Label t="الوظيفة"><select value={dialog.job || jobs[0]} onChange={(e) => setDialog({ ...dialog, job: e.target.value })} className="field mt-2">{jobs.map((j) => <option key={j}>{j}</option>)}</select></Label>}
-              <Label t="ملاحظات"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" rows="3" /></Label>
+              <Label t="ط§ظ„طھط§ط±ظٹط®"><input required type="date" value={dialog.assignment_date} onChange={(e) => setDialog({ ...dialog, assignment_date: e.target.value })} className="field mt-2" /></Label>
+              <Label t="ط§ظ„ظپط±ط¹"><select value={dialog.branch} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className="field mt-2">{branches.map((b) => <option key={b}>{b}</option>)}</select></Label>
+              <Label t="ط§ظ„ظ…ظˆظ‚ط¹"><input required value={dialog.location} onChange={(e) => setDialog({ ...dialog, location: e.target.value })} className="field mt-2" /></Label>
+              <Label t="ظ…ظ† ط§ظ„ط³ط§ط¹ط©"><input required type="time" value={dialog.start_time} onChange={(e) => setDialog({ ...dialog, start_time: e.target.value })} className="field mt-2" /></Label>
+              <Label t="ط¥ظ„ظ‰ ط§ظ„ط³ط§ط¹ط©"><input required type="time" value={dialog.end_time} onChange={(e) => setDialog({ ...dialog, end_time: e.target.value })} className="field mt-2" /></Label>
+              <Label t="ط³ط¨ط¨ ط§ظ„طھظƒظ„ظٹظپ"><input value={dialog.reason} onChange={(e) => setDialog({ ...dialog, reason: e.target.value })} className="field mt-2" /></Label>
+              <Label t="ط·ط±ظٹظ‚ط© ط§ظ„ط§ط®طھظٹط§ط±"><select value={dialog.mode} onChange={(e) => setDialog({ ...dialog, mode: e.target.value, selected: [] })} className="field mt-2"><option value="branch">ظƒظ„ ظ…ظˆط¸ظپظٹ ط§ظ„ظپط±ط¹</option><option value="job">ط­ط³ط¨ ط§ظ„ظˆط¸ظٹظپط©</option><option value="manual">ط§ط®طھظٹط§ط± ظ…طھط¹ط¯ط¯</option></select></Label>
+              {dialog.mode === "job" && <Label t="ط§ظ„ظˆط¸ظٹظپط©"><select value={dialog.job || jobs[0]} onChange={(e) => setDialog({ ...dialog, job: e.target.value })} className="field mt-2">{jobs.map((j) => <option key={j}>{j}</option>)}</select></Label>}
+              <Label t="ظ…ظ„ط§ط­ط¸ط§طھ"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" rows="3" /></Label>
             </div>
             {dialog.mode === "manual" && <div className="mt-5 grid max-h-56 gap-2 overflow-y-auto rounded-2xl border p-3 md:grid-cols-2">{employees.map((e) => <label key={e.id} className="flex items-center gap-2 rounded-xl bg-slate-50 p-2 text-sm"><input type="checkbox" checked={dialog.selected.includes(e.id)} onChange={(ev) => setDialog({ ...dialog, selected: ev.target.checked ? [...dialog.selected, e.id] : dialog.selected.filter((id) => id !== e.id) })} />{e.name} - {e.branch}</label>)}</div>}
-            <p className="mt-4 rounded-xl bg-blue-50 p-3 text-sm font-bold text-blue-700">عدد الموظفين المختارين: {selectedEmployees().length}</p>
-            <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ التكليف</button></div>
+            <p className="mt-4 rounded-xl bg-blue-50 p-3 text-sm font-bold text-blue-700">ط¹ط¯ط¯ ط§ظ„ظ…ظˆط¸ظپظٹظ† ط§ظ„ظ…ط®طھط§ط±ظٹظ†: {selectedEmployees().length}</p>
+            <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">ط¥ظ„ط؛ط§ط،</button><button className="btn-primary"><Save size={17} /> ط­ظپط¸ ط§ظ„طھظƒظ„ظٹظپ</button></div>
           </form>
         </div>
       )}
@@ -4472,24 +4686,24 @@ function OvertimePage({ employees, role, currentUser, can }) {
 }
 
 const shiftTabs = [
-  ["types", "أنواع الشفتات"],
-  ["used", "الشفتات المستخدمة"],
-  ["scenarios", "سيناريوهات الشفتات"],
-  ["assignments", "توزيع الموظفين على الشفتات"],
-  ["reports", "تقارير الشفتات"],
+  ["types", "ط£ظ†ظˆط§ط¹ ط§ظ„ط´ظپطھط§طھ"],
+  ["used", "ط§ظ„ط´ظپطھط§طھ ط§ظ„ظ…ط³طھط®ط¯ظ…ط©"],
+  ["scenarios", "ط³ظٹظ†ط§ط±ظٹظˆظ‡ط§طھ ط§ظ„ط´ظپطھط§طھ"],
+  ["assignments", "طھظˆط²ظٹط¹ ط§ظ„ظ…ظˆط¸ظپظٹظ† ط¹ظ„ظ‰ ط§ظ„ط´ظپطھط§طھ"],
+  ["reports", "طھظ‚ط§ط±ظٹط± ط§ظ„ط´ظپطھط§طھ"],
 ];
 const shiftAssignmentColumns = [
-  { key: "assignment_date", label: "التاريخ" },
-  { key: "employee_name", label: "الموظف" },
-  { key: "branch", label: "الفرع" },
-  { key: "shift_name", label: "الشفت" },
-  { key: "start_time", label: "من" },
-  { key: "end_time", label: "إلى" },
-  { key: "total_hours", label: "الساعات" },
-  { key: "status", label: "الحالة" },
+  { key: "assignment_date", label: "ط§ظ„طھط§ط±ظٹط®" },
+  { key: "employee_name", label: "ط§ظ„ظ…ظˆط¸ظپ" },
+  { key: "branch", label: "ط§ظ„ظپط±ط¹" },
+  { key: "shift_name", label: "ط§ظ„ط´ظپطھ" },
+  { key: "start_time", label: "ظ…ظ†" },
+  { key: "end_time", label: "ط¥ظ„ظ‰" },
+  { key: "total_hours", label: "ط§ظ„ط³ط§ط¹ط§طھ" },
+  { key: "status", label: "ط§ظ„ط­ط§ظ„ط©" },
 ];
 const canOverrideShiftConflicts = (role = "") =>
-  isAdminLikeRole(role) || String(role).includes("الموارد") || String(role).includes("ط§ظ„ظ…ظˆط§ط±ط¯");
+  isAdminLikeRole(role) || String(role).includes("ط§ظ„ظ…ظˆط§ط±ط¯") || String(role).includes("ط·آ§ط¸â€‍ط¸â€¦ط¸ث†ط·آ§ط·آ±ط·آ¯");
 const minutesOf = (time) => {
   const [h, m] = String(time || "00:00").split(":").map(Number);
   return (Number.isNaN(h) ? 0 : h) * 60 + (Number.isNaN(m) ? 0 : m);
@@ -4502,39 +4716,39 @@ const shiftsOverlap = (a, b) => {
   return aStart < bEnd && bStart < aEnd;
 };
 const makeShiftMessage = (row) =>
-  `الأخ/ الموظف: ${row.employee_name}
+  `ط§ظ„ط£ط®/ ط§ظ„ظ…ظˆط¸ظپ: ${row.employee_name}
 
-تحية طيبة،
+طھط­ظٹط© ط·ظٹط¨ط©طŒ
 
-نحيطكم علماً بأنه تم جدولتكم للعمل يوم ${arabicDayName(row.assignment_date)} الموافق ${row.assignment_date}م، في ${row.branch} ضمن شفت ${row.shift_name} من الساعة ${row.start_time} حتى الساعة ${row.end_time}.
+ظ†ط­ظٹط·ظƒظ… ط¹ظ„ظ…ط§ظ‹ ط¨ط£ظ†ظ‡ طھظ… ط¬ط¯ظˆظ„طھظƒظ… ظ„ظ„ط¹ظ…ظ„ ظٹظˆظ… ${arabicDayName(row.assignment_date)} ط§ظ„ظ…ظˆط§ظپظ‚ ${row.assignment_date}ظ…طŒ ظپظٹ ${row.branch} ط¶ظ…ظ† ط´ظپطھ ${row.shift_name} ظ…ظ† ط§ظ„ط³ط§ط¹ط© ${row.start_time} ط­طھظ‰ ط§ظ„ط³ط§ط¹ط© ${row.end_time}.
 
-يرجى الالتزام بالحضور والانصراف في الوقت المحدد وإثبات البصمة حسب الإجراء المعتمد.
+ظٹط±ط¬ظ‰ ط§ظ„ط§ظ„طھط²ط§ظ… ط¨ط§ظ„ط­ط¶ظˆط± ظˆط§ظ„ط§ظ†طµط±ط§ظپ ظپظٹ ط§ظ„ظˆظ‚طھ ط§ظ„ظ…ط­ط¯ط¯ ظˆط¥ط«ط¨ط§طھ ط§ظ„ط¨طµظ…ط© ط­ط³ط¨ ط§ظ„ط¥ط¬ط±ط§ط، ط§ظ„ظ…ط¹طھظ…ط¯.
 
-شاكرين لكم تعاونكم والتزامكم.
-إدارة الموارد البشرية`;
+ط´ط§ظƒط±ظٹظ† ظ„ظƒظ… طھط¹ط§ظˆظ†ظƒظ… ظˆط§ظ„طھط²ط§ظ…ظƒظ….
+ط¥ط¯ط§ط±ط© ط§ظ„ظ…ظˆط§ط±ط¯ ط§ظ„ط¨ط´ط±ظٹط©`;
 const upsertLocal = (list, item, key) =>
   list.some((x) => x[key] === item[key]) ? list.map((x) => (x[key] === item[key] ? item : x)) : [item, ...list];
 
 const inventoryTabs = [
-  ["dashboard", "لوحة المخزون", "inventory_dashboard"],
-  ["items", "الأصناف", "inventory_items"],
-  ["suppliers", "الموردون", "inventory_suppliers"],
-  ["purchase_requests", "طلب شراء", "inventory_purchase_requests"],
-  ["purchase_orders", "أمر شراء", "inventory_purchase_orders"],
-  ["receipts", "إذن استلام", "inventory_receipts"],
-  ["invoices", "فاتورة شراء", "inventory_invoices"],
-  ["issues", "سند صرف للفروع", "inventory_issue_vouchers"],
-  ["returns", "سند إرجاع من الفروع", "inventory_returns"],
-  ["transfers", "سند تحويل مخزني", "inventory_transfers"],
-  ["adjustments", "التسويات", "inventory_adjustments"],
-  ["stocktakes", "الجرد", "inventory_stocktakes"],
-  ["balances", "أرصدة المخزون", "inventory_balances"],
-  ["forecast", "توقع احتياج الفروع", "inventory_forecast"],
-  ["reports", "تقارير المخزون", "inventory_reports"],
-  ["settings", "إعدادات المخزون", "inventory_settings"],
+  ["dashboard", "ظ„ظˆط­ط© ط§ظ„ظ…ط®ط²ظˆظ†", "inventory_dashboard"],
+  ["items", "ط§ظ„ط£طµظ†ط§ظپ", "inventory_items"],
+  ["suppliers", "ط§ظ„ظ…ظˆط±ط¯ظˆظ†", "inventory_suppliers"],
+  ["purchase_requests", "ط·ظ„ط¨ ط´ط±ط§ط،", "inventory_purchase_requests"],
+  ["purchase_orders", "ط£ظ…ط± ط´ط±ط§ط،", "inventory_purchase_orders"],
+  ["receipts", "ط¥ط°ظ† ط§ط³طھظ„ط§ظ…", "inventory_receipts"],
+  ["invoices", "ظپط§طھظˆط±ط© ط´ط±ط§ط،", "inventory_invoices"],
+  ["issues", "ط³ظ†ط¯ طµط±ظپ ظ„ظ„ظپط±ظˆط¹", "inventory_issue_vouchers"],
+  ["returns", "ط³ظ†ط¯ ط¥ط±ط¬ط§ط¹ ظ…ظ† ط§ظ„ظپط±ظˆط¹", "inventory_returns"],
+  ["transfers", "ط³ظ†ط¯ طھط­ظˆظٹظ„ ظ…ط®ط²ظ†ظٹ", "inventory_transfers"],
+  ["adjustments", "ط§ظ„طھط³ظˆظٹط§طھ", "inventory_adjustments"],
+  ["stocktakes", "ط§ظ„ط¬ط±ط¯", "inventory_stocktakes"],
+  ["balances", "ط£ط±طµط¯ط© ط§ظ„ظ…ط®ط²ظˆظ†", "inventory_balances"],
+  ["forecast", "طھظˆظ‚ط¹ ط§ط­طھظٹط§ط¬ ط§ظ„ظپط±ظˆط¹", "inventory_forecast"],
+  ["reports", "طھظ‚ط§ط±ظٹط± ط§ظ„ظ…ط®ط²ظˆظ†", "inventory_reports"],
+  ["settings", "ط¥ط¹ط¯ط§ط¯ط§طھ ط§ظ„ظ…ط®ط²ظˆظ†", "inventory_settings"],
 ];
 const inventoryDocTypes = ["purchase_requests", "purchase_orders", "receipts", "invoices", "issues", "returns", "transfers", "adjustments", "stocktakes"];
-const inventoryStatusFlow = ["مسودة", "قيد المراجعة", "معتمد", "مرفوض", "مرحل", "ملغي"];
+const inventoryStatusFlow = ["ظ…ط³ظˆط¯ط©", "ظ‚ظٹط¯ ط§ظ„ظ…ط±ط§ط¬ط¹ط©", "ظ…ط¹طھظ…ط¯", "ظ…ط±ظپظˆط¶", "ظ…ط±ط­ظ„", "ظ…ظ„ط؛ظٹ"];
 
 function InventoryManagementPage({ can, currentUser }) {
   const [tab, setTab] = useState("dashboard");
@@ -4586,17 +4800,17 @@ function InventoryManagementPage({ can, currentUser }) {
   const forecast = generateBranchForecast({ movements, items: balances, branch: filters.branch, month: filters.month });
   const saveItem = async (event) => {
     event.preventDefault();
-    if (!canTab(dialog.item_id ? "can_edit" : "can_create")) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!canTab(dialog.item_id ? "can_edit" : "can_create")) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
     try {
       const saved = await inventoryService.saveInventoryItem(dialog);
       setItems((list) => upsertLocal(list, saved, "item_id"));
-      auditService.log({ user_id: currentUser?.user_id || currentUser?.username, user_name: currentUser?.username, action: dialog.item_id ? "تعديل صنف" : "إضافة صنف", module_name: "inventory_items", record_id: saved.item_id, new_data: saved }).catch(() => {});
+      auditService.log({ user_id: currentUser?.user_id || currentUser?.username, user_name: currentUser?.username, action: dialog.item_id ? "طھط¹ط¯ظٹظ„ طµظ†ظپ" : "ط¥ط¶ط§ظپط© طµظ†ظپ", module_name: "inventory_items", record_id: saved.item_id, new_data: saved }).catch(() => {});
       setDialog(null);
     } catch (e) { alert(e.message); }
   };
   const saveSupplier = async (event) => {
     event.preventDefault();
-    if (!canTab(dialog.supplier_id ? "can_edit" : "can_create")) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!canTab(dialog.supplier_id ? "can_edit" : "can_create")) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
     try {
       const saved = await inventoryService.saveSupplier(dialog);
       setSuppliers((list) => upsertLocal(list, saved, "supplier_id"));
@@ -4605,9 +4819,9 @@ function InventoryManagementPage({ can, currentUser }) {
   };
   const saveDocument = async (event) => {
     event.preventDefault();
-    if (!canTab(dialog.id ? "can_edit" : "can_create")) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
-    if (!dialog.document_date) return alert("يجب تحديد تاريخ المستند");
-    if (dialog.details?.length === 0 && !["invoices", "adjustments"].includes(dialog.type)) return alert("يجب إضافة صنف واحد على الأقل");
+    if (!canTab(dialog.id ? "can_edit" : "can_create")) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
+    if (!dialog.document_date) return alert("ظٹط¬ط¨ طھط­ط¯ظٹط¯ طھط§ط±ظٹط® ط§ظ„ظ…ط³طھظ†ط¯");
+    if (dialog.details?.length === 0 && !["invoices", "adjustments"].includes(dialog.type)) return alert("ظٹط¬ط¨ ط¥ط¶ط§ظپط© طµظ†ظپ ظˆط§ط­ط¯ ط¹ظ„ظ‰ ط§ظ„ط£ظ‚ظ„");
     try {
       const config = inventoryDocumentConfigs[dialog.type];
       const saved = await inventoryDocumentsService.saveDocument(dialog.type, { ...dialog, [config.idKey]: dialog.id }, dialog.details || []);
@@ -4616,9 +4830,9 @@ function InventoryManagementPage({ can, currentUser }) {
     } catch (e) { alert(e.message); }
   };
   const deleteRecord = async (kind, record) => {
-    if (!canTab("can_delete")) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
-    if (record.status && record.status !== "مسودة") return alert("لا يمكن حذف مستند مرحل");
-    if (!confirm("هل تريد حذف السجل؟")) return;
+    if (!canTab("can_delete")) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
+    if (record.status && record.status !== "ظ…ط³ظˆط¯ط©") return alert("ظ„ط§ ظٹظ…ظƒظ† ط­ط°ظپ ظ…ط³طھظ†ط¯ ظ…ط±ط­ظ„");
+    if (!confirm("ظ‡ظ„ طھط±ظٹط¯ ط­ط°ظپ ط§ظ„ط³ط¬ظ„طں")) return;
     try {
       if (kind === "items") {
         await inventoryService.deleteInventoryItem(record.item_id);
@@ -4633,11 +4847,11 @@ function InventoryManagementPage({ can, currentUser }) {
     } catch (e) { alert(e.message); }
   };
   const updateDocStatus = async (type, doc, status) => {
-    const action = status === "معتمد" ? "can_approve" : status === "مرحل" ? "can_post" : "can_edit";
-    if (!canTab(action)) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    const action = status === "ظ…ط¹طھظ…ط¯" ? "can_approve" : status === "ظ…ط±ط­ظ„" ? "can_post" : "can_edit";
+    if (!canTab(action)) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
     try {
       const details = await inventoryDocumentsService.loadDetails(type, doc.id).catch(() => []);
-      if (status === "مرحل") await inventoryDocumentsService.postStock(type, doc, details, currentUser?.username || "");
+      if (status === "ظ…ط±ط­ظ„") await inventoryDocumentsService.postStock(type, doc, details, currentUser?.username || "");
       else await inventoryDocumentsService.updateStatus(type, doc, status, { approved_by: currentUser?.username || "", approved_at: new Date().toISOString() });
       approvalService.log({ module_name: type, record_id: doc.id, action: status, old_status: doc.status, new_status: status, performed_by: currentUser?.username || "", notes: "" }).catch(() => {});
       load();
@@ -4645,10 +4859,10 @@ function InventoryManagementPage({ can, currentUser }) {
   };
   return (
     <div className="space-y-5">
-      <PageHead title="إدارة المخزون" desc="الدورة المستندية الكاملة للمخزون والمشتريات وحركة الأصناف" action={<button onClick={() => setTab("items")} className="btn-primary"><Wallet size={18} /> الأصناف</button>} />
+      <PageHead title="ط¥ط¯ط§ط±ط© ط§ظ„ظ…ط®ط²ظˆظ†" desc="ط§ظ„ط¯ظˆط±ط© ط§ظ„ظ…ط³طھظ†ط¯ظٹط© ط§ظ„ظƒط§ظ…ظ„ط© ظ„ظ„ظ…ط®ط²ظˆظ† ظˆط§ظ„ظ…ط´طھط±ظٹط§طھ ظˆط­ط±ظƒط© ط§ظ„ط£طµظ†ط§ظپ" action={<button onClick={() => setTab("items")} className="btn-primary"><Wallet size={18} /> ط§ظ„ط£طµظ†ط§ظپ</button>} />
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
       <div className="panel flex flex-wrap gap-2 p-2">{visibleTabs.map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === id ? "bg-brand-700 text-white" : "bg-slate-100 text-slate-600"}`}>{label}</button>)}</div>
-      {loading ? <div className="panel p-6 text-center text-sm text-slate-500">جاري تحميل بيانات المخزون...</div> : (
+      {loading ? <div className="panel p-6 text-center text-sm text-slate-500">ط¬ط§ط±ظٹ طھط­ظ…ظٹظ„ ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ط®ط²ظˆظ†...</div> : (
         <>
           {tab === "dashboard" && <InventoryDashboard items={balances} documents={documents} movements={movements} />}
           {tab === "items" && <InventoryItemsTab rows={items} filters={filters} setFilters={setFilters} setDialog={setDialog} deleteRecord={deleteRecord} canCreate={canTab("can_create")} />}
@@ -4663,7 +4877,7 @@ function InventoryManagementPage({ can, currentUser }) {
       {dialog?.kind === "item" && <InventoryItemDialog dialog={dialog} setDialog={setDialog} save={saveItem} />}
       {dialog?.kind === "supplier" && <InventorySupplierDialog dialog={dialog} setDialog={setDialog} save={saveSupplier} />}
       {dialog?.kind === "document" && <InventoryDocumentDialog dialog={dialog} setDialog={setDialog} save={saveDocument} items={items} suppliers={suppliers} />}
-      {dialog?.kind === "details" && <DetailsDialog title="تفاصيل المستند" row={dialog.row} close={() => setDialog(null)} />}
+      {dialog?.kind === "details" && <DetailsDialog title="طھظپط§طµظٹظ„ ط§ظ„ظ…ط³طھظ†ط¯" row={dialog.row} close={() => setDialog(null)} />}
     </div>
   );
 }
@@ -4672,7 +4886,7 @@ const inventoryBalances = (items, movements) => items.map((item) => {
   const itemMovements = movements.filter((m) => m.item_id === item.item_id);
   const totalPurchases = itemMovements.filter((m) => Number(m.quantity_in || 0) > 0).reduce((s, m) => s + Number(m.quantity_in || 0), 0);
   const totalIssued = itemMovements.filter((m) => Number(m.quantity_out || 0) > 0).reduce((s, m) => s + Number(m.quantity_out || 0), 0);
-  const totalReturns = itemMovements.filter((m) => String(m.movement_type || "").includes("إرجاع") || String(m.movement_type || "").includes("ط¥ط±ط¬ط§ط¹")).reduce((s, m) => s + Number(m.quantity_in || 0), 0);
+  const totalReturns = itemMovements.filter((m) => String(m.movement_type || "").includes("ط¥ط±ط¬ط§ط¹") || String(m.movement_type || "").includes("ط·آ¥ط·آ±ط·آ¬ط·آ§ط·آ¹")).reduce((s, m) => s + Number(m.quantity_in || 0), 0);
   const quantityIn = itemMovements.reduce((s, m) => s + Number(m.quantity_in || 0), 0);
   const quantityOut = itemMovements.reduce((s, m) => s + Number(m.quantity_out || 0), 0);
   const current = itemMovements.length ? Number(item.opening_balance || 0) + quantityIn - quantityOut : Number(item.current_balance || item.opening_balance || 0);
@@ -4681,61 +4895,61 @@ const inventoryBalances = (items, movements) => items.map((item) => {
   const averageUnitCost = incomingValue / Math.max(1, quantityIn) || Number(item.default_unit_cost || 0);
   const estimatedStockValue = current * averageUnitCost;
   const exchangeRate = Number(item.exchange_rate || itemMovements[0]?.exchange_rate || 1);
-  const status = current <= 0 ? "نافد" : current <= Number(item.reorder_point || 0) ? "يحتاج شراء" : current <= Number(item.minimum_stock || 0) ? "منخفض" : "متوفر";
-  return { ...item, total_purchases: totalPurchases, total_issued: totalIssued, total_returns: totalReturns, total_quantity_in: quantityIn, total_quantity_out: quantityOut, remaining_quantity: current, incoming_total_value: incomingValue, outgoing_total_value: outgoingValue, total_adjustments: quantityIn - quantityOut, current_balance: current, average_unit_cost: averageUnitCost, estimated_stock_value: estimatedStockValue, remaining_stock_value: estimatedStockValue, total_value_base: estimatedStockValue * exchangeRate, remaining_stock_value_base: estimatedStockValue * exchangeRate, currency_code: item.default_currency_code || item.currency_code || itemMovements[0]?.currency_code || "YER", currency_name: item.default_currency_name || item.currency_name || itemMovements[0]?.currency_name || "ريال يمني", stock_status: status };
+  const status = current <= 0 ? "ظ†ط§ظپط¯" : current <= Number(item.reorder_point || 0) ? "ظٹط­طھط§ط¬ ط´ط±ط§ط،" : current <= Number(item.minimum_stock || 0) ? "ظ…ظ†ط®ظپط¶" : "ظ…طھظˆظپط±";
+  return { ...item, total_purchases: totalPurchases, total_issued: totalIssued, total_returns: totalReturns, total_quantity_in: quantityIn, total_quantity_out: quantityOut, remaining_quantity: current, incoming_total_value: incomingValue, outgoing_total_value: outgoingValue, total_adjustments: quantityIn - quantityOut, current_balance: current, average_unit_cost: averageUnitCost, estimated_stock_value: estimatedStockValue, remaining_stock_value: estimatedStockValue, total_value_base: estimatedStockValue * exchangeRate, remaining_stock_value_base: estimatedStockValue * exchangeRate, currency_code: item.default_currency_code || item.currency_code || itemMovements[0]?.currency_code || "YER", currency_name: item.default_currency_name || item.currency_name || itemMovements[0]?.currency_name || "ط±ظٹط§ظ„ ظٹظ…ظ†ظٹ", stock_status: status };
 });
 
 function InventoryDashboard({ items, documents, movements }) {
   const totals = calculateInventoryDashboardTotals({ items, movements });
   const issueMovements = movements.filter((m) => Number(m.quantity_out || 0) > 0);
   const cards = [
-    ["إجمالي الأصناف", totals.total_items, Wallet],
-    ["إجمالي الكمية المدخلة", nf.format(totals.total_quantity_in), Download],
-    ["إجمالي الكمية المصروفة", nf.format(totals.total_quantity_out), Upload],
-    ["إجمالي الكمية المتبقية", nf.format(totals.remaining_quantity), Gauge],
-    ["إجمالي قيمة المشتريات", nf.format(totals.total_purchase_value), CircleDollarSign],
-    ["إجمالي قيمة الصرف", nf.format(totals.total_issue_value), Wallet],
-    ["إجمالي قيمة المخزون المتبقي", nf.format(totals.total_stock_value), CircleDollarSign],
-    ["قيمة المخزون بالعملة الأساسية", nf.format(totals.total_stock_value_base), Banknote],
-    ["الأصناف منخفضة المخزون", totals.low_stock_count, AlertTriangle],
-    ["الأصناف النافدة", totals.out_of_stock_count, AlertTriangle],
+    ["ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ط£طµظ†ط§ظپ", totals.total_items, Wallet],
+    ["ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظƒظ…ظٹط© ط§ظ„ظ…ط¯ط®ظ„ط©", nf.format(totals.total_quantity_in), Download],
+    ["ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظƒظ…ظٹط© ط§ظ„ظ…طµط±ظˆظپط©", nf.format(totals.total_quantity_out), Upload],
+    ["ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظƒظ…ظٹط© ط§ظ„ظ…طھط¨ظ‚ظٹط©", nf.format(totals.remaining_quantity), Gauge],
+    ["ط¥ط¬ظ…ط§ظ„ظٹ ظ‚ظٹظ…ط© ط§ظ„ظ…ط´طھط±ظٹط§طھ", nf.format(totals.total_purchase_value), CircleDollarSign],
+    ["ط¥ط¬ظ…ط§ظ„ظٹ ظ‚ظٹظ…ط© ط§ظ„طµط±ظپ", nf.format(totals.total_issue_value), Wallet],
+    ["ط¥ط¬ظ…ط§ظ„ظٹ ظ‚ظٹظ…ط© ط§ظ„ظ…ط®ط²ظˆظ† ط§ظ„ظ…طھط¨ظ‚ظٹ", nf.format(totals.total_stock_value), CircleDollarSign],
+    ["ظ‚ظٹظ…ط© ط§ظ„ظ…ط®ط²ظˆظ† ط¨ط§ظ„ط¹ظ…ظ„ط© ط§ظ„ط£ط³ط§ط³ظٹط©", nf.format(totals.total_stock_value_base), Banknote],
+    ["ط§ظ„ط£طµظ†ط§ظپ ظ…ظ†ط®ظپط¶ط© ط§ظ„ظ…ط®ط²ظˆظ†", totals.low_stock_count, AlertTriangle],
+    ["ط§ظ„ط£طµظ†ط§ظپ ط§ظ„ظ†ط§ظپط¯ط©", totals.out_of_stock_count, AlertTriangle],
   ];
   const byBranch = Object.entries(groupCount(issueMovements, "branch")).map(([name, value]) => ({ name, value }));
   const byCategory = Object.entries(groupCount(items, "category")).map(([name, value]) => ({ name, value }));
-  return <div className="space-y-5"><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">{cards.map(([label, value, I]) => <Mini key={label} label={label} value={value} I={I} />)}</div><div className="grid gap-5 xl:grid-cols-2"><Chart title="الصرف حسب الفروع" sub="حركات صرف الفروع"><ResponsiveContainer width="100%" height={240}><BarChart data={byBranch}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></Chart><Chart title="الأصناف حسب التصنيف" sub="توزيع الأصناف"><ResponsiveContainer width="100%" height={240}><PieChart><Pie data={byCategory} dataKey="value" innerRadius={55} outerRadius={85}>{["#7f1d1d", "#991b1b", "#dc2626", "#f59e0b", "#64748b"].map((c) => <Cell key={c} fill={c} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer></Chart></div></div>;
+  return <div className="space-y-5"><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">{cards.map(([label, value, I]) => <Mini key={label} label={label} value={value} I={I} />)}</div><div className="grid gap-5 xl:grid-cols-2"><Chart title="ط§ظ„طµط±ظپ ط­ط³ط¨ ط§ظ„ظپط±ظˆط¹" sub="ط­ط±ظƒط§طھ طµط±ظپ ط§ظ„ظپط±ظˆط¹"><ResponsiveContainer width="100%" height={240}><BarChart data={byBranch}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></Chart><Chart title="ط§ظ„ط£طµظ†ط§ظپ ط­ط³ط¨ ط§ظ„طھطµظ†ظٹظپ" sub="طھظˆط²ظٹط¹ ط§ظ„ط£طµظ†ط§ظپ"><ResponsiveContainer width="100%" height={240}><PieChart><Pie data={byCategory} dataKey="value" innerRadius={55} outerRadius={85}>{["#7f1d1d", "#991b1b", "#dc2626", "#f59e0b", "#64748b"].map((c) => <Cell key={c} fill={c} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer></Chart></div></div>;
 }
 
 function InventoryItemsTab({ rows, filters, setFilters, setDialog, deleteRecord, canCreate }) {
   const filtered = rows.filter((x) => (!filters.q || x.item_name.includes(filters.q) || x.item_code.includes(filters.q)) && (filters.category === "all" || x.category === filters.category) && (filters.status === "all" || x.stock_status === filters.status || String(x.is_active) === filters.status));
-  const exportRows = inventoryRowsForExport(filtered, [{ key: "item_code", label: "الكود" }, { key: "item_name", label: "الصنف" }, { key: "category", label: "التصنيف" }, { key: "unit_type", label: "الوحدة" }, { key: "current_balance", label: "الرصيد" }]);
-  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="بحث بالصنف أو الكود..." /><select value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })} className="field max-w-[180px]"><option value="all">كل التصنيفات</option>{inventoryCategories.map((c) => <option key={c}>{c}</option>)}</select><button disabled={!canCreate} onClick={() => setDialog({ kind: "item", item_id: `ITM-${Date.now()}`, item_code: "", item_name: "", category: inventoryCategories[0], unit_type: inventoryUnits[0], default_unit_cost: 0, minimum_stock: 0, reorder_point: 0, opening_balance: 0, current_balance: 0, default_currency_code: "YER", default_currency_name: getInventoryCurrency("YER").currency_name, exchange_rate: 1, is_active: true, notes: "" })} className="btn-primary"><Plus size={17} /> إضافة صنف</button><button onClick={() => exportExcel(exportRows, "الأصناف")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>الكود</th><th>الصنف</th><th>التصنيف</th><th>الوحدة</th><th>الرصيد</th><th>نقطة الطلب</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((r) => <tr key={r.item_id}><td>{r.item_code}</td><td>{r.item_name}</td><td>{r.category}</td><td>{r.unit_type}</td><td>{r.current_balance}</td><td>{r.reorder_point}</td><td><Status>{r.is_active ? "نشط" : "غير نشط"}</Status></td><td><button onClick={() => setDialog({ ...r, kind: "item" })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => setDialog({ kind: "details", row: r })} className="p-2 text-slate-600"><Eye size={16} /></button><button onClick={() => deleteRecord("items", r)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div></div>;
+  const exportRows = inventoryRowsForExport(filtered, [{ key: "item_code", label: "ط§ظ„ظƒظˆط¯" }, { key: "item_name", label: "ط§ظ„طµظ†ظپ" }, { key: "category", label: "ط§ظ„طھطµظ†ظٹظپ" }, { key: "unit_type", label: "ط§ظ„ظˆط­ط¯ط©" }, { key: "current_balance", label: "ط§ظ„ط±طµظٹط¯" }]);
+  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="ط¨ط­ط« ط¨ط§ظ„طµظ†ظپ ط£ظˆ ط§ظ„ظƒظˆط¯..." /><select value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })} className="field max-w-[180px]"><option value="all">ظƒظ„ ط§ظ„طھطµظ†ظٹظپط§طھ</option>{inventoryCategories.map((c) => <option key={c}>{c}</option>)}</select><button disabled={!canCreate} onClick={() => setDialog({ kind: "item", item_id: `ITM-${Date.now()}`, item_code: "", item_name: "", category: inventoryCategories[0], unit_type: inventoryUnits[0], default_unit_cost: 0, minimum_stock: 0, reorder_point: 0, opening_balance: 0, current_balance: 0, default_currency_code: "YER", default_currency_name: getInventoryCurrency("YER").currency_name, exchange_rate: 1, is_active: true, notes: "" })} className="btn-primary"><Plus size={17} /> ط¥ط¶ط§ظپط© طµظ†ظپ</button><button onClick={() => exportExcel(exportRows, "ط§ظ„ط£طµظ†ط§ظپ")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>ط§ظ„ظƒظˆط¯</th><th>ط§ظ„طµظ†ظپ</th><th>ط§ظ„طھطµظ†ظٹظپ</th><th>ط§ظ„ظˆط­ط¯ط©</th><th>ط§ظ„ط±طµظٹط¯</th><th>ظ†ظ‚ط·ط© ط§ظ„ط·ظ„ط¨</th><th>ط§ظ„ط­ط§ظ„ط©</th><th></th></tr></thead><tbody>{filtered.map((r) => <tr key={r.item_id}><td>{r.item_code}</td><td>{r.item_name}</td><td>{r.category}</td><td>{r.unit_type}</td><td>{r.current_balance}</td><td>{r.reorder_point}</td><td><Status>{r.is_active ? "ظ†ط´ط·" : "ط؛ظٹط± ظ†ط´ط·"}</Status></td><td><button onClick={() => setDialog({ ...r, kind: "item" })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => setDialog({ kind: "details", row: r })} className="p-2 text-slate-600"><Eye size={16} /></button><button onClick={() => deleteRecord("items", r)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div></div>;
 }
 
 function InventorySuppliersTab({ rows, filters, setFilters, setDialog, deleteRecord, canCreate }) {
   const filtered = rows.filter((x) => !filters.q || x.supplier_name.includes(filters.q) || x.phone.includes(filters.q));
-  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="بحث بالمورد..." /><button disabled={!canCreate} onClick={() => setDialog({ kind: "supplier", supplier_id: `SUP-${Date.now()}`, supplier_name: "", phone: "", address: "", tax_number: "", commercial_register: "", contact_person: "", is_active: true, notes: "" })} className="btn-primary"><Plus size={17} /> إضافة مورد</button><button onClick={() => exportExcel(filtered, "الموردون")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>المورد</th><th>الهاتف</th><th>السجل التجاري</th><th>مسؤول التواصل</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((r) => <tr key={r.supplier_id}><td>{r.supplier_name}</td><td>{r.phone}</td><td>{r.commercial_register}</td><td>{r.contact_person}</td><td><Status>{r.is_active ? "نشط" : "غير نشط"}</Status></td><td><button onClick={() => setDialog({ ...r, kind: "supplier" })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => deleteRecord("suppliers", r)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div></div>;
+  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="ط¨ط­ط« ط¨ط§ظ„ظ…ظˆط±ط¯..." /><button disabled={!canCreate} onClick={() => setDialog({ kind: "supplier", supplier_id: `SUP-${Date.now()}`, supplier_name: "", phone: "", address: "", tax_number: "", commercial_register: "", contact_person: "", is_active: true, notes: "" })} className="btn-primary"><Plus size={17} /> ط¥ط¶ط§ظپط© ظ…ظˆط±ط¯</button><button onClick={() => exportExcel(filtered, "ط§ظ„ظ…ظˆط±ط¯ظˆظ†")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>ط§ظ„ظ…ظˆط±ط¯</th><th>ط§ظ„ظ‡ط§طھظپ</th><th>ط§ظ„ط³ط¬ظ„ ط§ظ„طھط¬ط§ط±ظٹ</th><th>ظ…ط³ط¤ظˆظ„ ط§ظ„طھظˆط§طµظ„</th><th>ط§ظ„ط­ط§ظ„ط©</th><th></th></tr></thead><tbody>{filtered.map((r) => <tr key={r.supplier_id}><td>{r.supplier_name}</td><td>{r.phone}</td><td>{r.commercial_register}</td><td>{r.contact_person}</td><td><Status>{r.is_active ? "ظ†ط´ط·" : "ط؛ظٹط± ظ†ط´ط·"}</Status></td><td><button onClick={() => setDialog({ ...r, kind: "supplier" })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => deleteRecord("suppliers", r)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div></div>;
 }
 
 function InventoryDocumentsTab({ type, rows, items, suppliers, filters, setFilters, setDialog, deleteRecord, updateDocStatus, canCreate }) {
   const config = inventoryDocumentConfigs[type];
   const filtered = rows.filter((x) => (!filters.q || String(x.document_number || "").includes(filters.q) || String(x.supplier_name || x.branch || "").includes(filters.q)) && (filters.status === "all" || x.status === filters.status || x.approval_status === filters.status) && (!filters.month || String(x.document_date || "").startsWith(filters.month)));
-  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[200px] flex-1" placeholder="بحث بالمستند..." /><input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field max-w-[170px]" /><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[170px]"><option value="all">كل الحالات</option>{["مسودة", "قيد المراجعة", "معتمد", "مرحل", "مرفوض", "ملغي"].map((s) => <option key={s}>{s}</option>)}</select><button disabled={!canCreate} onClick={() => setDialog({ kind: "document", type, id: `${type.toUpperCase()}-${Date.now()}`, document_number: `${config.label}-${Date.now()}`, document_date: new Date().toISOString().slice(0, 10), status: "مسودة", approval_status: "مسودة", supplier_id: suppliers[0]?.supplier_id || "", supplier_name: suppliers[0]?.supplier_name || "", branch: branches[0], priority: "عادي", details: [] })} className="btn-primary"><Plus size={17} /> إضافة</button><button onClick={() => exportExcel(filtered, config.label)} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button><button onClick={() => printDocument(config.label, rowsToReportHtml(config.label, filtered, [{ key: "document_number", label: "الرقم" }, { key: "document_date", label: "التاريخ" }, { key: "supplier_name", label: "المورد" }, { key: "branch", label: "الفرع" }, { key: "status", label: "الحالة" }]))} className="btn-secondary"><Printer size={17} /> طباعة</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>رقم المستند</th><th>التاريخ</th><th>المورد/الفرع</th><th>الحالة</th><th>الاعتماد</th><th>القيمة</th><th></th></tr></thead><tbody>{filtered.map((r) => <tr key={r.id}><td>{r.document_number}</td><td>{r.document_date}</td><td>{r.supplier_name || r.branch || r.requesting_branch}</td><td><Status>{r.status}</Status></td><td><Status>{r.approval_status}</Status></td><td>{money(r.total_amount || 0)}</td><td><button onClick={() => setDialog({ kind: "details", row: r })} className="p-2 text-slate-600"><Eye size={16} /></button><button onClick={() => setDialog({ ...r, kind: "document", type, details: [] })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => updateDocStatus(type, r, "قيد المراجعة")} className="btn-secondary !h-8 !px-2">إرسال</button><button onClick={() => updateDocStatus(type, r, "معتمد")} className="btn-secondary !h-8 !px-2">اعتماد</button><button onClick={() => updateDocStatus(type, r, "مرحل")} className="btn-secondary !h-8 !px-2">ترحيل</button><button onClick={() => deleteRecord(type, r)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div></div>;
+  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[200px] flex-1" placeholder="ط¨ط­ط« ط¨ط§ظ„ظ…ط³طھظ†ط¯..." /><input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field max-w-[170px]" /><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[170px]"><option value="all">ظƒظ„ ط§ظ„ط­ط§ظ„ط§طھ</option>{["ظ…ط³ظˆط¯ط©", "ظ‚ظٹط¯ ط§ظ„ظ…ط±ط§ط¬ط¹ط©", "ظ…ط¹طھظ…ط¯", "ظ…ط±ط­ظ„", "ظ…ط±ظپظˆط¶", "ظ…ظ„ط؛ظٹ"].map((s) => <option key={s}>{s}</option>)}</select><button disabled={!canCreate} onClick={() => setDialog({ kind: "document", type, id: `${type.toUpperCase()}-${Date.now()}`, document_number: `${config.label}-${Date.now()}`, document_date: new Date().toISOString().slice(0, 10), status: "ظ…ط³ظˆط¯ط©", approval_status: "ظ…ط³ظˆط¯ط©", supplier_id: suppliers[0]?.supplier_id || "", supplier_name: suppliers[0]?.supplier_name || "", branch: branches[0], priority: "ط¹ط§ط¯ظٹ", details: [] })} className="btn-primary"><Plus size={17} /> ط¥ط¶ط§ظپط©</button><button onClick={() => exportExcel(filtered, config.label)} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button><button onClick={() => printDocument(config.label, rowsToReportHtml(config.label, filtered, [{ key: "document_number", label: "ط§ظ„ط±ظ‚ظ…" }, { key: "document_date", label: "ط§ظ„طھط§ط±ظٹط®" }, { key: "supplier_name", label: "ط§ظ„ظ…ظˆط±ط¯" }, { key: "branch", label: "ط§ظ„ظپط±ط¹" }, { key: "status", label: "ط§ظ„ط­ط§ظ„ط©" }]))} className="btn-secondary"><Printer size={17} /> ط·ط¨ط§ط¹ط©</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>ط±ظ‚ظ… ط§ظ„ظ…ط³طھظ†ط¯</th><th>ط§ظ„طھط§ط±ظٹط®</th><th>ط§ظ„ظ…ظˆط±ط¯/ط§ظ„ظپط±ط¹</th><th>ط§ظ„ط­ط§ظ„ط©</th><th>ط§ظ„ط§ط¹طھظ…ط§ط¯</th><th>ط§ظ„ظ‚ظٹظ…ط©</th><th></th></tr></thead><tbody>{filtered.map((r) => <tr key={r.id}><td>{r.document_number}</td><td>{r.document_date}</td><td>{r.supplier_name || r.branch || r.requesting_branch}</td><td><Status>{r.status}</Status></td><td><Status>{r.approval_status}</Status></td><td>{money(r.total_amount || 0)}</td><td><button onClick={() => setDialog({ kind: "details", row: r })} className="p-2 text-slate-600"><Eye size={16} /></button><button onClick={() => setDialog({ ...r, kind: "document", type, details: [] })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => updateDocStatus(type, r, "ظ‚ظٹط¯ ط§ظ„ظ…ط±ط§ط¬ط¹ط©")} className="btn-secondary !h-8 !px-2">ط¥ط±ط³ط§ظ„</button><button onClick={() => updateDocStatus(type, r, "ظ…ط¹طھظ…ط¯")} className="btn-secondary !h-8 !px-2">ط§ط¹طھظ…ط§ط¯</button><button onClick={() => updateDocStatus(type, r, "ظ…ط±ط­ظ„")} className="btn-secondary !h-8 !px-2">طھط±ط­ظٹظ„</button><button onClick={() => deleteRecord(type, r)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div></div>;
 }
 
-﻿function InventoryBalancesTab({ rows, filters, setFilters }) {
+function InventoryBalancesTab({ rows, filters, setFilters }) {
   const filtered = rows.filter((x) => (filters.category === "all" || x.category === filters.category) && (filters.status === "all" || x.stock_status === filters.status));
   const summary = filtered.reduce((acc, row) => ({ inQty: acc.inQty + Number(row.total_quantity_in || row.total_purchases || 0), outQty: acc.outQty + Number(row.total_quantity_out || row.total_issued || 0), remain: acc.remain + Number(row.remaining_quantity || row.current_balance || 0), value: acc.value + Number(row.remaining_stock_value || row.estimated_stock_value || 0), base: acc.base + Number(row.remaining_stock_value_base || row.total_value_base || 0) }), { inQty: 0, outQty: 0, remain: 0, value: 0, base: 0 });
-  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><select value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })} className="field max-w-[180px]"><option value="all">كل التصنيفات</option>{inventoryCategories.map((c) => <option key={c}>{c}</option>)}</select><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[180px]"><option value="all">كل الحالات</option>{["متوفر", "منخفض", "نافد", "يحتاج شراء"].map((s) => <option key={s}>{s}</option>)}</select><button onClick={() => exportExcel(filtered, "أرصدة المخزون")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>رقم الصنف</th><th>اسم الصنف</th><th>التصنيف</th><th>الوحدة</th><th>العملة</th><th>الافتتاحية</th><th>الكمية المدخلة</th><th>الكمية المصروفة</th><th>المتبقية</th><th>متوسط سعر الوحدة</th><th>قيمة الداخل</th><th>قيمة الصرف</th><th>قيمة المخزون</th><th>القيمة بالعملة الأساسية</th><th>آخر حركة</th><th>الحالة</th></tr></thead><tbody>{filtered.map((r) => <tr key={r.item_id}><td>{r.item_code}</td><td>{r.item_name}</td><td>{r.category}</td><td>{r.unit_type}</td><td>{r.currency_code || "YER"}</td><td>{r.opening_balance}</td><td>{r.total_quantity_in || r.total_purchases || 0}</td><td>{r.total_quantity_out || r.total_issued || 0}</td><td>{r.remaining_quantity || r.current_balance || 0}</td><td>{nf.format(Number(r.average_unit_cost || 0))}</td><td>{nf.format(Number(r.incoming_total_value || 0))}</td><td>{nf.format(Number(r.outgoing_total_value || 0))}</td><td>{nf.format(Number(r.remaining_stock_value || r.estimated_stock_value || 0))}</td><td>{nf.format(Number(r.remaining_stock_value_base || r.total_value_base || 0))}</td><td>{r.last_movement_date || ""}</td><td><Status>{r.stock_status}</Status></td></tr>)}<tr className="bg-slate-50 font-extrabold"><td colSpan="6">الإجمالي</td><td>{nf.format(summary.inQty)}</td><td>{nf.format(summary.outQty)}</td><td>{nf.format(summary.remain)}</td><td></td><td></td><td></td><td>{nf.format(summary.value)}</td><td>{nf.format(summary.base)}</td><td></td><td></td></tr></tbody></table></div></div></div>;
+  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><select value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })} className="field max-w-[180px]"><option value="all">ظƒظ„ ط§ظ„طھطµظ†ظٹظپط§طھ</option>{inventoryCategories.map((c) => <option key={c}>{c}</option>)}</select><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[180px]"><option value="all">ظƒظ„ ط§ظ„ط­ط§ظ„ط§طھ</option>{["ظ…طھظˆظپط±", "ظ…ظ†ط®ظپط¶", "ظ†ط§ظپط¯", "ظٹط­طھط§ط¬ ط´ط±ط§ط،"].map((s) => <option key={s}>{s}</option>)}</select><button onClick={() => exportExcel(filtered, "ط£ط±طµط¯ط© ط§ظ„ظ…ط®ط²ظˆظ†")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>ط±ظ‚ظ… ط§ظ„طµظ†ظپ</th><th>ط§ط³ظ… ط§ظ„طµظ†ظپ</th><th>ط§ظ„طھطµظ†ظٹظپ</th><th>ط§ظ„ظˆط­ط¯ط©</th><th>ط§ظ„ط¹ظ…ظ„ط©</th><th>ط§ظ„ط§ظپطھطھط§ط­ظٹط©</th><th>ط§ظ„ظƒظ…ظٹط© ط§ظ„ظ…ط¯ط®ظ„ط©</th><th>ط§ظ„ظƒظ…ظٹط© ط§ظ„ظ…طµط±ظˆظپط©</th><th>ط§ظ„ظ…طھط¨ظ‚ظٹط©</th><th>ظ…طھظˆط³ط· ط³ط¹ط± ط§ظ„ظˆط­ط¯ط©</th><th>ظ‚ظٹظ…ط© ط§ظ„ط¯ط§ط®ظ„</th><th>ظ‚ظٹظ…ط© ط§ظ„طµط±ظپ</th><th>ظ‚ظٹظ…ط© ط§ظ„ظ…ط®ط²ظˆظ†</th><th>ط§ظ„ظ‚ظٹظ…ط© ط¨ط§ظ„ط¹ظ…ظ„ط© ط§ظ„ط£ط³ط§ط³ظٹط©</th><th>ط¢ط®ط± ط­ط±ظƒط©</th><th>ط§ظ„ط­ط§ظ„ط©</th></tr></thead><tbody>{filtered.map((r) => <tr key={r.item_id}><td>{r.item_code}</td><td>{r.item_name}</td><td>{r.category}</td><td>{r.unit_type}</td><td>{r.currency_code || "YER"}</td><td>{r.opening_balance}</td><td>{r.total_quantity_in || r.total_purchases || 0}</td><td>{r.total_quantity_out || r.total_issued || 0}</td><td>{r.remaining_quantity || r.current_balance || 0}</td><td>{nf.format(Number(r.average_unit_cost || 0))}</td><td>{nf.format(Number(r.incoming_total_value || 0))}</td><td>{nf.format(Number(r.outgoing_total_value || 0))}</td><td>{nf.format(Number(r.remaining_stock_value || r.estimated_stock_value || 0))}</td><td>{nf.format(Number(r.remaining_stock_value_base || r.total_value_base || 0))}</td><td>{r.last_movement_date || ""}</td><td><Status>{r.stock_status}</Status></td></tr>)}<tr className="bg-slate-50 font-extrabold"><td colSpan="6">ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ</td><td>{nf.format(summary.inQty)}</td><td>{nf.format(summary.outQty)}</td><td>{nf.format(summary.remain)}</td><td></td><td></td><td></td><td>{nf.format(summary.value)}</td><td>{nf.format(summary.base)}</td><td></td><td></td></tr></tbody></table></div></div></div>;
 }
 
 
 function InventoryForecastTab({ rows, filters, setFilters }) {
-  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field max-w-[170px]" /><button onClick={() => exportExcel(rows, "توقع احتياج الفروع")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>الفرع</th><th>الصنف</th><th>إجمالي الصرف</th><th>متوسط شهري</th><th>احتياج شهر</th><th>احتياج 3 أشهر</th><th>الرصيد</th><th>الموصى بشرائه</th></tr></thead><tbody>{rows.map((r) => <tr key={`${r.branch}-${r.item_id}`}><td>{r.branch}</td><td>{r.item_name}</td><td>{r.total_issued_quantity}</td><td>{r.average_monthly_consumption}</td><td>{r.expected_need_next_month}</td><td>{r.expected_need_next_3_months}</td><td>{r.current_balance}</td><td>{r.recommended_purchase_quantity}</td></tr>)}</tbody></table></div></div></div>;
+  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">ظƒظ„ ط§ظ„ظپط±ظˆط¹</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field max-w-[170px]" /><button onClick={() => exportExcel(rows, "طھظˆظ‚ط¹ ط§ط­طھظٹط§ط¬ ط§ظ„ظپط±ظˆط¹")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>ط§ظ„ظپط±ط¹</th><th>ط§ظ„طµظ†ظپ</th><th>ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„طµط±ظپ</th><th>ظ…طھظˆط³ط· ط´ظ‡ط±ظٹ</th><th>ط§ط­طھظٹط§ط¬ ط´ظ‡ط±</th><th>ط§ط­طھظٹط§ط¬ 3 ط£ط´ظ‡ط±</th><th>ط§ظ„ط±طµظٹط¯</th><th>ط§ظ„ظ…ظˆطµظ‰ ط¨ط´ط±ط§ط¦ظ‡</th></tr></thead><tbody>{rows.map((r) => <tr key={`${r.branch}-${r.item_id}`}><td>{r.branch}</td><td>{r.item_name}</td><td>{r.total_issued_quantity}</td><td>{r.average_monthly_consumption}</td><td>{r.expected_need_next_month}</td><td>{r.expected_need_next_3_months}</td><td>{r.current_balance}</td><td>{r.recommended_purchase_quantity}</td></tr>)}</tbody></table></div></div></div>;
 }
 
 function InventoryReportsTab({ reports, filters, setFilters, canExport }) {
-  const reportList = [["تقرير الأصناف", reports.items], ["تقرير الموردين", reports.suppliers], ["تقرير طلبات الشراء", reports.purchase_requests], ["تقرير أوامر الشراء", reports.purchase_orders], ["تقرير إذون الاستلام", reports.receipts], ["تقرير فواتير الشراء", reports.invoices], ["تقرير الصرف للفروع", reports.issues], ["تقرير إرجاع الفروع", reports.returns], ["تقرير التحويلات", reports.transfers], ["تقرير التسويات", reports.adjustments], ["تقرير الجرد", reports.stocktakes], ["تقرير الرصيد الحالي", reports.balances], ["تقرير حركة صنف", reports.movements], ["تقرير الأصناف منخفضة المخزون", reports.low_stock]];
-  return <div className="space-y-4"><div className="panel grid gap-3 p-4 md:grid-cols-4"><input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field" /><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><select value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })} className="field"><option value="all">كل التصنيفات</option>{inventoryCategories.map((c) => <option key={c}>{c}</option>)}</select></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{reportList.map(([title, rows]) => <div key={title} className="panel p-5"><FileBarChart className="text-brand-700" /><h3 className="mt-3 font-extrabold">{title}</h3><p className="mt-1 text-xs text-slate-500">عدد السجلات: {(rows || []).length}</p><div className="mt-5 flex gap-2"><button disabled={!canExport} onClick={() => exportExcel(rows || [], title)} className="btn-secondary flex-1"><FileSpreadsheet size={15} /> Excel</button><button onClick={() => printDocument(title, rowsToReportHtml(title, rows || [], [{ key: "document_number", label: "الرقم" }, { key: "item_name", label: "الصنف" }, { key: "supplier_name", label: "المورد" }, { key: "branch", label: "الفرع" }, { key: "status", label: "الحالة" }]))} className="btn-secondary flex-1"><Printer size={15} /> PDF</button><button disabled={!canExport} onClick={() => exportDocx(title, rows || [])} className="btn-secondary flex-1"><Download size={15} /> Word</button></div></div>)}</div></div>;
+  const reportList = [["طھظ‚ط±ظٹط± ط§ظ„ط£طµظ†ط§ظپ", reports.items], ["طھظ‚ط±ظٹط± ط§ظ„ظ…ظˆط±ط¯ظٹظ†", reports.suppliers], ["طھظ‚ط±ظٹط± ط·ظ„ط¨ط§طھ ط§ظ„ط´ط±ط§ط،", reports.purchase_requests], ["طھظ‚ط±ظٹط± ط£ظˆط§ظ…ط± ط§ظ„ط´ط±ط§ط،", reports.purchase_orders], ["طھظ‚ط±ظٹط± ط¥ط°ظˆظ† ط§ظ„ط§ط³طھظ„ط§ظ…", reports.receipts], ["طھظ‚ط±ظٹط± ظپظˆط§طھظٹط± ط§ظ„ط´ط±ط§ط،", reports.invoices], ["طھظ‚ط±ظٹط± ط§ظ„طµط±ظپ ظ„ظ„ظپط±ظˆط¹", reports.issues], ["طھظ‚ط±ظٹط± ط¥ط±ط¬ط§ط¹ ط§ظ„ظپط±ظˆط¹", reports.returns], ["طھظ‚ط±ظٹط± ط§ظ„طھط­ظˆظٹظ„ط§طھ", reports.transfers], ["طھظ‚ط±ظٹط± ط§ظ„طھط³ظˆظٹط§طھ", reports.adjustments], ["طھظ‚ط±ظٹط± ط§ظ„ط¬ط±ط¯", reports.stocktakes], ["طھظ‚ط±ظٹط± ط§ظ„ط±طµظٹط¯ ط§ظ„ط­ط§ظ„ظٹ", reports.balances], ["طھظ‚ط±ظٹط± ط­ط±ظƒط© طµظ†ظپ", reports.movements], ["طھظ‚ط±ظٹط± ط§ظ„ط£طµظ†ط§ظپ ظ…ظ†ط®ظپط¶ط© ط§ظ„ظ…ط®ط²ظˆظ†", reports.low_stock]];
+  return <div className="space-y-4"><div className="panel grid gap-3 p-4 md:grid-cols-4"><input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field" /><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field"><option value="all">ظƒظ„ ط§ظ„ظپط±ظˆط¹</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><select value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })} className="field"><option value="all">ظƒظ„ ط§ظ„طھطµظ†ظٹظپط§طھ</option>{inventoryCategories.map((c) => <option key={c}>{c}</option>)}</select></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{reportList.map(([title, rows]) => <div key={title} className="panel p-5"><FileBarChart className="text-brand-700" /><h3 className="mt-3 font-extrabold">{title}</h3><p className="mt-1 text-xs text-slate-500">ط¹ط¯ط¯ ط§ظ„ط³ط¬ظ„ط§طھ: {(rows || []).length}</p><div className="mt-5 flex gap-2"><button disabled={!canExport} onClick={() => exportExcel(rows || [], title)} className="btn-secondary flex-1"><FileSpreadsheet size={15} /> Excel</button><button onClick={() => printDocument(title, rowsToReportHtml(title, rows || [], [{ key: "document_number", label: "ط§ظ„ط±ظ‚ظ…" }, { key: "item_name", label: "ط§ظ„طµظ†ظپ" }, { key: "supplier_name", label: "ط§ظ„ظ…ظˆط±ط¯" }, { key: "branch", label: "ط§ظ„ظپط±ط¹" }, { key: "status", label: "ط§ظ„ط­ط§ظ„ط©" }]))} className="btn-secondary flex-1"><Printer size={15} /> PDF</button><button disabled={!canExport} onClick={() => exportDocx(title, rows || [])} className="btn-secondary flex-1"><Download size={15} /> Word</button></div></div>)}</div></div>;
 }
 
 function InventorySettingsTab() {
@@ -4767,56 +4981,56 @@ function InventorySettingsTab() {
       await inventorySettingsService.saveInventorySettings(settings);
       await inventorySettingsService.saveDocumentNumbering(numbering);
       await Promise.all(currencyRows.map((row) => inventoryService.saveInventoryCurrencySetting(row)));
-      alert("تم حفظ إعدادات المخزون");
+      alert("طھظ… ط­ظپط¸ ط¥ط¹ط¯ط§ط¯ط§طھ ط§ظ„ظ…ط®ط²ظˆظ†");
     } catch (e) { alert(e.message); }
   };
-  if (loading) return <div className="panel p-6 text-center text-sm text-slate-500">جاري تحميل إعدادات المخزون...</div>;
+  if (loading) return <div className="panel p-6 text-center text-sm text-slate-500">ط¬ط§ط±ظٹ طھط­ظ…ظٹظ„ ط¥ط¹ط¯ط§ط¯ط§طھ ط§ظ„ظ…ط®ط²ظˆظ†...</div>;
   return (
     <div className="space-y-5">
       <div className="panel p-5">
-        <div className="mb-4 flex"><h3 className="font-extrabold">الإعدادات العامة للمخزون</h3><button onClick={saveAll} className="btn-primary mr-auto"><Save size={17} /> حفظ الإعدادات</button></div>
+        <div className="mb-4 flex"><h3 className="font-extrabold">ط§ظ„ط¥ط¹ط¯ط§ط¯ط§طھ ط§ظ„ط¹ط§ظ…ط© ظ„ظ„ظ…ط®ط²ظˆظ†</h3><button onClick={saveAll} className="btn-primary mr-auto"><Save size={17} /> ط­ظپط¸ ط§ظ„ط¥ط¹ط¯ط§ط¯ط§طھ</button></div>
         <div className="grid gap-4 md:grid-cols-3">
-          <Label t="اسم المخزن الرئيسي"><input value={general.main_warehouse_name || ""} onChange={(e) => setGeneral({ main_warehouse_name: e.target.value })} className="field mt-2" /></Label>
-          <Label t="تفعيل تعدد المخازن"><select value={String(general.multi_warehouses === true)} onChange={(e) => setGeneral({ multi_warehouses: e.target.value === "true" })} className="field mt-2"><option value="false">لا</option><option value="true">نعم</option></select></Label>
-          <Label t="السماح بالصرف بدون رصيد"><select value={String(general.allow_negative_stock === true)} onChange={(e) => setGeneral({ allow_negative_stock: e.target.value === "true" })} className="field mt-2"><option value="false">لا</option><option value="true">نعم</option></select></Label>
-          <Label t="تعديل المستندات المرحلة"><select value={String(general.allow_edit_posted_documents === true)} onChange={(e) => setGeneral({ allow_edit_posted_documents: e.target.value === "true" })} className="field mt-2"><option value="false">لا</option><option value="true">نعم</option></select></Label>
-          <Label t="طريقة تقييم المخزون"><select value={general.valuation_method || "متوسط التكلفة"} onChange={(e) => setGeneral({ valuation_method: e.target.value })} className="field mt-2"><option>متوسط التكلفة</option><option>آخر سعر شراء</option><option>سعر ثابت</option></select></Label>
-          <Label t="تفعيل حد إعادة الطلب"><select value={String(general.enable_reorder_point !== false)} onChange={(e) => setGeneral({ enable_reorder_point: e.target.value === "true" })} className="field mt-2"><option value="true">نعم</option><option value="false">لا</option></select></Label>
-          <Label t="اعتماد سندات الصرف"><select value={String(general.require_issue_approval !== false)} onChange={(e) => setGeneral({ require_issue_approval: e.target.value === "true" })} className="field mt-2"><option value="true">نعم</option><option value="false">لا</option></select></Label>
-          <Label t="أيام التنبيه قبل النفاد"><input type="number" value={general.stock_alert_days || 0} onChange={(e) => setGeneral({ stock_alert_days: e.target.value })} className="field mt-2" /></Label>
-          <Label t="الوحدة الافتراضية"><select value={general.default_unit || "حبة"} onChange={(e) => setGeneral({ default_unit: e.target.value })} className="field mt-2">{inventoryUnits.map((u) => <option key={u}>{u}</option>)}</select></Label>
+          <Label t="ط§ط³ظ… ط§ظ„ظ…ط®ط²ظ† ط§ظ„ط±ط¦ظٹط³ظٹ"><input value={general.main_warehouse_name || ""} onChange={(e) => setGeneral({ main_warehouse_name: e.target.value })} className="field mt-2" /></Label>
+          <Label t="طھظپط¹ظٹظ„ طھط¹ط¯ط¯ ط§ظ„ظ…ط®ط§ط²ظ†"><select value={String(general.multi_warehouses === true)} onChange={(e) => setGeneral({ multi_warehouses: e.target.value === "true" })} className="field mt-2"><option value="false">ظ„ط§</option><option value="true">ظ†ط¹ظ…</option></select></Label>
+          <Label t="ط§ظ„ط³ظ…ط§ط­ ط¨ط§ظ„طµط±ظپ ط¨ط¯ظˆظ† ط±طµظٹط¯"><select value={String(general.allow_negative_stock === true)} onChange={(e) => setGeneral({ allow_negative_stock: e.target.value === "true" })} className="field mt-2"><option value="false">ظ„ط§</option><option value="true">ظ†ط¹ظ…</option></select></Label>
+          <Label t="طھط¹ط¯ظٹظ„ ط§ظ„ظ…ط³طھظ†ط¯ط§طھ ط§ظ„ظ…ط±ط­ظ„ط©"><select value={String(general.allow_edit_posted_documents === true)} onChange={(e) => setGeneral({ allow_edit_posted_documents: e.target.value === "true" })} className="field mt-2"><option value="false">ظ„ط§</option><option value="true">ظ†ط¹ظ…</option></select></Label>
+          <Label t="ط·ط±ظٹظ‚ط© طھظ‚ظٹظٹظ… ط§ظ„ظ…ط®ط²ظˆظ†"><select value={general.valuation_method || "ظ…طھظˆط³ط· ط§ظ„طھظƒظ„ظپط©"} onChange={(e) => setGeneral({ valuation_method: e.target.value })} className="field mt-2"><option>ظ…طھظˆط³ط· ط§ظ„طھظƒظ„ظپط©</option><option>ط¢ط®ط± ط³ط¹ط± ط´ط±ط§ط،</option><option>ط³ط¹ط± ط«ط§ط¨طھ</option></select></Label>
+          <Label t="طھظپط¹ظٹظ„ ط­ط¯ ط¥ط¹ط§ط¯ط© ط§ظ„ط·ظ„ط¨"><select value={String(general.enable_reorder_point !== false)} onChange={(e) => setGeneral({ enable_reorder_point: e.target.value === "true" })} className="field mt-2"><option value="true">ظ†ط¹ظ…</option><option value="false">ظ„ط§</option></select></Label>
+          <Label t="ط§ط¹طھظ…ط§ط¯ ط³ظ†ط¯ط§طھ ط§ظ„طµط±ظپ"><select value={String(general.require_issue_approval !== false)} onChange={(e) => setGeneral({ require_issue_approval: e.target.value === "true" })} className="field mt-2"><option value="true">ظ†ط¹ظ…</option><option value="false">ظ„ط§</option></select></Label>
+          <Label t="ط£ظٹط§ظ… ط§ظ„طھظ†ط¨ظٹظ‡ ظ‚ط¨ظ„ ط§ظ„ظ†ظپط§ط¯"><input type="number" value={general.stock_alert_days || 0} onChange={(e) => setGeneral({ stock_alert_days: e.target.value })} className="field mt-2" /></Label>
+          <Label t="ط§ظ„ظˆط­ط¯ط© ط§ظ„ط§ظپطھط±ط§ط¶ظٹط©"><select value={general.default_unit || "ط­ط¨ط©"} onChange={(e) => setGeneral({ default_unit: e.target.value })} className="field mt-2">{inventoryUnits.map((u) => <option key={u}>{u}</option>)}</select></Label>
         </div>
       </div>
       <div className="panel p-5">
-        <div className="mb-4 flex"><h3 className="font-extrabold">إعدادات العملات</h3><button onClick={() => setCurrencyRows([...currencyRows, { setting_id: `CUR-${Date.now()}`, currency_code: "", currency_name: "", exchange_rate: 1, is_base_currency: false, is_active: true }])} className="btn-secondary mr-auto"><Plus size={17} /> إضافة عملة</button></div>
-        <div className="grid gap-4 md:grid-cols-3"><Label t="العملة الافتراضية"><select value={currencyRows.find((c) => c.is_base_currency)?.currency_code || "YER"} onChange={(e) => setCurrencyRows(currencyRows.map((row) => ({ ...row, is_base_currency: row.currency_code === e.target.value })))} className="field mt-2">{currencyRows.map((c) => <option key={c.currency_code} value={c.currency_code}>{c.currency_code} - {c.currency_name}</option>)}</select></Label><Label t="السماح بتغيير العملة في المستندات"><select value={String(general.allow_document_currency_change !== false)} onChange={(e) => setGeneral({ allow_document_currency_change: e.target.value === "true" })} className="field mt-2"><option value="true">نعم</option><option value="false">لا</option></select></Label><Label t="التحويل للعملة الأساسية في التقارير"><select value={String(general.enable_base_currency_reports !== false)} onChange={(e) => setGeneral({ enable_base_currency_reports: e.target.value === "true" })} className="field mt-2"><option value="true">نعم</option><option value="false">لا</option></select></Label></div>
-        <div className="table-wrap mt-4"><table><thead><tr><th>الكود</th><th>اسم العملة</th><th>سعر الصرف</th><th>عملة أساسية</th><th>نشطة</th></tr></thead><tbody>{currencyRows.map((row, i) => <tr key={row.setting_id || row.currency_code || i}><td><input className="field" value={row.currency_code} onChange={(e) => setCurrencyRows(currencyRows.map((x, idx) => idx === i ? { ...x, currency_code: e.target.value } : x))} /></td><td><input className="field" value={row.currency_name} onChange={(e) => setCurrencyRows(currencyRows.map((x, idx) => idx === i ? { ...x, currency_name: e.target.value } : x))} /></td><td><input type="number" className="field" value={row.exchange_rate} onChange={(e) => setCurrencyRows(currencyRows.map((x, idx) => idx === i ? { ...x, exchange_rate: e.target.value } : x))} /></td><td><input type="checkbox" checked={row.is_base_currency === true} onChange={(e) => setCurrencyRows(currencyRows.map((x, idx) => ({ ...x, is_base_currency: idx === i ? e.target.checked : e.target.checked ? false : x.is_base_currency })))} /></td><td><input type="checkbox" checked={row.is_active !== false} onChange={(e) => setCurrencyRows(currencyRows.map((x, idx) => idx === i ? { ...x, is_active: e.target.checked } : x))} /></td></tr>)}</tbody></table></div>
+        <div className="mb-4 flex"><h3 className="font-extrabold">ط¥ط¹ط¯ط§ط¯ط§طھ ط§ظ„ط¹ظ…ظ„ط§طھ</h3><button onClick={() => setCurrencyRows([...currencyRows, { setting_id: `CUR-${Date.now()}`, currency_code: "", currency_name: "", exchange_rate: 1, is_base_currency: false, is_active: true }])} className="btn-secondary mr-auto"><Plus size={17} /> ط¥ط¶ط§ظپط© ط¹ظ…ظ„ط©</button></div>
+        <div className="grid gap-4 md:grid-cols-3"><Label t="ط§ظ„ط¹ظ…ظ„ط© ط§ظ„ط§ظپطھط±ط§ط¶ظٹط©"><select value={currencyRows.find((c) => c.is_base_currency)?.currency_code || "YER"} onChange={(e) => setCurrencyRows(currencyRows.map((row) => ({ ...row, is_base_currency: row.currency_code === e.target.value })))} className="field mt-2">{currencyRows.map((c) => <option key={c.currency_code} value={c.currency_code}>{c.currency_code} - {c.currency_name}</option>)}</select></Label><Label t="ط§ظ„ط³ظ…ط§ط­ ط¨طھط؛ظٹظٹط± ط§ظ„ط¹ظ…ظ„ط© ظپظٹ ط§ظ„ظ…ط³طھظ†ط¯ط§طھ"><select value={String(general.allow_document_currency_change !== false)} onChange={(e) => setGeneral({ allow_document_currency_change: e.target.value === "true" })} className="field mt-2"><option value="true">ظ†ط¹ظ…</option><option value="false">ظ„ط§</option></select></Label><Label t="ط§ظ„طھط­ظˆظٹظ„ ظ„ظ„ط¹ظ…ظ„ط© ط§ظ„ط£ط³ط§ط³ظٹط© ظپظٹ ط§ظ„طھظ‚ط§ط±ظٹط±"><select value={String(general.enable_base_currency_reports !== false)} onChange={(e) => setGeneral({ enable_base_currency_reports: e.target.value === "true" })} className="field mt-2"><option value="true">ظ†ط¹ظ…</option><option value="false">ظ„ط§</option></select></Label></div>
+        <div className="table-wrap mt-4"><table><thead><tr><th>ط§ظ„ظƒظˆط¯</th><th>ط§ط³ظ… ط§ظ„ط¹ظ…ظ„ط©</th><th>ط³ط¹ط± ط§ظ„طµط±ظپ</th><th>ط¹ظ…ظ„ط© ط£ط³ط§ط³ظٹط©</th><th>ظ†ط´ط·ط©</th></tr></thead><tbody>{currencyRows.map((row, i) => <tr key={row.setting_id || row.currency_code || i}><td><input className="field" value={row.currency_code} onChange={(e) => setCurrencyRows(currencyRows.map((x, idx) => idx === i ? { ...x, currency_code: e.target.value } : x))} /></td><td><input className="field" value={row.currency_name} onChange={(e) => setCurrencyRows(currencyRows.map((x, idx) => idx === i ? { ...x, currency_name: e.target.value } : x))} /></td><td><input type="number" className="field" value={row.exchange_rate} onChange={(e) => setCurrencyRows(currencyRows.map((x, idx) => idx === i ? { ...x, exchange_rate: e.target.value } : x))} /></td><td><input type="checkbox" checked={row.is_base_currency === true} onChange={(e) => setCurrencyRows(currencyRows.map((x, idx) => ({ ...x, is_base_currency: idx === i ? e.target.checked : e.target.checked ? false : x.is_base_currency })))} /></td><td><input type="checkbox" checked={row.is_active !== false} onChange={(e) => setCurrencyRows(currencyRows.map((x, idx) => idx === i ? { ...x, is_active: e.target.checked } : x))} /></td></tr>)}</tbody></table></div>
       </div>
       <div className="panel p-5">
-        <h3 className="mb-4 font-extrabold">ترقيم المستندات</h3>
-        <div className="table-wrap"><table><thead><tr><th>المستند</th><th>Prefix</th><th>الرقم التالي</th><th>إعادة سنوية</th><th>مثال</th></tr></thead><tbody>{numbering.map((row, i) => <tr key={row.numbering_id}><td>{row.document_label}</td><td><input className="field" value={row.prefix} onChange={(e) => setNumbering(numbering.map((x, idx) => idx === i ? { ...x, prefix: e.target.value } : x))} /></td><td><input type="number" className="field" value={row.next_number} onChange={(e) => setNumbering(numbering.map((x, idx) => idx === i ? { ...x, next_number: e.target.value } : x))} /></td><td><input type="checkbox" checked={row.reset_yearly} onChange={(e) => setNumbering(numbering.map((x, idx) => idx === i ? { ...x, reset_yearly: e.target.checked } : x))} /></td><td>{inventorySettingsService.generateDocumentNumber(row)}</td></tr>)}</tbody></table></div>
+        <h3 className="mb-4 font-extrabold">طھط±ظ‚ظٹظ… ط§ظ„ظ…ط³طھظ†ط¯ط§طھ</h3>
+        <div className="table-wrap"><table><thead><tr><th>ط§ظ„ظ…ط³طھظ†ط¯</th><th>Prefix</th><th>ط§ظ„ط±ظ‚ظ… ط§ظ„طھط§ظ„ظٹ</th><th>ط¥ط¹ط§ط¯ط© ط³ظ†ظˆظٹط©</th><th>ظ…ط«ط§ظ„</th></tr></thead><tbody>{numbering.map((row, i) => <tr key={row.numbering_id}><td>{row.document_label}</td><td><input className="field" value={row.prefix} onChange={(e) => setNumbering(numbering.map((x, idx) => idx === i ? { ...x, prefix: e.target.value } : x))} /></td><td><input type="number" className="field" value={row.next_number} onChange={(e) => setNumbering(numbering.map((x, idx) => idx === i ? { ...x, next_number: e.target.value } : x))} /></td><td><input type="checkbox" checked={row.reset_yearly} onChange={(e) => setNumbering(numbering.map((x, idx) => idx === i ? { ...x, reset_yearly: e.target.checked } : x))} /></td><td>{inventorySettingsService.generateDocumentNumber(row)}</td></tr>)}</tbody></table></div>
       </div>
       <div className="panel p-5">
-        <div className="mb-4 flex"><h3 className="font-extrabold">إعدادات الفروع المخزنية</h3><button onClick={() => setBranchRows([...branchRows, { branch_setting_id: `IBS-${Date.now()}`, branch: branches[0] || "", allowed_to_request_items: true, allowed_to_receive_items: true, max_monthly_issue_limit: 0, default_receiver: "", notes: "" }])} className="btn-secondary mr-auto"><Plus size={17} /> إضافة فرع</button></div>
-        <div className="table-wrap"><table><thead><tr><th>الفرع</th><th>طلب أصناف</th><th>استلام أصناف</th><th>حد الصرف الشهري</th><th>المستلم الافتراضي</th><th></th></tr></thead><tbody>{branchRows.map((row, i) => <tr key={row.branch_setting_id}><td><select className="field" value={row.branch} onChange={(e) => setBranchRows(branchRows.map((x, idx) => idx === i ? { ...x, branch: e.target.value } : x))}>{branches.map((b) => <option key={b}>{b}</option>)}</select></td><td><input type="checkbox" checked={row.allowed_to_request_items} onChange={(e) => setBranchRows(branchRows.map((x, idx) => idx === i ? { ...x, allowed_to_request_items: e.target.checked } : x))} /></td><td><input type="checkbox" checked={row.allowed_to_receive_items} onChange={(e) => setBranchRows(branchRows.map((x, idx) => idx === i ? { ...x, allowed_to_receive_items: e.target.checked } : x))} /></td><td><input className="field" type="number" value={row.max_monthly_issue_limit} onChange={(e) => setBranchRows(branchRows.map((x, idx) => idx === i ? { ...x, max_monthly_issue_limit: e.target.value } : x))} /></td><td><input className="field" value={row.default_receiver} onChange={(e) => setBranchRows(branchRows.map((x, idx) => idx === i ? { ...x, default_receiver: e.target.value } : x))} /></td><td><button onClick={() => inventorySettingsService.saveBranchSetting(row).then(load).catch((e) => alert(e.message))} className="text-blue-600"><Save size={16} /></button><button onClick={() => inventorySettingsService.deleteBranchSetting(row.branch_setting_id).then(load).catch((e) => alert(e.message))} className="text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>
+        <div className="mb-4 flex"><h3 className="font-extrabold">ط¥ط¹ط¯ط§ط¯ط§طھ ط§ظ„ظپط±ظˆط¹ ط§ظ„ظ…ط®ط²ظ†ظٹط©</h3><button onClick={() => setBranchRows([...branchRows, { branch_setting_id: `IBS-${Date.now()}`, branch: branches[0] || "", allowed_to_request_items: true, allowed_to_receive_items: true, max_monthly_issue_limit: 0, default_receiver: "", notes: "" }])} className="btn-secondary mr-auto"><Plus size={17} /> ط¥ط¶ط§ظپط© ظپط±ط¹</button></div>
+        <div className="table-wrap"><table><thead><tr><th>ط§ظ„ظپط±ط¹</th><th>ط·ظ„ط¨ ط£طµظ†ط§ظپ</th><th>ط§ط³طھظ„ط§ظ… ط£طµظ†ط§ظپ</th><th>ط­ط¯ ط§ظ„طµط±ظپ ط§ظ„ط´ظ‡ط±ظٹ</th><th>ط§ظ„ظ…ط³طھظ„ظ… ط§ظ„ط§ظپطھط±ط§ط¶ظٹ</th><th></th></tr></thead><tbody>{branchRows.map((row, i) => <tr key={row.branch_setting_id}><td><select className="field" value={row.branch} onChange={(e) => setBranchRows(branchRows.map((x, idx) => idx === i ? { ...x, branch: e.target.value } : x))}>{branches.map((b) => <option key={b}>{b}</option>)}</select></td><td><input type="checkbox" checked={row.allowed_to_request_items} onChange={(e) => setBranchRows(branchRows.map((x, idx) => idx === i ? { ...x, allowed_to_request_items: e.target.checked } : x))} /></td><td><input type="checkbox" checked={row.allowed_to_receive_items} onChange={(e) => setBranchRows(branchRows.map((x, idx) => idx === i ? { ...x, allowed_to_receive_items: e.target.checked } : x))} /></td><td><input className="field" type="number" value={row.max_monthly_issue_limit} onChange={(e) => setBranchRows(branchRows.map((x, idx) => idx === i ? { ...x, max_monthly_issue_limit: e.target.value } : x))} /></td><td><input className="field" value={row.default_receiver} onChange={(e) => setBranchRows(branchRows.map((x, idx) => idx === i ? { ...x, default_receiver: e.target.value } : x))} /></td><td><button onClick={() => inventorySettingsService.saveBranchSetting(row).then(load).catch((e) => alert(e.message))} className="text-blue-600"><Save size={16} /></button><button onClick={() => inventorySettingsService.deleteBranchSetting(row.branch_setting_id).then(load).catch((e) => alert(e.message))} className="text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>
       </div>
     </div>
   );
 }
 
-﻿function InventoryItemDialog({ dialog, setDialog, save }) {
+function InventoryItemDialog({ dialog, setDialog, save }) {
   const currency = getInventoryCurrency(dialog.default_currency_code || dialog.currency_code || "YER");
   const totals = calculateInventoryLineTotal({ quantity: dialog.current_balance || dialog.opening_balance || 0, unit_price: dialog.default_unit_cost || 0, currency_code: currency.currency_code, exchange_rate: dialog.exchange_rate || currency.exchange_rate });
   const setCurrency = (code) => { const c = getInventoryCurrency(code); setDialog({ ...dialog, default_currency_code: c.currency_code, default_currency_name: c.currency_name, currency_code: c.currency_code, currency_name: c.currency_name, exchange_rate: c.exchange_rate }); };
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6"><DialogTitle title="بيانات الصنف" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="كود الصنف"><input required value={dialog.item_code} onChange={(e) => setDialog({ ...dialog, item_code: e.target.value })} className="field mt-2" /></Label><Label t="اسم الصنف"><input required value={dialog.item_name} onChange={(e) => setDialog({ ...dialog, item_name: e.target.value })} className="field mt-2" /></Label><Label t="التصنيف"><select value={dialog.category} onChange={(e) => setDialog({ ...dialog, category: e.target.value })} className="field mt-2">{inventoryCategories.map((c) => <option key={c}>{c}</option>)}</select></Label><Label t="وحدة القياس"><select value={dialog.unit_type} onChange={(e) => setDialog({ ...dialog, unit_type: e.target.value })} className="field mt-2">{inventoryUnits.map((u) => <option key={u}>{u}</option>)}</select></Label><Label t="تكلفة الوحدة"><input type="number" value={dialog.default_unit_cost} onChange={(e) => setDialog({ ...dialog, default_unit_cost: e.target.value })} className="field mt-2" /></Label><Label t="العملة"><select value={currency.currency_code} onChange={(e) => setCurrency(e.target.value)} className="field mt-2">{inventoryCurrencies.map((c) => <option key={c.currency_code} value={c.currency_code}>{c.currency_code} - {c.currency_name}</option>)}</select></Label><Label t="سعر الصرف"><input type="number" value={dialog.exchange_rate || currency.exchange_rate} onChange={(e) => setDialog({ ...dialog, exchange_rate: e.target.value })} className="field mt-2" /></Label><Label t="الحد الأدنى"><input type="number" value={dialog.minimum_stock} onChange={(e) => setDialog({ ...dialog, minimum_stock: e.target.value })} className="field mt-2" /></Label><Label t="نقطة إعادة الطلب"><input type="number" value={dialog.reorder_point} onChange={(e) => setDialog({ ...dialog, reorder_point: e.target.value })} className="field mt-2" /></Label><Label t="الرصيد الافتتاحي"><input type="number" value={dialog.opening_balance} onChange={(e) => setDialog({ ...dialog, opening_balance: e.target.value, current_balance: e.target.value })} className="field mt-2" /></Label><Label t="إجمالي السعر"><input readOnly value={`${nf.format(totals.total_value)} ${totals.currency_code}`} className="field mt-2 bg-slate-50" /></Label><Label t="الإجمالي بالعملة الأساسية"><input readOnly value={`${nf.format(totals.total_value_base)} YER`} className="field mt-2 bg-slate-50" /></Label><Label t="الحالة"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">غير نشط</option></select></Label><Label t="ملاحظات"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>;
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6"><DialogTitle title="ط¨ظٹط§ظ†ط§طھ ط§ظ„طµظ†ظپ" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="ظƒظˆط¯ ط§ظ„طµظ†ظپ"><input required value={dialog.item_code} onChange={(e) => setDialog({ ...dialog, item_code: e.target.value })} className="field mt-2" /></Label><Label t="ط§ط³ظ… ط§ظ„طµظ†ظپ"><input required value={dialog.item_name} onChange={(e) => setDialog({ ...dialog, item_name: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„طھطµظ†ظٹظپ"><select value={dialog.category} onChange={(e) => setDialog({ ...dialog, category: e.target.value })} className="field mt-2">{inventoryCategories.map((c) => <option key={c}>{c}</option>)}</select></Label><Label t="ظˆط­ط¯ط© ط§ظ„ظ‚ظٹط§ط³"><select value={dialog.unit_type} onChange={(e) => setDialog({ ...dialog, unit_type: e.target.value })} className="field mt-2">{inventoryUnits.map((u) => <option key={u}>{u}</option>)}</select></Label><Label t="طھظƒظ„ظپط© ط§ظ„ظˆط­ط¯ط©"><input type="number" value={dialog.default_unit_cost} onChange={(e) => setDialog({ ...dialog, default_unit_cost: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ط¹ظ…ظ„ط©"><select value={currency.currency_code} onChange={(e) => setCurrency(e.target.value)} className="field mt-2">{inventoryCurrencies.map((c) => <option key={c.currency_code} value={c.currency_code}>{c.currency_code} - {c.currency_name}</option>)}</select></Label><Label t="ط³ط¹ط± ط§ظ„طµط±ظپ"><input type="number" value={dialog.exchange_rate || currency.exchange_rate} onChange={(e) => setDialog({ ...dialog, exchange_rate: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ط­ط¯ ط§ظ„ط£ط¯ظ†ظ‰"><input type="number" value={dialog.minimum_stock} onChange={(e) => setDialog({ ...dialog, minimum_stock: e.target.value })} className="field mt-2" /></Label><Label t="ظ†ظ‚ط·ط© ط¥ط¹ط§ط¯ط© ط§ظ„ط·ظ„ط¨"><input type="number" value={dialog.reorder_point} onChange={(e) => setDialog({ ...dialog, reorder_point: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ط±طµظٹط¯ ط§ظ„ط§ظپطھطھط§ط­ظٹ"><input type="number" value={dialog.opening_balance} onChange={(e) => setDialog({ ...dialog, opening_balance: e.target.value, current_balance: e.target.value })} className="field mt-2" /></Label><Label t="ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ط³ط¹ط±"><input readOnly value={`${nf.format(totals.total_value)} ${totals.currency_code}`} className="field mt-2 bg-slate-50" /></Label><Label t="ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ ط¨ط§ظ„ط¹ظ…ظ„ط© ط§ظ„ط£ط³ط§ط³ظٹط©"><input readOnly value={`${nf.format(totals.total_value_base)} YER`} className="field mt-2 bg-slate-50" /></Label><Label t="ط§ظ„ط­ط§ظ„ط©"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">ظ†ط´ط·</option><option value="false">ط؛ظٹط± ظ†ط´ط·</option></select></Label><Label t="ظ…ظ„ط§ط­ط¸ط§طھ"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>;
 }
 
 
 function InventorySupplierDialog({ dialog, setDialog, save }) {
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-3xl overflow-y-auto p-6"><DialogTitle title="بيانات المورد" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-2"><Label t="اسم المورد"><input required value={dialog.supplier_name} onChange={(e) => setDialog({ ...dialog, supplier_name: e.target.value })} className="field mt-2" /></Label><Label t="الهاتف"><input value={dialog.phone} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label><Label t="العنوان"><input value={dialog.address} onChange={(e) => setDialog({ ...dialog, address: e.target.value })} className="field mt-2" /></Label><Label t="الرقم الضريبي"><input value={dialog.tax_number} onChange={(e) => setDialog({ ...dialog, tax_number: e.target.value })} className="field mt-2" /></Label><Label t="السجل التجاري"><input value={dialog.commercial_register} onChange={(e) => setDialog({ ...dialog, commercial_register: e.target.value })} className="field mt-2" /></Label><Label t="مسؤول التواصل"><input value={dialog.contact_person} onChange={(e) => setDialog({ ...dialog, contact_person: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">غير نشط</option></select></Label><Label t="ملاحظات"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>;
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-3xl overflow-y-auto p-6"><DialogTitle title="ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ظˆط±ط¯" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-2"><Label t="ط§ط³ظ… ط§ظ„ظ…ظˆط±ط¯"><input required value={dialog.supplier_name} onChange={(e) => setDialog({ ...dialog, supplier_name: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ظ‡ط§طھظپ"><input value={dialog.phone} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ط¹ظ†ظˆط§ظ†"><input value={dialog.address} onChange={(e) => setDialog({ ...dialog, address: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ط±ظ‚ظ… ط§ظ„ط¶ط±ظٹط¨ظٹ"><input value={dialog.tax_number} onChange={(e) => setDialog({ ...dialog, tax_number: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ط³ط¬ظ„ ط§ظ„طھط¬ط§ط±ظٹ"><input value={dialog.commercial_register} onChange={(e) => setDialog({ ...dialog, commercial_register: e.target.value })} className="field mt-2" /></Label><Label t="ظ…ط³ط¤ظˆظ„ ط§ظ„طھظˆط§طµظ„"><input value={dialog.contact_person} onChange={(e) => setDialog({ ...dialog, contact_person: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ط­ط§ظ„ط©"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">ظ†ط´ط·</option><option value="false">ط؛ظٹط± ظ†ط´ط·</option></select></Label><Label t="ظ…ظ„ط§ط­ط¸ط§طھ"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>;
 }
 
-﻿function InventoryDocumentDialog({ dialog, setDialog, save, items, suppliers }) {
+function InventoryDocumentDialog({ dialog, setDialog, save, items, suppliers }) {
   const currentCurrency = getInventoryCurrency(dialog.currency_code || "YER");
   const setCurrency = (code) => {
     const c = getInventoryCurrency(code);
@@ -4834,7 +5048,7 @@ function InventorySupplierDialog({ dialog, setDialog, save }) {
   };
   const selectSupplier = (supplierId) => { const supplier = suppliers.find((x) => x.supplier_id === supplierId); setDialog({ ...dialog, supplier_id: supplierId, supplier_name: supplier?.supplier_name || "" }); };
   const docTotals = (dialog.details || []).reduce((acc, d) => ({ total: acc.total + Number(d.total_value || 0), base: acc.base + Number(d.total_value_base || 0) }), { total: 0, base: 0 });
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-6xl overflow-y-auto p-6"><DialogTitle title={inventoryDocumentConfigs[dialog.type]?.label || "مستند مخزني"} close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-4"><Label t="رقم المستند"><input value={dialog.document_number} onChange={(e) => setDialog({ ...dialog, document_number: e.target.value })} className="field mt-2" /></Label><Label t="تاريخ المستند"><input required type="date" value={dialog.document_date} onChange={(e) => setDialog({ ...dialog, document_date: e.target.value })} className="field mt-2" /></Label><Label t="المورد"><select value={dialog.supplier_id} onChange={(e) => selectSupplier(e.target.value)} className="field mt-2"><option value="">بدون مورد</option>{suppliers.map((s) => <option key={s.supplier_id} value={s.supplier_id}>{s.supplier_name}</option>)}</select></Label><Label t="الفرع"><select value={dialog.branch || dialog.requesting_branch} onChange={(e) => setDialog({ ...dialog, branch: e.target.value, requesting_branch: e.target.value })} className="field mt-2">{branches.map((b) => <option key={b}>{b}</option>)}</select></Label><Label t="العملة"><select value={currentCurrency.currency_code} onChange={(e) => setCurrency(e.target.value)} className="field mt-2">{inventoryCurrencies.map((c) => <option key={c.currency_code} value={c.currency_code}>{c.currency_code} - {c.currency_name}</option>)}</select></Label><Label t="سعر الصرف"><input type="number" value={dialog.exchange_rate || currentCurrency.exchange_rate} onChange={(e) => setDialog({ ...dialog, exchange_rate: e.target.value, details: (dialog.details || []).map((d) => ({ ...d, exchange_rate: e.target.value, ...calculateInventoryLineTotal({ ...d, exchange_rate: e.target.value }) })) })} className="field mt-2" /></Label><Label t="إجمالي السعر"><input readOnly value={`${nf.format(docTotals.total)} ${currentCurrency.currency_code}`} className="field mt-2 bg-slate-50" /></Label><Label t="الإجمالي بالعملة الأساسية"><input readOnly value={`${nf.format(docTotals.base)} YER`} className="field mt-2 bg-slate-50" /></Label><Label t="الأولوية"><select value={dialog.priority || "عادي"} onChange={(e) => setDialog({ ...dialog, priority: e.target.value })} className="field mt-2"><option>عادي</option><option>عاجل</option><option>طارئ</option></select></Label><Label t="الحالة"><select value={dialog.status} onChange={(e) => setDialog({ ...dialog, status: e.target.value, approval_status: e.target.value })} className="field mt-2">{inventoryStatusFlow.map((s) => <option key={s}>{s}</option>)}</select></Label><Label t="ملاحظات"><input value={dialog.notes || ""} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2" /></Label></div>{dialog.type !== "invoices" && dialog.type !== "adjustments" && <div className="mt-6 rounded-2xl border p-4"><div className="mb-3 flex"><h4 className="font-extrabold">تفاصيل الأصناف</h4><button type="button" onClick={addDetail} className="btn-secondary mr-auto"><Plus size={15} /> إضافة صنف</button></div><div className="space-y-2">{(dialog.details || []).map((d, i) => <div key={d.detail_id || i} className="grid gap-2 rounded-xl bg-slate-50 p-3 md:grid-cols-8"><select value={d.item_id} onChange={(e) => selectItem(i, e.target.value)} className="field"><option value="">اختر الصنف</option>{items.map((item) => <option key={item.item_id} value={item.item_id}>{item.item_name}</option>)}</select><input value={d.unit_type} readOnly className="field bg-white" /><input type="number" value={d.quantity} onChange={(e) => updateDetail(i, { quantity: e.target.value })} className="field" placeholder="الكمية" /><input type="number" value={d.unit_cost || d.unit_price} onChange={(e) => updateDetail(i, { unit_cost: e.target.value, unit_price: e.target.value })} className="field" placeholder="السعر" /><select value={d.currency_code || currentCurrency.currency_code} onChange={(e) => { const c = getInventoryCurrency(e.target.value); updateDetail(i, { currency_code: c.currency_code, currency_name: c.currency_name, exchange_rate: c.exchange_rate }); }} className="field">{inventoryCurrencies.map((c) => <option key={c.currency_code} value={c.currency_code}>{c.currency_code}</option>)}</select><input type="number" value={d.exchange_rate || currentCurrency.exchange_rate} onChange={(e) => updateDetail(i, { exchange_rate: e.target.value })} className="field" /><input value={`${nf.format(Number(d.total_value || 0))} ${d.currency_code || currentCurrency.currency_code}`} readOnly className="field bg-white" /><button type="button" onClick={() => setDialog({ ...dialog, details: dialog.details.filter((_, idx) => idx !== i) })} className="btn-secondary text-red-600">حذف</button><input value={`${nf.format(Number(d.total_value_base || 0))} YER`} readOnly className="field bg-white md:col-span-2" /></div>)}</div></div>}<DialogActions close={() => setDialog(null)} /></form></div>;
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-6xl overflow-y-auto p-6"><DialogTitle title={inventoryDocumentConfigs[dialog.type]?.label || "ظ…ط³طھظ†ط¯ ظ…ط®ط²ظ†ظٹ"} close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-4"><Label t="ط±ظ‚ظ… ط§ظ„ظ…ط³طھظ†ط¯"><input value={dialog.document_number} onChange={(e) => setDialog({ ...dialog, document_number: e.target.value })} className="field mt-2" /></Label><Label t="طھط§ط±ظٹط® ط§ظ„ظ…ط³طھظ†ط¯"><input required type="date" value={dialog.document_date} onChange={(e) => setDialog({ ...dialog, document_date: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ظ…ظˆط±ط¯"><select value={dialog.supplier_id} onChange={(e) => selectSupplier(e.target.value)} className="field mt-2"><option value="">ط¨ط¯ظˆظ† ظ…ظˆط±ط¯</option>{suppliers.map((s) => <option key={s.supplier_id} value={s.supplier_id}>{s.supplier_name}</option>)}</select></Label><Label t="ط§ظ„ظپط±ط¹"><select value={dialog.branch || dialog.requesting_branch} onChange={(e) => setDialog({ ...dialog, branch: e.target.value, requesting_branch: e.target.value })} className="field mt-2">{branches.map((b) => <option key={b}>{b}</option>)}</select></Label><Label t="ط§ظ„ط¹ظ…ظ„ط©"><select value={currentCurrency.currency_code} onChange={(e) => setCurrency(e.target.value)} className="field mt-2">{inventoryCurrencies.map((c) => <option key={c.currency_code} value={c.currency_code}>{c.currency_code} - {c.currency_name}</option>)}</select></Label><Label t="ط³ط¹ط± ط§ظ„طµط±ظپ"><input type="number" value={dialog.exchange_rate || currentCurrency.exchange_rate} onChange={(e) => setDialog({ ...dialog, exchange_rate: e.target.value, details: (dialog.details || []).map((d) => ({ ...d, exchange_rate: e.target.value, ...calculateInventoryLineTotal({ ...d, exchange_rate: e.target.value }) })) })} className="field mt-2" /></Label><Label t="ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ط³ط¹ط±"><input readOnly value={`${nf.format(docTotals.total)} ${currentCurrency.currency_code}`} className="field mt-2 bg-slate-50" /></Label><Label t="ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ ط¨ط§ظ„ط¹ظ…ظ„ط© ط§ظ„ط£ط³ط§ط³ظٹط©"><input readOnly value={`${nf.format(docTotals.base)} YER`} className="field mt-2 bg-slate-50" /></Label><Label t="ط§ظ„ط£ظˆظ„ظˆظٹط©"><select value={dialog.priority || "ط¹ط§ط¯ظٹ"} onChange={(e) => setDialog({ ...dialog, priority: e.target.value })} className="field mt-2"><option>ط¹ط§ط¯ظٹ</option><option>ط¹ط§ط¬ظ„</option><option>ط·ط§ط±ط¦</option></select></Label><Label t="ط§ظ„ط­ط§ظ„ط©"><select value={dialog.status} onChange={(e) => setDialog({ ...dialog, status: e.target.value, approval_status: e.target.value })} className="field mt-2">{inventoryStatusFlow.map((s) => <option key={s}>{s}</option>)}</select></Label><Label t="ظ…ظ„ط§ط­ط¸ط§طھ"><input value={dialog.notes || ""} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2" /></Label></div>{dialog.type !== "invoices" && dialog.type !== "adjustments" && <div className="mt-6 rounded-2xl border p-4"><div className="mb-3 flex"><h4 className="font-extrabold">طھظپط§طµظٹظ„ ط§ظ„ط£طµظ†ط§ظپ</h4><button type="button" onClick={addDetail} className="btn-secondary mr-auto"><Plus size={15} /> ط¥ط¶ط§ظپط© طµظ†ظپ</button></div><div className="space-y-2">{(dialog.details || []).map((d, i) => <div key={d.detail_id || i} className="grid gap-2 rounded-xl bg-slate-50 p-3 md:grid-cols-8"><select value={d.item_id} onChange={(e) => selectItem(i, e.target.value)} className="field"><option value="">ط§ط®طھط± ط§ظ„طµظ†ظپ</option>{items.map((item) => <option key={item.item_id} value={item.item_id}>{item.item_name}</option>)}</select><input value={d.unit_type} readOnly className="field bg-white" /><input type="number" value={d.quantity} onChange={(e) => updateDetail(i, { quantity: e.target.value })} className="field" placeholder="ط§ظ„ظƒظ…ظٹط©" /><input type="number" value={d.unit_cost || d.unit_price} onChange={(e) => updateDetail(i, { unit_cost: e.target.value, unit_price: e.target.value })} className="field" placeholder="ط§ظ„ط³ط¹ط±" /><select value={d.currency_code || currentCurrency.currency_code} onChange={(e) => { const c = getInventoryCurrency(e.target.value); updateDetail(i, { currency_code: c.currency_code, currency_name: c.currency_name, exchange_rate: c.exchange_rate }); }} className="field">{inventoryCurrencies.map((c) => <option key={c.currency_code} value={c.currency_code}>{c.currency_code}</option>)}</select><input type="number" value={d.exchange_rate || currentCurrency.exchange_rate} onChange={(e) => updateDetail(i, { exchange_rate: e.target.value })} className="field" /><input value={`${nf.format(Number(d.total_value || 0))} ${d.currency_code || currentCurrency.currency_code}`} readOnly className="field bg-white" /><button type="button" onClick={() => setDialog({ ...dialog, details: dialog.details.filter((_, idx) => idx !== i) })} className="btn-secondary text-red-600">ط­ط°ظپ</button><input value={`${nf.format(Number(d.total_value_base || 0))} YER`} readOnly className="field bg-white md:col-span-2" /></div>)}</div></div>}<DialogActions close={() => setDialog(null)} /></form></div>;
 }
 
 const normalizeLegacyShiftPeriods = (types, periods) => {
@@ -4844,7 +5058,7 @@ const normalizeLegacyShiftPeriods = (types, periods) => {
     .map((type) => ({
       period_id: `LEGACY-${type.shift_type_id}`,
       shift_type_id: type.shift_type_id,
-      period_name: type.shift_period || "فترة العمل",
+      period_name: type.shift_period || "ظپطھط±ط© ط§ظ„ط¹ظ…ظ„",
       start_time: type.start_time,
       end_time: type.end_time,
       total_hours: calculateShiftHours(type.start_time, type.end_time),
@@ -4857,7 +5071,7 @@ const normalizeLegacyShiftPeriods = (types, periods) => {
 };
 const periodsForShift = (shiftTypeId, periods) => periods.filter((period) => period.shift_type_id === shiftTypeId && period.is_active !== false);
 const shiftTotalHours = (type, periods) => {
-  if (type.shift_mode === "مرن") return Number(type.required_hours || type.total_hours || 0);
+  if (type.shift_mode === "ظ…ط±ظ†") return Number(type.required_hours || type.total_hours || 0);
   const rows = periodsForShift(type.shift_type_id, periods);
   return Number((rows.reduce((sum, period) => sum + Number(period.total_hours || calculateShiftHours(period.start_time, period.end_time)), 0) || type.total_hours || 0).toFixed(2));
 };
@@ -4926,8 +5140,8 @@ function EmployeeShiftsPage({ employees, setEmployees, role, currentUser, can })
     return () => unsubs.forEach((u) => u?.());
   }, []);
   const visibleAssignments = assignments.filter((a) => {
-    if (String(role).includes("الموظف") && currentUser?.employeeId) return a.employee_id === currentUser.employeeId;
-    if (String(role).includes("مدير فرع") && currentUser?.branch) return a.branch === currentUser.branch;
+    if (String(role).includes("ط§ظ„ظ…ظˆط¸ظپ") && currentUser?.employeeId) return a.employee_id === currentUser.employeeId;
+    if (String(role).includes("ظ…ط¯ظٹط± ظپط±ط¹") && currentUser?.branch) return a.branch === currentUser.branch;
     return true;
   });
   const today = new Date().toISOString().slice(0, 10);
@@ -4935,16 +5149,16 @@ function EmployeeShiftsPage({ employees, setEmployees, role, currentUser, can })
   const scheduledIds = new Set(todayAssignments.map((a) => a.employee_id));
   const shortageBranches = usedShifts.filter((u) => u.is_active && u.min_employees).filter((u) => todayAssignments.filter((a) => a.branch === u.branch && a.shift_type_id === u.shift_type_id).length < u.min_employees);
   const conflictRows = visibleAssignments.filter((a, i, arr) => arr.some((b, j) => i !== j && a.assignment_date === b.assignment_date && a.employee_id === b.employee_id && shiftsOverlap(a, b)));
-  const pressureBranch = Object.entries(groupCount(todayAssignments, "branch")).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
+  const pressureBranch = Object.entries(groupCount(todayAssignments, "branch")).sort((a, b) => b[1] - a[1])[0]?.[0] || "â€”";
   const cards = [
-    ["إجمالي الشفتات", shiftTypes.length, CalendarCheck],
-    ["الشفتات النشطة", shiftTypes.filter((s) => s.is_active).length, BadgeCheck],
-    ["الموظفون المجدولون اليوم", scheduledIds.size, Users],
-    ["الفروع التي لديها نقص تغطية", new Set(shortageBranches.map((x) => x.branch)).size, AlertTriangle],
-    ["إجمالي ساعات العمل اليوم", todayAssignments.reduce((s, a) => s + Number(a.total_hours || 0), 0).toFixed(1), Clock3],
-    ["عدد التعارضات", conflictRows.length, MessageSquareWarning],
-    ["الموظفون غير المجدولين", employees.filter((e) => !scheduledIds.has(e.id)).length, UserCheck],
-    ["أكثر فرع لديه ضغط شفتات", pressureBranch, Building2],
+    ["ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ط´ظپطھط§طھ", shiftTypes.length, CalendarCheck],
+    ["ط§ظ„ط´ظپطھط§طھ ط§ظ„ظ†ط´ط·ط©", shiftTypes.filter((s) => s.is_active).length, BadgeCheck],
+    ["ط§ظ„ظ…ظˆط¸ظپظˆظ† ط§ظ„ظ…ط¬ط¯ظˆظ„ظˆظ† ط§ظ„ظٹظˆظ…", scheduledIds.size, Users],
+    ["ط§ظ„ظپط±ظˆط¹ ط§ظ„طھظٹ ظ„ط¯ظٹظ‡ط§ ظ†ظ‚طµ طھط؛ط·ظٹط©", new Set(shortageBranches.map((x) => x.branch)).size, AlertTriangle],
+    ["ط¥ط¬ظ…ط§ظ„ظٹ ط³ط§ط¹ط§طھ ط§ظ„ط¹ظ…ظ„ ط§ظ„ظٹظˆظ…", todayAssignments.reduce((s, a) => s + Number(a.total_hours || 0), 0).toFixed(1), Clock3],
+    ["ط¹ط¯ط¯ ط§ظ„طھط¹ط§ط±ط¶ط§طھ", conflictRows.length, MessageSquareWarning],
+    ["ط§ظ„ظ…ظˆط¸ظپظˆظ† ط؛ظٹط± ط§ظ„ظ…ط¬ط¯ظˆظ„ظٹظ†", employees.filter((e) => !scheduledIds.has(e.id)).length, UserCheck],
+    ["ط£ظƒط«ط± ظپط±ط¹ ظ„ط¯ظٹظ‡ ط¶ط؛ط· ط´ظپطھط§طھ", pressureBranch, Building2],
   ];
   const filteredAssignments = visibleAssignments.filter((a) =>
     (!filters.date || a.assignment_date === filters.date) &&
@@ -4957,16 +5171,16 @@ function EmployeeShiftsPage({ employees, setEmployees, role, currentUser, can })
   const saveType = async (e) => {
     e.preventDefault();
     const exists = shiftTypes.some((s) => s.shift_type_id === dialog.shift_type_id);
-    if ((exists && !canEdit) || (!exists && !canCreate)) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if ((exists && !canEdit) || (!exists && !canCreate)) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
     const activePeriods = (dialog.periods || []).filter((period) => period.is_active !== false);
-    if (!dialog.shift_name?.trim()) return alert("يجب إدخال اسم الشفت");
-    if (!dialog.shift_mode) return alert("يجب تحديد نوع الشفت ثابت أو مرن");
-    if (dialog.shift_mode === "ثابت" && !activePeriods.length) return alert("يجب إضافة فترة واحدة على الأقل");
-    if (activePeriods.some((period) => !period.start_time || !period.end_time)) return alert("يجب إدخال وقت البداية والنهاية");
-    if (activePeriods.some((period) => calculateShiftHours(period.start_time, period.end_time) <= 0)) return alert("عدد ساعات الشفت غير صحيح");
-    if (dialog.shift_mode === "مرن" && (!Number(dialog.required_hours) || !dialog.flexible_start_from || !dialog.flexible_end_until)) return alert("يجب تحديد نطاق الشفت المرن وعدد الساعات المطلوبة");
+    if (!dialog.shift_name?.trim()) return alert("ظٹط¬ط¨ ط¥ط¯ط®ط§ظ„ ط§ط³ظ… ط§ظ„ط´ظپطھ");
+    if (!dialog.shift_mode) return alert("ظٹط¬ط¨ طھط­ط¯ظٹط¯ ظ†ظˆط¹ ط§ظ„ط´ظپطھ ط«ط§ط¨طھ ط£ظˆ ظ…ط±ظ†");
+    if (dialog.shift_mode === "ط«ط§ط¨طھ" && !activePeriods.length) return alert("ظٹط¬ط¨ ط¥ط¶ط§ظپط© ظپطھط±ط© ظˆط§ط­ط¯ط© ط¹ظ„ظ‰ ط§ظ„ط£ظ‚ظ„");
+    if (activePeriods.some((period) => !period.start_time || !period.end_time)) return alert("ظٹط¬ط¨ ط¥ط¯ط®ط§ظ„ ظˆظ‚طھ ط§ظ„ط¨ط¯ط§ظٹط© ظˆط§ظ„ظ†ظ‡ط§ظٹط©");
+    if (activePeriods.some((period) => calculateShiftHours(period.start_time, period.end_time) <= 0)) return alert("ط¹ط¯ط¯ ط³ط§ط¹ط§طھ ط§ظ„ط´ظپطھ ط؛ظٹط± طµط­ظٹط­");
+    if (dialog.shift_mode === "ظ…ط±ظ†" && (!Number(dialog.required_hours) || !dialog.flexible_start_from || !dialog.flexible_end_until)) return alert("ظٹط¬ط¨ طھط­ط¯ظٹط¯ ظ†ط·ط§ظ‚ ط§ظ„ط´ظپطھ ط§ظ„ظ…ط±ظ† ظˆط¹ط¯ط¯ ط§ظ„ط³ط§ط¹ط§طھ ط§ظ„ظ…ط·ظ„ظˆط¨ط©");
     try {
-      const totalHours = dialog.shift_mode === "مرن"
+      const totalHours = dialog.shift_mode === "ظ…ط±ظ†"
         ? Number(dialog.required_hours || 0)
         : activePeriods.reduce((sum, period) => sum + calculateShiftHours(period.start_time, period.end_time), 0);
       const primary = activePeriods[0] || dialog;
@@ -4986,7 +5200,7 @@ function EmployeeShiftsPage({ employees, setEmployees, role, currentUser, can })
   const saveUsed = async (e) => {
     e.preventDefault();
     const duplicate = usedShifts.find((u) => u.used_shift_id !== dialog.used_shift_id && u.is_active && dialog.is_active !== false && u.branch === dialog.branch && u.start_time === dialog.start_time && u.end_time === dialog.end_time);
-    if (duplicate && !confirm("يوجد شفت نشط بنفس الفرع ونفس الفترة. هل تريد المتابعة؟")) return;
+    if (duplicate && !confirm("ظٹظˆط¬ط¯ ط´ظپطھ ظ†ط´ط· ط¨ظ†ظپط³ ط§ظ„ظپط±ط¹ ظˆظ†ظپط³ ط§ظ„ظپطھط±ط©. ظ‡ظ„ طھط±ظٹط¯ ط§ظ„ظ…طھط§ط¨ط¹ط©طں")) return;
     try {
       const saved = await shiftsService.saveUsed(dialog);
       setUsedShifts((list) => upsertLocal(list, saved, "used_shift_id"));
@@ -5011,7 +5225,7 @@ function EmployeeShiftsPage({ employees, setEmployees, role, currentUser, can })
       ...d,
       shift_type_id: shiftTypeId,
       shift_name: s?.shift_name || "",
-      shift_mode: s?.shift_mode || "ثابت",
+      shift_mode: s?.shift_mode || "ط«ط§ط¨طھ",
       shift_periods: rows,
       start_time: first.start_time || "",
       end_time: last.end_time || "",
@@ -5020,7 +5234,7 @@ function EmployeeShiftsPage({ employees, setEmployees, role, currentUser, can })
   };
   const saveAssignments = async (e) => {
     e.preventDefault();
-    if (!canCreate) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!canCreate) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
     const selected = employees.filter((emp) => (dialog.selected_employee_ids || []).includes(emp.id));
     const rows = selected.map((emp) => ({
       assignment_id: `${dialog.assignment_date}-${emp.id}-${dialog.shift_type_id}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -5032,29 +5246,29 @@ function EmployeeShiftsPage({ employees, setEmployees, role, currentUser, can })
       job: emp.job,
       shift_type_id: dialog.shift_type_id,
       shift_name: dialog.shift_name,
-      shift_mode: dialog.shift_mode || "ثابت",
+      shift_mode: dialog.shift_mode || "ط«ط§ط¨طھ",
       shift_periods: dialog.shift_periods || [],
       start_time: dialog.start_time,
       end_time: dialog.end_time,
       total_hours: Number(dialog.total_hours || calculateShiftHours(dialog.start_time, dialog.end_time)),
-      status: "مجدول",
+      status: "ظ…ط¬ط¯ظˆظ„",
       notes: dialog.notes || "",
     }));
-    if (!rows.length) return alert("يرجى اختيار موظف واحد على الأقل.");
+    if (!rows.length) return alert("ظٹط±ط¬ظ‰ ط§ط®طھظٹط§ط± ظ…ظˆط¸ظپ ظˆط§ط­ط¯ ط¹ظ„ظ‰ ط§ظ„ط£ظ‚ظ„.");
     const warnings = [];
     rows.forEach((row) => {
-      if (assignments.some((a) => a.assignment_date === row.assignment_date && a.employee_id === row.employee_id && shiftsOverlap(a, row))) warnings.push(`يوجد تعارض في جدول الموظف ${row.employee_name}`);
+      if (assignments.some((a) => a.assignment_date === row.assignment_date && a.employee_id === row.employee_id && shiftsOverlap(a, row))) warnings.push(`ظٹظˆط¬ط¯ طھط¹ط§ط±ط¶ ظپظٹ ط¬ط¯ظˆظ„ ط§ظ„ظ…ظˆط¸ظپ ${row.employee_name}`);
       const employee = employees.find((emp) => emp.id === row.employee_id);
-      if (employee?.status === "إجازة" || employee?.status === "ط¥ط¬ط§ط²ط©") warnings.push(`الموظف ${row.employee_name} في إجازة`);
+      if (employee?.status === "ط¥ط¬ط§ط²ط©" || employee?.status === "ط·آ¥ط·آ¬ط·آ§ط·آ²ط·آ©") warnings.push(`ط§ظ„ظ…ظˆط¸ظپ ${row.employee_name} ظپظٹ ط¥ط¬ط§ط²ط©`);
       const used = usedShifts.find((u) => u.branch === row.branch && u.shift_type_id === row.shift_type_id && u.is_active);
       if (used) {
         const count = assignments.filter((a) => a.assignment_date === row.assignment_date && a.branch === row.branch && a.shift_type_id === row.shift_type_id).length + rows.filter((r) => r.branch === row.branch && r.shift_type_id === row.shift_type_id).length;
-        if (used.min_employees && count < used.min_employees) warnings.push(`لا توجد تغطية كافية لهذا الفرع: ${row.branch}`);
-        if (used.max_employees && count > used.max_employees) warnings.push(`عدد الموظفين أكبر من الحد الأقصى في ${row.branch}`);
+        if (used.min_employees && count < used.min_employees) warnings.push(`ظ„ط§ طھظˆط¬ط¯ طھط؛ط·ظٹط© ظƒط§ظپظٹط© ظ„ظ‡ط°ط§ ط§ظ„ظپط±ط¹: ${row.branch}`);
+        if (used.max_employees && count > used.max_employees) warnings.push(`ط¹ط¯ط¯ ط§ظ„ظ…ظˆط¸ظپظٹظ† ط£ظƒط¨ط± ظ…ظ† ط§ظ„ط­ط¯ ط§ظ„ط£ظ‚طµظ‰ ظپظٹ ${row.branch}`);
       }
     });
     if (warnings.length && !canOverrideShiftConflicts(role)) return alert(warnings.join("\n"));
-    if (warnings.length && !confirm(`${warnings.join("\n")}\nهل تريد المتابعة؟`)) return;
+    if (warnings.length && !confirm(`${warnings.join("\n")}\nظ‡ظ„ طھط±ظٹط¯ ط§ظ„ظ…طھط§ط¨ط¹ط©طں`)) return;
     try {
       const saved = await shiftAssignmentsService.save(rows);
       setAssignments((list) => [...saved, ...list]);
@@ -5062,8 +5276,8 @@ function EmployeeShiftsPage({ employees, setEmployees, role, currentUser, can })
     } catch (err) { alert(err.message); }
   };
   const removeRecord = async (kind, id) => {
-    if (!canDelete) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
-    if (!confirm("هل تريد حذف السجل؟")) return;
+    if (!canDelete) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
+    if (!confirm("ظ‡ظ„ طھط±ظٹط¯ ط­ط°ظپ ط§ظ„ط³ط¬ظ„طں")) return;
     try {
       if (kind === "type") { await shiftsService.removeType(id); setShiftTypes((list) => list.filter((x) => x.shift_type_id !== id)); }
       else if (kind === "used") { await shiftsService.removeUsed(id); setUsedShifts((list) => list.filter((x) => x.used_shift_id !== id)); }
@@ -5073,24 +5287,24 @@ function EmployeeShiftsPage({ employees, setEmployees, role, currentUser, can })
   };
   const copyShiftSchedule = async (fromDate, toDate, targetBranch = "") => {
     const source = assignments.filter((a) => a.assignment_date === fromDate && (!targetBranch || a.branch === targetBranch));
-    if (!source.length) return alert("لا توجد شفتات لنسخها من التاريخ المحدد.");
+    if (!source.length) return alert("ظ„ط§ طھظˆط¬ط¯ ط´ظپطھط§طھ ظ„ظ†ط³ط®ظ‡ط§ ظ…ظ† ط§ظ„طھط§ط±ظٹط® ط§ظ„ظ…ط­ط¯ط¯.");
     try {
       const saved = await shiftAssignmentsService.save(source.map((a) => ({ ...a, assignment_id: `${toDate}-${a.employee_id}-${a.shift_type_id}-${Date.now()}-${Math.random().toString(16).slice(2)}`, assignment_date: toDate })));
       setAssignments((list) => [...saved, ...list]);
-      alert("تم نسخ الجدول بنجاح");
+      alert("طھظ… ظ†ط³ط® ط§ظ„ط¬ط¯ظˆظ„ ط¨ظ†ط¬ط§ط­");
     } catch (e) { alert(e.message); }
   };
   const exportShiftReport = (title, rows) => {
     const exportRows = reportRowsForExport(rows, shiftAssignmentColumns);
-    return { exportRows, print: () => printDocument(title, `<h1>${title}</h1><p>تاريخ التقرير: ${new Date().toLocaleDateString("ar-SA")}</p>${rowsToReportHtml("", rows, shiftAssignmentColumns)}<div style="margin-top:36px;display:flex;justify-content:space-between"><b>إعداد الموارد البشرية</b><b>اعتماد الإدارة</b></div>`) };
+    return { exportRows, print: () => printDocument(title, `<h1>${title}</h1><p>طھط§ط±ظٹط® ط§ظ„طھظ‚ط±ظٹط±: ${new Date().toLocaleDateString("ar-SA")}</p>${rowsToReportHtml("", rows, shiftAssignmentColumns)}<div style="margin-top:36px;display:flex;justify-content:space-between"><b>ط¥ط¹ط¯ط§ط¯ ط§ظ„ظ…ظˆط§ط±ط¯ ط§ظ„ط¨ط´ط±ظٹط©</b><b>ط§ط¹طھظ…ط§ط¯ ط§ظ„ط¥ط¯ط§ط±ط©</b></div>`) };
   };
   return (
     <div className="space-y-5">
-      <PageHead title="شفتات الموظفين" desc="إدارة أنواع الشفتات والسيناريوهات وتوزيع الموظفين والتقارير" action={<button onClick={() => setTab("assignments")} className="btn-primary"><CalendarCheck size={18} /> توزيع شفت</button>} />
+      <PageHead title="ط´ظپطھط§طھ ط§ظ„ظ…ظˆط¸ظپظٹظ†" desc="ط¥ط¯ط§ط±ط© ط£ظ†ظˆط§ط¹ ط§ظ„ط´ظپطھط§طھ ظˆط§ظ„ط³ظٹظ†ط§ط±ظٹظˆظ‡ط§طھ ظˆطھظˆط²ظٹط¹ ط§ظ„ظ…ظˆط¸ظپظٹظ† ظˆط§ظ„طھظ‚ط§ط±ظٹط±" action={<button onClick={() => setTab("assignments")} className="btn-primary"><CalendarCheck size={18} /> طھظˆط²ظٹط¹ ط´ظپطھ</button>} />
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{cards.map(([label, value, I]) => <Mini key={label} label={label} value={value} I={I} />)}</div>
       <div className="panel flex flex-wrap gap-2 p-2">{shiftTabs.map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === id ? "bg-brand-700 text-white" : "bg-slate-100 text-slate-600"}`}>{label}</button>)}</div>
-      {loading ? <div className="panel p-6 text-center text-sm text-slate-500">جاري تحميل بيانات الشفتات...</div> : (
+      {loading ? <div className="panel p-6 text-center text-sm text-slate-500">ط¬ط§ط±ظٹ طھط­ظ…ظٹظ„ ط¨ظٹط§ظ†ط§طھ ط§ظ„ط´ظپطھط§طھ...</div> : (
         <>
           {tab === "types" && <ShiftTypesTab rows={shiftTypes} periods={shiftTypePeriods} setDialog={setDialog} removeRecord={removeRecord} filters={filters} setFilters={setFilters} />}
           {tab === "used" && <UsedShiftsTab rows={usedShifts} shiftTypes={shiftTypes} periods={shiftTypePeriods} setDialog={setDialog} removeRecord={removeRecord} filters={filters} setFilters={setFilters} />}
@@ -5110,53 +5324,53 @@ function EmployeeShiftsPage({ employees, setEmployees, role, currentUser, can })
 }
 
 const pageLabels = {
-  dashboard: "لوحة التحكم",
-  employees: "الموظفون",
-  evaluations: "التقييمات",
-  incentives: "الحوافز",
-  guarantees: "ضمانات الموظفين",
-  overtime: "العمل الإضافي",
-  shifts: "شفتات الموظفين",
-  reports_center: "مركز التقارير",
-  reports: "التقارير",
-  settings: "الإعدادات",
-  users_permissions: "المستخدمون والصلاحيات",
-  audit_logs: "سجل العمليات",
+  dashboard: "ظ„ظˆط­ط© ط§ظ„طھط­ظƒظ…",
+  employees: "ط§ظ„ظ…ظˆط¸ظپظˆظ†",
+  evaluations: "ط§ظ„طھظ‚ظٹظٹظ…ط§طھ",
+  incentives: "ط§ظ„ط­ظˆط§ظپط²",
+  guarantees: "ط¶ظ…ط§ظ†ط§طھ ط§ظ„ظ…ظˆط¸ظپظٹظ†",
+  overtime: "ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ",
+  shifts: "ط´ظپطھط§طھ ط§ظ„ظ…ظˆط¸ظپظٹظ†",
+  reports_center: "ظ…ط±ظƒط² ط§ظ„طھظ‚ط§ط±ظٹط±",
+  reports: "ط§ظ„طھظ‚ط§ط±ظٹط±",
+  settings: "ط§ظ„ط¥ط¹ط¯ط§ط¯ط§طھ",
+  users_permissions: "ط§ظ„ظ…ط³طھط®ط¯ظ…ظˆظ† ظˆط§ظ„طµظ„ط§ط­ظٹط§طھ",
+  audit_logs: "ط³ط¬ظ„ ط§ظ„ط¹ظ…ظ„ظٹط§طھ",
 };
 
 function ShiftTypesTab({ rows, periods, setDialog, removeRecord, filters, setFilters }) {
   const filtered = rows.filter((r) => (!filters.q || r.shift_name.includes(filters.q)) && (filters.period === "all" || r.shift_period === filters.period));
-  return <div className="panel p-4"><div className="mb-4 flex flex-wrap gap-3"><input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="بحث باسم الشفت..." /><select value={filters.period} onChange={(e) => setFilters({ ...filters, period: e.target.value })} className="field max-w-[170px]"><option value="all">كل الفترات</option>{shiftPeriods.map((p) => <option key={p}>{p}</option>)}</select><button onClick={() => setDialog({ kind: "type", shift_type_id: `ST-${Date.now()}`, shift_name: "", start_time: "08:00", end_time: "15:00", total_hours: 7, break_minutes: 0, shift_period: "صباحي", shift_mode: "ثابت", flexible_start_from: "", flexible_end_until: "", required_hours: 0, is_active: true, notes: "", periods: [{ period_id: `STP-${Date.now()}`, period_name: "فترة العمل", start_time: "08:00", end_time: "15:00", total_hours: 7, sort_order: 1, is_active: true, notes: "" }] })} className="btn-primary"><Plus size={17} /> إضافة نوع</button></div><div className="table-wrap"><table><thead><tr><th>الشفت</th><th>نوع الشفت</th><th>عدد الفترات</th><th>الساعات</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((r) => { const rows = periodsForShift(r.shift_type_id, periods); return <tr key={r.shift_type_id}><td><b>{r.shift_name}</b><div className="mt-2 space-y-1 text-xs text-slate-500">{rows.map((p) => <p key={p.period_id}>{p.period_name}: {p.start_time} - {p.end_time}</p>)}</div></td><td><Status>{r.shift_mode || "ثابت"}</Status></td><td>{rows.length}</td><td>{shiftTotalHours(r, periods)}</td><td><Status>{r.is_active ? "نشط" : "غير نشط"}</Status></td><td><button onClick={() => setDialog({ ...r, kind: "type", periods: rows })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => removeRecord("type", r.shift_type_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>; })}</tbody></table></div></div>;
+  return <div className="panel p-4"><div className="mb-4 flex flex-wrap gap-3"><input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="ط¨ط­ط« ط¨ط§ط³ظ… ط§ظ„ط´ظپطھ..." /><select value={filters.period} onChange={(e) => setFilters({ ...filters, period: e.target.value })} className="field max-w-[170px]"><option value="all">ظƒظ„ ط§ظ„ظپطھط±ط§طھ</option>{shiftPeriods.map((p) => <option key={p}>{p}</option>)}</select><button onClick={() => setDialog({ kind: "type", shift_type_id: `ST-${Date.now()}`, shift_name: "", start_time: "08:00", end_time: "15:00", total_hours: 7, break_minutes: 0, shift_period: "طµط¨ط§ط­ظٹ", shift_mode: "ط«ط§ط¨طھ", flexible_start_from: "", flexible_end_until: "", required_hours: 0, is_active: true, notes: "", periods: [{ period_id: `STP-${Date.now()}`, period_name: "ظپطھط±ط© ط§ظ„ط¹ظ…ظ„", start_time: "08:00", end_time: "15:00", total_hours: 7, sort_order: 1, is_active: true, notes: "" }] })} className="btn-primary"><Plus size={17} /> ط¥ط¶ط§ظپط© ظ†ظˆط¹</button></div><div className="table-wrap"><table><thead><tr><th>ط§ظ„ط´ظپطھ</th><th>ظ†ظˆط¹ ط§ظ„ط´ظپطھ</th><th>ط¹ط¯ط¯ ط§ظ„ظپطھط±ط§طھ</th><th>ط§ظ„ط³ط§ط¹ط§طھ</th><th>ط§ظ„ط­ط§ظ„ط©</th><th></th></tr></thead><tbody>{filtered.map((r) => { const rows = periodsForShift(r.shift_type_id, periods); return <tr key={r.shift_type_id}><td><b>{r.shift_name}</b><div className="mt-2 space-y-1 text-xs text-slate-500">{rows.map((p) => <p key={p.period_id}>{p.period_name}: {p.start_time} - {p.end_time}</p>)}</div></td><td><Status>{r.shift_mode || "ط«ط§ط¨طھ"}</Status></td><td>{rows.length}</td><td>{shiftTotalHours(r, periods)}</td><td><Status>{r.is_active ? "ظ†ط´ط·" : "ط؛ظٹط± ظ†ط´ط·"}</Status></td><td><button onClick={() => setDialog({ ...r, kind: "type", periods: rows })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => removeRecord("type", r.shift_type_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>; })}</tbody></table></div></div>;
 }
 
 function UsedShiftsTab({ rows, shiftTypes, periods, setDialog, removeRecord, filters, setFilters }) {
   const filtered = rows.filter((r) => (filters.branch === "all" || r.branch === filters.branch) && (filters.active === "all" || String(r.is_active) === filters.active));
-  return <div className="panel p-4"><div className="mb-4 flex flex-wrap gap-3"><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><select value={filters.active} onChange={(e) => setFilters({ ...filters, active: e.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option><option value="true">نشط</option><option value="false">غير نشط</option></select><button onClick={() => setDialog({ kind: "used", used_shift_id: `US-${Date.now()}`, branch: branches[0], shift_type_id: shiftTypes[0]?.shift_type_id || "", shift_name: shiftTypes[0]?.shift_name || "", start_time: shiftTypes[0]?.start_time || "08:00", end_time: shiftTypes[0]?.end_time || "15:00", required_employees: 1, min_employees: 1, max_employees: 3, active_from: new Date().toISOString().slice(0, 10), active_to: "", is_active: true, notes: "" })} className="btn-primary"><Plus size={17} /> إضافة شفت مستخدم</button></div><div className="table-wrap"><table><thead><tr><th>الفرع</th><th>الشفت</th><th>الفترات</th><th>الإجمالي</th><th>المطلوب</th><th>الأدنى/الأقصى</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((r) => { const rows = periodsForShift(r.shift_type_id, periods); return <tr key={r.used_shift_id}><td>{r.branch}</td><td>{r.shift_name}</td><td><div className="space-y-1 text-xs text-slate-500">{rows.map((p) => <p key={p.period_id}>{p.period_name}: {p.start_time}-{p.end_time}</p>)}</div></td><td>{rows.reduce((s, p) => s + Number(p.total_hours || 0), 0) || calculateShiftHours(r.start_time, r.end_time)}</td><td>{r.required_employees}</td><td>{r.min_employees} / {r.max_employees}</td><td><Status>{r.is_active ? "نشط" : "غير نشط"}</Status></td><td><button onClick={() => setDialog({ ...r, kind: "used" })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => removeRecord("used", r.used_shift_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>; })}</tbody></table></div></div>;
+  return <div className="panel p-4"><div className="mb-4 flex flex-wrap gap-3"><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">ظƒظ„ ط§ظ„ظپط±ظˆط¹</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><select value={filters.active} onChange={(e) => setFilters({ ...filters, active: e.target.value })} className="field max-w-[160px]"><option value="all">ظƒظ„ ط§ظ„ط­ط§ظ„ط§طھ</option><option value="true">ظ†ط´ط·</option><option value="false">ط؛ظٹط± ظ†ط´ط·</option></select><button onClick={() => setDialog({ kind: "used", used_shift_id: `US-${Date.now()}`, branch: branches[0], shift_type_id: shiftTypes[0]?.shift_type_id || "", shift_name: shiftTypes[0]?.shift_name || "", start_time: shiftTypes[0]?.start_time || "08:00", end_time: shiftTypes[0]?.end_time || "15:00", required_employees: 1, min_employees: 1, max_employees: 3, active_from: new Date().toISOString().slice(0, 10), active_to: "", is_active: true, notes: "" })} className="btn-primary"><Plus size={17} /> ط¥ط¶ط§ظپط© ط´ظپطھ ظ…ط³طھط®ط¯ظ…</button></div><div className="table-wrap"><table><thead><tr><th>ط§ظ„ظپط±ط¹</th><th>ط§ظ„ط´ظپطھ</th><th>ط§ظ„ظپطھط±ط§طھ</th><th>ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ</th><th>ط§ظ„ظ…ط·ظ„ظˆط¨</th><th>ط§ظ„ط£ط¯ظ†ظ‰/ط§ظ„ط£ظ‚طµظ‰</th><th>ط§ظ„ط­ط§ظ„ط©</th><th></th></tr></thead><tbody>{filtered.map((r) => { const rows = periodsForShift(r.shift_type_id, periods); return <tr key={r.used_shift_id}><td>{r.branch}</td><td>{r.shift_name}</td><td><div className="space-y-1 text-xs text-slate-500">{rows.map((p) => <p key={p.period_id}>{p.period_name}: {p.start_time}-{p.end_time}</p>)}</div></td><td>{rows.reduce((s, p) => s + Number(p.total_hours || 0), 0) || calculateShiftHours(r.start_time, r.end_time)}</td><td>{r.required_employees}</td><td>{r.min_employees} / {r.max_employees}</td><td><Status>{r.is_active ? "ظ†ط´ط·" : "ط؛ظٹط± ظ†ط´ط·"}</Status></td><td><button onClick={() => setDialog({ ...r, kind: "used" })} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => removeRecord("used", r.used_shift_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>; })}</tbody></table></div></div>;
 }
 
 function ShiftScenariosTab({ rows, details, setDialog, removeRecord, filters, setFilters }) {
-  const filtered = rows.filter((r) => (filters.branch === "all" || r.branch === filters.branch || r.branch === "كل الفروع") && (filters.status === "all" || r.scenario_type === filters.status));
-  return <div className="panel p-4"><div className="mb-4 flex flex-wrap gap-3"><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option><option>كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[160px]"><option value="all">كل الأنواع</option>{scenarioTypes.map((s) => <option key={s}>{s}</option>)}</select><button onClick={() => setDialog({ kind: "scenario", scenario_id: `SC-${Date.now()}`, scenario_name: "", branch: "كل الفروع", scenario_type: "عادي", description: "", is_active: true, details: [] })} className="btn-primary"><Plus size={17} /> إضافة سيناريو</button></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((r) => <div key={r.scenario_id} className="rounded-2xl border p-4"><div className="flex"><b>{r.scenario_name}</b><Status>{r.is_active ? "نشط" : "غير نشط"}</Status></div><p className="mt-2 text-sm text-slate-500">{r.branch} • {r.scenario_type}</p><p className="mt-2 text-xs text-slate-400">عدد الشفتات: {details.filter((d) => d.scenario_id === r.scenario_id).length}</p><div className="mt-4 flex gap-2"><button onClick={() => setDialog({ ...r, kind: "scenario", details: details.filter((d) => d.scenario_id === r.scenario_id) })} className="btn-secondary"><Pencil size={15} /> تعديل</button><button onClick={() => removeRecord("scenario", r.scenario_id)} className="btn-secondary text-red-600"><Trash2 size={15} /></button></div></div>)}</div></div>;
+  const filtered = rows.filter((r) => (filters.branch === "all" || r.branch === filters.branch || r.branch === "ظƒظ„ ط§ظ„ظپط±ظˆط¹") && (filters.status === "all" || r.scenario_type === filters.status));
+  return <div className="panel p-4"><div className="mb-4 flex flex-wrap gap-3"><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">ظƒظ„ ط§ظ„ظپط±ظˆط¹</option><option>ظƒظ„ ط§ظ„ظپط±ظˆط¹</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[160px]"><option value="all">ظƒظ„ ط§ظ„ط£ظ†ظˆط§ط¹</option>{scenarioTypes.map((s) => <option key={s}>{s}</option>)}</select><button onClick={() => setDialog({ kind: "scenario", scenario_id: `SC-${Date.now()}`, scenario_name: "", branch: "ظƒظ„ ط§ظ„ظپط±ظˆط¹", scenario_type: "ط¹ط§ط¯ظٹ", description: "", is_active: true, details: [] })} className="btn-primary"><Plus size={17} /> ط¥ط¶ط§ظپط© ط³ظٹظ†ط§ط±ظٹظˆ</button></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((r) => <div key={r.scenario_id} className="rounded-2xl border p-4"><div className="flex"><b>{r.scenario_name}</b><Status>{r.is_active ? "ظ†ط´ط·" : "ط؛ظٹط± ظ†ط´ط·"}</Status></div><p className="mt-2 text-sm text-slate-500">{r.branch} â€¢ {r.scenario_type}</p><p className="mt-2 text-xs text-slate-400">ط¹ط¯ط¯ ط§ظ„ط´ظپطھط§طھ: {details.filter((d) => d.scenario_id === r.scenario_id).length}</p><div className="mt-4 flex gap-2"><button onClick={() => setDialog({ ...r, kind: "scenario", details: details.filter((d) => d.scenario_id === r.scenario_id) })} className="btn-secondary"><Pencil size={15} /> طھط¹ط¯ظٹظ„</button><button onClick={() => removeRecord("scenario", r.scenario_id)} className="btn-secondary text-red-600"><Trash2 size={15} /></button></div></div>)}</div></div>;
 }
 
 function ShiftAssignmentsTab({ rows, employees, shiftTypes, periods, setDialog, removeRecord, filters, setFilters, copyShiftSchedule, setEmployeeDialog }) {
   const firstShift = shiftTypes[0] || {};
   const firstPeriods = periodsForShift(firstShift.shift_type_id, periods);
-  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><input type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} className="field max-w-[170px]" /><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field min-w-[180px]" placeholder="بحث بالموظف..." /><select value={filters.shift} onChange={(e) => setFilters({ ...filters, shift: e.target.value })} className="field max-w-[180px]"><option value="all">كل الشفتات</option>{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option>{shiftAssignmentStatuses.map((s) => <option key={s}>{s}</option>)}</select><button onClick={() => setDialog({ kind: "assignment", assignment_date: new Date().toISOString().slice(0, 10), shift_type_id: firstShift.shift_type_id || "", shift_name: firstShift.shift_name || "", shift_mode: firstShift.shift_mode || "ثابت", shift_periods: firstPeriods, start_time: firstPeriods[0]?.start_time || firstShift.start_time || "08:00", end_time: firstPeriods[firstPeriods.length - 1]?.end_time || firstShift.end_time || "15:00", total_hours: shiftTotalHours(firstShift, periods), selected_employee_ids: [], notes: "" })} className="btn-primary"><Plus size={17} /> توزيع شفت</button><button onClick={() => setEmployeeDialog({ editing: null })} className="btn-secondary"><Users size={17} /> إضافة موظف</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr>{shiftAssignmentColumns.map((c) => <th key={c.key}>{c.label}</th>)}<th>واتساب</th><th></th></tr></thead><tbody>{rows.map((r) => <tr key={r.assignment_id}><td>{r.assignment_date}</td><td>{r.employee_name}</td><td>{r.branch}</td><td><b>{r.shift_name}</b><p className="mt-1 text-xs text-slate-400">{r.shift_mode || "ثابت"}</p><div className="mt-1 space-y-1 text-xs text-slate-500">{(r.shift_periods || []).map((p) => <p key={p.period_id || p.period_name}>{p.period_name}: {p.start_time}-{p.end_time}</p>)}</div></td><td>{r.start_time}</td><td>{r.end_time}</td><td>{r.total_hours}</td><td><Status>{r.status}</Status></td><td><button onClick={() => navigator.clipboard?.writeText(makeShiftMessage(r)).then(() => alert("تم نسخ الرسالة"))} className="btn-secondary !h-9 !px-3">نسخ الرسالة</button><button onClick={() => window.open(`https://wa.me/${normalizeWhatsAppPhone(r.employee_phone)}?text=${encodeURIComponent(makeShiftMessage(r))}`, "_blank")} className="btn-secondary !h-9 !px-3">فتح واتساب</button></td><td><button onClick={() => removeRecord("assignment", r.assignment_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div><CopyScheduleBox copyShiftSchedule={copyShiftSchedule} /></div>;
+  return <div className="space-y-4"><div className="panel flex flex-wrap gap-3 p-4"><input type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} className="field max-w-[170px]" /><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">ظƒظ„ ط§ظ„ظپط±ظˆط¹</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field min-w-[180px]" placeholder="ط¨ط­ط« ط¨ط§ظ„ظ…ظˆط¸ظپ..." /><select value={filters.shift} onChange={(e) => setFilters({ ...filters, shift: e.target.value })} className="field max-w-[180px]"><option value="all">ظƒظ„ ط§ظ„ط´ظپطھط§طھ</option>{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[160px]"><option value="all">ظƒظ„ ط§ظ„ط­ط§ظ„ط§طھ</option>{shiftAssignmentStatuses.map((s) => <option key={s}>{s}</option>)}</select><button onClick={() => setDialog({ kind: "assignment", assignment_date: new Date().toISOString().slice(0, 10), shift_type_id: firstShift.shift_type_id || "", shift_name: firstShift.shift_name || "", shift_mode: firstShift.shift_mode || "ط«ط§ط¨طھ", shift_periods: firstPeriods, start_time: firstPeriods[0]?.start_time || firstShift.start_time || "08:00", end_time: firstPeriods[firstPeriods.length - 1]?.end_time || firstShift.end_time || "15:00", total_hours: shiftTotalHours(firstShift, periods), selected_employee_ids: [], notes: "" })} className="btn-primary"><Plus size={17} /> طھظˆط²ظٹط¹ ط´ظپطھ</button><button onClick={() => setEmployeeDialog({ editing: null })} className="btn-secondary"><Users size={17} /> ط¥ط¶ط§ظپط© ظ…ظˆط¸ظپ</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr>{shiftAssignmentColumns.map((c) => <th key={c.key}>{c.label}</th>)}<th>ظˆط§طھط³ط§ط¨</th><th></th></tr></thead><tbody>{rows.map((r) => <tr key={r.assignment_id}><td>{r.assignment_date}</td><td>{r.employee_name}</td><td>{r.branch}</td><td><b>{r.shift_name}</b><p className="mt-1 text-xs text-slate-400">{r.shift_mode || "ط«ط§ط¨طھ"}</p><div className="mt-1 space-y-1 text-xs text-slate-500">{(r.shift_periods || []).map((p) => <p key={p.period_id || p.period_name}>{p.period_name}: {p.start_time}-{p.end_time}</p>)}</div></td><td>{r.start_time}</td><td>{r.end_time}</td><td>{r.total_hours}</td><td><Status>{r.status}</Status></td><td><button onClick={() => navigator.clipboard?.writeText(makeShiftMessage(r)).then(() => alert("طھظ… ظ†ط³ط® ط§ظ„ط±ط³ط§ظ„ط©"))} className="btn-secondary !h-9 !px-3">ظ†ط³ط® ط§ظ„ط±ط³ط§ظ„ط©</button><button onClick={() => window.open(`https://wa.me/${normalizeWhatsAppPhone(r.employee_phone)}?text=${encodeURIComponent(makeShiftMessage(r))}`, "_blank")} className="btn-secondary !h-9 !px-3">ظپطھط­ ظˆط§طھط³ط§ط¨</button></td><td><button onClick={() => removeRecord("assignment", r.assignment_id)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div><CopyScheduleBox copyShiftSchedule={copyShiftSchedule} /></div>;
 }
 
 function CopyScheduleBox({ copyShiftSchedule }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [branch, setBranch] = useState("");
-  return <div className="panel flex flex-wrap items-end gap-3 p-4"><Label t="نسخ من تاريخ"><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="field mt-2" /></Label><Label t="إلى تاريخ"><input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="field mt-2" /></Label><Label t="الفرع اختياري"><select value={branch} onChange={(e) => setBranch(e.target.value)} className="field mt-2"><option value="">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select></Label><button onClick={() => from && to ? copyShiftSchedule(from, to, branch) : alert("حدد تاريخ النسخ والتاريخ الجديد")} className="btn-secondary">نسخ الجدول</button></div>;
+  return <div className="panel flex flex-wrap items-end gap-3 p-4"><Label t="ظ†ط³ط® ظ…ظ† طھط§ط±ظٹط®"><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="field mt-2" /></Label><Label t="ط¥ظ„ظ‰ طھط§ط±ظٹط®"><input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="field mt-2" /></Label><Label t="ط§ظ„ظپط±ط¹ ط§ط®طھظٹط§ط±ظٹ"><select value={branch} onChange={(e) => setBranch(e.target.value)} className="field mt-2"><option value="">ظƒظ„ ط§ظ„ظپط±ظˆط¹</option>{branches.map((b) => <option key={b}>{b}</option>)}</select></Label><button onClick={() => from && to ? copyShiftSchedule(from, to, branch) : alert("ط­ط¯ط¯ طھط§ط±ظٹط® ط§ظ„ظ†ط³ط® ظˆط§ظ„طھط§ط±ظٹط® ط§ظ„ط¬ط¯ظٹط¯")} className="btn-secondary">ظ†ط³ط® ط§ظ„ط¬ط¯ظˆظ„</button></div>;
 }
 
 function ShiftReportsTab({ rows, employees, assignments, shiftTypes, filters, setFilters, canExport, exportShiftReport }) {
   const unscheduled = employees.filter((e) => !assignments.some((a) => a.employee_id === e.id && (!filters.date || a.assignment_date === filters.date)));
   const conflicts = assignments.filter((a, i, arr) => arr.some((b, j) => i !== j && a.assignment_date === b.assignment_date && a.employee_id === b.employee_id && shiftsOverlap(a, b)));
-  const reports = [["تقرير الشفتات اليومي", rows], ["تقرير الشفتات حسب الفرع", rows], ["تقرير الشفتات حسب الموظف", rows], ["تقرير الشفتات حسب الشهر", rows], ["تقرير نقص التغطية", rows.filter((r) => r.status === "غائب")], ["تقرير التعارضات", conflicts], ["تقرير إجمالي ساعات العمل", rows], ["مقارنة الشفتات بين الفروع", rows], ["مقارنة ساعات العمل بين الموظفين", rows], ["تقرير الموظفين غير المجدولين", unscheduled.map((e) => ({ employee_name: e.name, branch: e.branch, job: e.job, status: e.status }))]];
-  return <div className="space-y-4"><div className="panel grid gap-3 p-4 md:grid-cols-4 xl:grid-cols-6"><input type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} className="field" /><input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field" /><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field" placeholder="الموظف" /><select value={filters.shift} onChange={(e) => setFilters({ ...filters, shift: e.target.value })} className="field"><option value="all">كل الشفتات</option>{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field"><option value="all">كل الحالات</option>{shiftAssignmentStatuses.map((s) => <option key={s}>{s}</option>)}</select></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{reports.map(([title, reportRows]) => { const report = exportShiftReport(title, reportRows); return <div key={title} className="panel p-5"><FileBarChart className="text-brand-700" /><h3 className="mt-3 font-extrabold">{title}</h3><p className="mt-1 text-xs text-slate-500">عدد السجلات: {reportRows.length}</p><div className="mt-5 flex gap-2"><button disabled={!canExport} onClick={() => exportExcel(report.exportRows, title)} className="btn-secondary flex-1"><FileSpreadsheet size={15} /> Excel</button><button onClick={report.print} className="btn-secondary flex-1"><Printer size={15} /> PDF</button><button disabled={!canExport} onClick={() => exportDocx(title, report.exportRows)} className="btn-secondary flex-1"><Download size={15} /> Word</button></div></div>; })}</div></div>;
+  const reports = [["طھظ‚ط±ظٹط± ط§ظ„ط´ظپطھط§طھ ط§ظ„ظٹظˆظ…ظٹ", rows], ["طھظ‚ط±ظٹط± ط§ظ„ط´ظپطھط§طھ ط­ط³ط¨ ط§ظ„ظپط±ط¹", rows], ["طھظ‚ط±ظٹط± ط§ظ„ط´ظپطھط§طھ ط­ط³ط¨ ط§ظ„ظ…ظˆط¸ظپ", rows], ["طھظ‚ط±ظٹط± ط§ظ„ط´ظپطھط§طھ ط­ط³ط¨ ط§ظ„ط´ظ‡ط±", rows], ["طھظ‚ط±ظٹط± ظ†ظ‚طµ ط§ظ„طھط؛ط·ظٹط©", rows.filter((r) => r.status === "ط؛ط§ط¦ط¨")], ["طھظ‚ط±ظٹط± ط§ظ„طھط¹ط§ط±ط¶ط§طھ", conflicts], ["طھظ‚ط±ظٹط± ط¥ط¬ظ…ط§ظ„ظٹ ط³ط§ط¹ط§طھ ط§ظ„ط¹ظ…ظ„", rows], ["ظ…ظ‚ط§ط±ظ†ط© ط§ظ„ط´ظپطھط§طھ ط¨ظٹظ† ط§ظ„ظپط±ظˆط¹", rows], ["ظ…ظ‚ط§ط±ظ†ط© ط³ط§ط¹ط§طھ ط§ظ„ط¹ظ…ظ„ ط¨ظٹظ† ط§ظ„ظ…ظˆط¸ظپظٹظ†", rows], ["طھظ‚ط±ظٹط± ط§ظ„ظ…ظˆط¸ظپظٹظ† ط؛ظٹط± ط§ظ„ظ…ط¬ط¯ظˆظ„ظٹظ†", unscheduled.map((e) => ({ employee_name: e.name, branch: e.branch, job: e.job, status: e.status }))]];
+  return <div className="space-y-4"><div className="panel grid gap-3 p-4 md:grid-cols-4 xl:grid-cols-6"><input type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} className="field" /><input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field" /><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field"><option value="all">ظƒظ„ ط§ظ„ظپط±ظˆط¹</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field" placeholder="ط§ظ„ظ…ظˆط¸ظپ" /><select value={filters.shift} onChange={(e) => setFilters({ ...filters, shift: e.target.value })} className="field"><option value="all">ظƒظ„ ط§ظ„ط´ظپطھط§طھ</option>{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field"><option value="all">ظƒظ„ ط§ظ„ط­ط§ظ„ط§طھ</option>{shiftAssignmentStatuses.map((s) => <option key={s}>{s}</option>)}</select></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{reports.map(([title, reportRows]) => { const report = exportShiftReport(title, reportRows); return <div key={title} className="panel p-5"><FileBarChart className="text-brand-700" /><h3 className="mt-3 font-extrabold">{title}</h3><p className="mt-1 text-xs text-slate-500">ط¹ط¯ط¯ ط§ظ„ط³ط¬ظ„ط§طھ: {reportRows.length}</p><div className="mt-5 flex gap-2"><button disabled={!canExport} onClick={() => exportExcel(report.exportRows, title)} className="btn-secondary flex-1"><FileSpreadsheet size={15} /> Excel</button><button onClick={report.print} className="btn-secondary flex-1"><Printer size={15} /> PDF</button><button disabled={!canExport} onClick={() => exportDocx(title, report.exportRows)} className="btn-secondary flex-1"><Download size={15} /> Word</button></div></div>; })}</div></div>;
 }
 
 function ShiftCharts({ assignments, usedShifts, conflicts }) {
@@ -5166,30 +5380,30 @@ function ShiftCharts({ assignments, usedShifts, conflicts }) {
   const coverage = usedShifts.map((u) => ({ name: u.branch, value: assignments.filter((a) => a.branch === u.branch && a.shift_type_id === u.shift_type_id).length }));
   const conflictByBranch = Object.entries(groupCount(conflicts, "branch")).map(([name, value]) => ({ name, value }));
   if (!assignments.length && !usedShifts.length) return null;
-  return <div className="grid gap-5 xl:grid-cols-2"><Chart title="الشفتات حسب الفروع" sub="عدد التوزيعات"><ResponsiveContainer width="100%" height={220}><BarChart data={byBranch}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></Chart><Chart title="الشفتات حسب الأيام" sub="التوزيع اليومي"><ResponsiveContainer width="100%" height={220}><AreaChart data={byDay}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Area dataKey="value" stroke="#7f1d1d" fill="#fbe5e5" /></AreaChart></ResponsiveContainer></Chart><Chart title="ساعات العمل حسب الموظفين" sub="أعلى 10 موظفين"><ResponsiveContainer width="100%" height={220}><BarChart data={byEmployeeHours}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis /><Tooltip /><Bar dataKey="value" fill="#991b1b" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></Chart><Chart title="التغطية والتعارضات حسب الفرع" sub="مؤشرات رقابية"><ResponsiveContainer width="100%" height={220}><BarChart data={[...coverage, ...conflictByBranch]}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></Chart></div>;
+  return <div className="grid gap-5 xl:grid-cols-2"><Chart title="ط§ظ„ط´ظپطھط§طھ ط­ط³ط¨ ط§ظ„ظپط±ظˆط¹" sub="ط¹ط¯ط¯ ط§ظ„طھظˆط²ظٹط¹ط§طھ"><ResponsiveContainer width="100%" height={220}><BarChart data={byBranch}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></Chart><Chart title="ط§ظ„ط´ظپطھط§طھ ط­ط³ط¨ ط§ظ„ط£ظٹط§ظ…" sub="ط§ظ„طھظˆط²ظٹط¹ ط§ظ„ظٹظˆظ…ظٹ"><ResponsiveContainer width="100%" height={220}><AreaChart data={byDay}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Area dataKey="value" stroke="#7f1d1d" fill="#fbe5e5" /></AreaChart></ResponsiveContainer></Chart><Chart title="ط³ط§ط¹ط§طھ ط§ظ„ط¹ظ…ظ„ ط­ط³ط¨ ط§ظ„ظ…ظˆط¸ظپظٹظ†" sub="ط£ط¹ظ„ظ‰ 10 ظ…ظˆط¸ظپظٹظ†"><ResponsiveContainer width="100%" height={220}><BarChart data={byEmployeeHours}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis /><Tooltip /><Bar dataKey="value" fill="#991b1b" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></Chart><Chart title="ط§ظ„طھط؛ط·ظٹط© ظˆط§ظ„طھط¹ط§ط±ط¶ط§طھ ط­ط³ط¨ ط§ظ„ظپط±ط¹" sub="ظ…ط¤ط´ط±ط§طھ ط±ظ‚ط§ط¨ظٹط©"><ResponsiveContainer width="100%" height={220}><BarChart data={[...coverage, ...conflictByBranch]}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></Chart></div>;
 }
 
 function ShiftTypeDialog({ dialog, setDialog, save }) {
   const periods = dialog.periods || [];
   const updatePeriod = (index, patch) => setDialog({ ...dialog, periods: periods.map((period, i) => i === index ? { ...period, ...patch } : period) });
-  const addPeriod = () => setDialog({ ...dialog, periods: [...periods, { period_id: `STP-${Date.now()}`, period_name: `فترة ${periods.length + 1}`, start_time: "08:00", end_time: "12:00", total_hours: 4, sort_order: periods.length + 1, is_active: true, notes: "" }] });
-  const totalHours = dialog.shift_mode === "مرن" ? Number(dialog.required_hours || 0) : periods.filter((p) => p.is_active !== false).reduce((sum, p) => sum + calculateShiftHours(p.start_time, p.end_time), 0);
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="بيانات نوع الشفت" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="اسم الشفت"><input required value={dialog.shift_name} onChange={(e) => setDialog({ ...dialog, shift_name: e.target.value })} className="field mt-2" /></Label><Label t="نوع الشفت"><select value={dialog.shift_mode || "ثابت"} onChange={(e) => setDialog({ ...dialog, shift_mode: e.target.value })} className="field mt-2"><option>ثابت</option><option>مرن</option></select></Label><Label t="الفترة"><select value={dialog.shift_period} onChange={(e) => setDialog({ ...dialog, shift_period: e.target.value })} className="field mt-2">{shiftPeriods.map((p) => <option key={p}>{p}</option>)}</select></Label><Label t="إجمالي الساعات"><input readOnly value={Number(totalHours).toFixed(2)} className="field mt-2 bg-slate-50" /></Label><Label t="دقائق الاستراحة"><input type="number" value={dialog.break_minutes} onChange={(e) => setDialog({ ...dialog, break_minutes: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">غير نشط</option></select></Label>{dialog.shift_mode === "مرن" && <><Label t="بداية النطاق المسموح"><input type="time" value={dialog.flexible_start_from || ""} onChange={(e) => setDialog({ ...dialog, flexible_start_from: e.target.value })} className="field mt-2" /></Label><Label t="نهاية النطاق المسموح"><input type="time" value={dialog.flexible_end_until || ""} onChange={(e) => setDialog({ ...dialog, flexible_end_until: e.target.value })} className="field mt-2" /></Label><Label t="عدد الساعات المطلوبة"><input type="number" step="0.25" value={dialog.required_hours || ""} onChange={(e) => setDialog({ ...dialog, required_hours: e.target.value })} className="field mt-2" /></Label></>}<Label t="ملاحظات"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><div className="mt-6 rounded-2xl border p-4"><div className="mb-3 flex"><h4 className="font-extrabold">فترات الشفت</h4><button type="button" onClick={addPeriod} className="btn-secondary mr-auto"><Plus size={15} /> إضافة فترة</button></div><div className="space-y-3">{periods.map((period, index) => <div key={period.period_id || index} className="rounded-2xl bg-slate-50 p-3"><div className="grid gap-3 md:grid-cols-5"><input value={period.period_name} onChange={(e) => updatePeriod(index, { period_name: e.target.value })} className="field" placeholder="اسم الفترة" /><input type="time" value={period.start_time} onChange={(e) => updatePeriod(index, { start_time: e.target.value, total_hours: calculateShiftHours(e.target.value, period.end_time) })} className="field" /><input type="time" value={period.end_time} onChange={(e) => updatePeriod(index, { end_time: e.target.value, total_hours: calculateShiftHours(period.start_time, e.target.value) })} className="field" /><input readOnly value={calculateShiftHours(period.start_time, period.end_time)} className="field bg-white" /><button type="button" onClick={() => setDialog({ ...dialog, periods: periods.filter((_, i) => i !== index) })} className="btn-secondary text-red-600">حذف</button></div><input value={period.notes || ""} onChange={(e) => updatePeriod(index, { notes: e.target.value })} className="field mt-2" placeholder="ملاحظات الفترة" /><ShiftPeriodTimeline periods={[period]} /></div>)}</div></div><DialogActions close={() => setDialog(null)} /></form></div>;
+  const addPeriod = () => setDialog({ ...dialog, periods: [...periods, { period_id: `STP-${Date.now()}`, period_name: `ظپطھط±ط© ${periods.length + 1}`, start_time: "08:00", end_time: "12:00", total_hours: 4, sort_order: periods.length + 1, is_active: true, notes: "" }] });
+  const totalHours = dialog.shift_mode === "ظ…ط±ظ†" ? Number(dialog.required_hours || 0) : periods.filter((p) => p.is_active !== false).reduce((sum, p) => sum + calculateShiftHours(p.start_time, p.end_time), 0);
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="ط¨ظٹط§ظ†ط§طھ ظ†ظˆط¹ ط§ظ„ط´ظپطھ" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="ط§ط³ظ… ط§ظ„ط´ظپطھ"><input required value={dialog.shift_name} onChange={(e) => setDialog({ ...dialog, shift_name: e.target.value })} className="field mt-2" /></Label><Label t="ظ†ظˆط¹ ط§ظ„ط´ظپطھ"><select value={dialog.shift_mode || "ط«ط§ط¨طھ"} onChange={(e) => setDialog({ ...dialog, shift_mode: e.target.value })} className="field mt-2"><option>ط«ط§ط¨طھ</option><option>ظ…ط±ظ†</option></select></Label><Label t="ط§ظ„ظپطھط±ط©"><select value={dialog.shift_period} onChange={(e) => setDialog({ ...dialog, shift_period: e.target.value })} className="field mt-2">{shiftPeriods.map((p) => <option key={p}>{p}</option>)}</select></Label><Label t="ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ط³ط§ط¹ط§طھ"><input readOnly value={Number(totalHours).toFixed(2)} className="field mt-2 bg-slate-50" /></Label><Label t="ط¯ظ‚ط§ط¦ظ‚ ط§ظ„ط§ط³طھط±ط§ط­ط©"><input type="number" value={dialog.break_minutes} onChange={(e) => setDialog({ ...dialog, break_minutes: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ط­ط§ظ„ط©"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">ظ†ط´ط·</option><option value="false">ط؛ظٹط± ظ†ط´ط·</option></select></Label>{dialog.shift_mode === "ظ…ط±ظ†" && <><Label t="ط¨ط¯ط§ظٹط© ط§ظ„ظ†ط·ط§ظ‚ ط§ظ„ظ…ط³ظ…ظˆط­"><input type="time" value={dialog.flexible_start_from || ""} onChange={(e) => setDialog({ ...dialog, flexible_start_from: e.target.value })} className="field mt-2" /></Label><Label t="ظ†ظ‡ط§ظٹط© ط§ظ„ظ†ط·ط§ظ‚ ط§ظ„ظ…ط³ظ…ظˆط­"><input type="time" value={dialog.flexible_end_until || ""} onChange={(e) => setDialog({ ...dialog, flexible_end_until: e.target.value })} className="field mt-2" /></Label><Label t="ط¹ط¯ط¯ ط§ظ„ط³ط§ط¹ط§طھ ط§ظ„ظ…ط·ظ„ظˆط¨ط©"><input type="number" step="0.25" value={dialog.required_hours || ""} onChange={(e) => setDialog({ ...dialog, required_hours: e.target.value })} className="field mt-2" /></Label></>}<Label t="ظ…ظ„ط§ط­ط¸ط§طھ"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><div className="mt-6 rounded-2xl border p-4"><div className="mb-3 flex"><h4 className="font-extrabold">ظپطھط±ط§طھ ط§ظ„ط´ظپطھ</h4><button type="button" onClick={addPeriod} className="btn-secondary mr-auto"><Plus size={15} /> ط¥ط¶ط§ظپط© ظپطھط±ط©</button></div><div className="space-y-3">{periods.map((period, index) => <div key={period.period_id || index} className="rounded-2xl bg-slate-50 p-3"><div className="grid gap-3 md:grid-cols-5"><input value={period.period_name} onChange={(e) => updatePeriod(index, { period_name: e.target.value })} className="field" placeholder="ط§ط³ظ… ط§ظ„ظپطھط±ط©" /><input type="time" value={period.start_time} onChange={(e) => updatePeriod(index, { start_time: e.target.value, total_hours: calculateShiftHours(e.target.value, period.end_time) })} className="field" /><input type="time" value={period.end_time} onChange={(e) => updatePeriod(index, { end_time: e.target.value, total_hours: calculateShiftHours(period.start_time, e.target.value) })} className="field" /><input readOnly value={calculateShiftHours(period.start_time, period.end_time)} className="field bg-white" /><button type="button" onClick={() => setDialog({ ...dialog, periods: periods.filter((_, i) => i !== index) })} className="btn-secondary text-red-600">ط­ط°ظپ</button></div><input value={period.notes || ""} onChange={(e) => updatePeriod(index, { notes: e.target.value })} className="field mt-2" placeholder="ظ…ظ„ط§ط­ط¸ط§طھ ط§ظ„ظپطھط±ط©" /><ShiftPeriodTimeline periods={[period]} /></div>)}</div></div><DialogActions close={() => setDialog(null)} /></form></div>;
 }
 
 function UsedShiftDialog({ dialog, setDialog, save, shiftTypes, selectShift }) {
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel w-full max-w-4xl p-6"><DialogTitle title="الشفت المستخدم" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="الفرع"><select value={dialog.branch} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className="field mt-2">{branches.map((b) => <option key={b}>{b}</option>)}</select></Label><Label t="نوع الشفت"><select value={dialog.shift_type_id} onChange={(e) => selectShift(e.target.value)} className="field mt-2">{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select></Label><Label t="من الساعة"><input type="time" value={dialog.start_time} onChange={(e) => setDialog({ ...dialog, start_time: e.target.value })} className="field mt-2" /></Label><Label t="إلى الساعة"><input type="time" value={dialog.end_time} onChange={(e) => setDialog({ ...dialog, end_time: e.target.value })} className="field mt-2" /></Label><Label t="المطلوب"><input type="number" value={dialog.required_employees} onChange={(e) => setDialog({ ...dialog, required_employees: e.target.value })} className="field mt-2" /></Label><Label t="الحد الأدنى"><input type="number" value={dialog.min_employees} onChange={(e) => setDialog({ ...dialog, min_employees: e.target.value })} className="field mt-2" /></Label><Label t="الحد الأقصى"><input type="number" value={dialog.max_employees} onChange={(e) => setDialog({ ...dialog, max_employees: e.target.value })} className="field mt-2" /></Label><Label t="من تاريخ"><input type="date" value={dialog.active_from} onChange={(e) => setDialog({ ...dialog, active_from: e.target.value })} className="field mt-2" /></Label><Label t="إلى تاريخ"><input type="date" value={dialog.active_to || ""} onChange={(e) => setDialog({ ...dialog, active_to: e.target.value })} className="field mt-2" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>;
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel w-full max-w-4xl p-6"><DialogTitle title="ط§ظ„ط´ظپطھ ط§ظ„ظ…ط³طھط®ط¯ظ…" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="ط§ظ„ظپط±ط¹"><select value={dialog.branch} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className="field mt-2">{branches.map((b) => <option key={b}>{b}</option>)}</select></Label><Label t="ظ†ظˆط¹ ط§ظ„ط´ظپطھ"><select value={dialog.shift_type_id} onChange={(e) => selectShift(e.target.value)} className="field mt-2">{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select></Label><Label t="ظ…ظ† ط§ظ„ط³ط§ط¹ط©"><input type="time" value={dialog.start_time} onChange={(e) => setDialog({ ...dialog, start_time: e.target.value })} className="field mt-2" /></Label><Label t="ط¥ظ„ظ‰ ط§ظ„ط³ط§ط¹ط©"><input type="time" value={dialog.end_time} onChange={(e) => setDialog({ ...dialog, end_time: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ظ…ط·ظ„ظˆط¨"><input type="number" value={dialog.required_employees} onChange={(e) => setDialog({ ...dialog, required_employees: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ط­ط¯ ط§ظ„ط£ط¯ظ†ظ‰"><input type="number" value={dialog.min_employees} onChange={(e) => setDialog({ ...dialog, min_employees: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ط­ط¯ ط§ظ„ط£ظ‚طµظ‰"><input type="number" value={dialog.max_employees} onChange={(e) => setDialog({ ...dialog, max_employees: e.target.value })} className="field mt-2" /></Label><Label t="ظ…ظ† طھط§ط±ظٹط®"><input type="date" value={dialog.active_from} onChange={(e) => setDialog({ ...dialog, active_from: e.target.value })} className="field mt-2" /></Label><Label t="ط¥ظ„ظ‰ طھط§ط±ظٹط®"><input type="date" value={dialog.active_to || ""} onChange={(e) => setDialog({ ...dialog, active_to: e.target.value })} className="field mt-2" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>;
 }
 
 function ScenarioDialog({ dialog, setDialog, save, shiftTypes }) {
   const addDetail = () => { const s = shiftTypes[0] || {}; setDialog({ ...dialog, details: [...(dialog.details || []), { scenario_detail_id: `SCD-${Date.now()}`, shift_type_id: s.shift_type_id || "", shift_name: s.shift_name || "", start_time: s.start_time || "08:00", end_time: s.end_time || "15:00", required_employees: 1, notes: "" }] }); };
   const updateDetail = (i, patch) => setDialog({ ...dialog, details: (dialog.details || []).map((d, idx) => idx === i ? { ...d, ...patch } : d) });
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="سيناريو الشفتات" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="اسم السيناريو"><input required value={dialog.scenario_name} onChange={(e) => setDialog({ ...dialog, scenario_name: e.target.value })} className="field mt-2" /></Label><Label t="الفرع"><select value={dialog.branch} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className="field mt-2"><option>كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select></Label><Label t="النوع"><select value={dialog.scenario_type} onChange={(e) => setDialog({ ...dialog, scenario_type: e.target.value })} className="field mt-2">{scenarioTypes.map((s) => <option key={s}>{s}</option>)}</select></Label><Label t="الوصف"><textarea value={dialog.description} onChange={(e) => setDialog({ ...dialog, description: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><div className="mt-5 flex"><h4 className="font-extrabold">الشفتات داخل السيناريو</h4><button type="button" onClick={addDetail} className="btn-secondary mr-auto"><Plus size={15} /> إضافة شفت</button></div><div className="mt-3 space-y-2">{(dialog.details || []).map((d, i) => <div key={d.scenario_detail_id} className="grid gap-2 rounded-xl bg-slate-50 p-3 md:grid-cols-5"><select value={d.shift_type_id} onChange={(e) => { const s = shiftTypes.find((x) => x.shift_type_id === e.target.value); updateDetail(i, { shift_type_id: e.target.value, shift_name: s?.shift_name || "", start_time: s?.start_time || "", end_time: s?.end_time || "" }); }} className="field">{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select><input type="time" value={d.start_time} onChange={(e) => updateDetail(i, { start_time: e.target.value })} className="field" /><input type="time" value={d.end_time} onChange={(e) => updateDetail(i, { end_time: e.target.value })} className="field" /><input type="number" value={d.required_employees} onChange={(e) => updateDetail(i, { required_employees: e.target.value })} className="field" /><button type="button" onClick={() => setDialog({ ...dialog, details: dialog.details.filter((_, idx) => idx !== i) })} className="btn-secondary text-red-600">حذف</button></div>)}</div><DialogActions close={() => setDialog(null)} /></form></div>;
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="ط³ظٹظ†ط§ط±ظٹظˆ ط§ظ„ط´ظپطھط§طھ" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="ط§ط³ظ… ط§ظ„ط³ظٹظ†ط§ط±ظٹظˆ"><input required value={dialog.scenario_name} onChange={(e) => setDialog({ ...dialog, scenario_name: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ظپط±ط¹"><select value={dialog.branch} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className="field mt-2"><option>ظƒظ„ ط§ظ„ظپط±ظˆط¹</option>{branches.map((b) => <option key={b}>{b}</option>)}</select></Label><Label t="ط§ظ„ظ†ظˆط¹"><select value={dialog.scenario_type} onChange={(e) => setDialog({ ...dialog, scenario_type: e.target.value })} className="field mt-2">{scenarioTypes.map((s) => <option key={s}>{s}</option>)}</select></Label><Label t="ط§ظ„ظˆطµظپ"><textarea value={dialog.description} onChange={(e) => setDialog({ ...dialog, description: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><div className="mt-5 flex"><h4 className="font-extrabold">ط§ظ„ط´ظپطھط§طھ ط¯ط§ط®ظ„ ط§ظ„ط³ظٹظ†ط§ط±ظٹظˆ</h4><button type="button" onClick={addDetail} className="btn-secondary mr-auto"><Plus size={15} /> ط¥ط¶ط§ظپط© ط´ظپطھ</button></div><div className="mt-3 space-y-2">{(dialog.details || []).map((d, i) => <div key={d.scenario_detail_id} className="grid gap-2 rounded-xl bg-slate-50 p-3 md:grid-cols-5"><select value={d.shift_type_id} onChange={(e) => { const s = shiftTypes.find((x) => x.shift_type_id === e.target.value); updateDetail(i, { shift_type_id: e.target.value, shift_name: s?.shift_name || "", start_time: s?.start_time || "", end_time: s?.end_time || "" }); }} className="field">{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select><input type="time" value={d.start_time} onChange={(e) => updateDetail(i, { start_time: e.target.value })} className="field" /><input type="time" value={d.end_time} onChange={(e) => updateDetail(i, { end_time: e.target.value })} className="field" /><input type="number" value={d.required_employees} onChange={(e) => updateDetail(i, { required_employees: e.target.value })} className="field" /><button type="button" onClick={() => setDialog({ ...dialog, details: dialog.details.filter((_, idx) => idx !== i) })} className="btn-secondary text-red-600">ط­ط°ظپ</button></div>)}</div><DialogActions close={() => setDialog(null)} /></form></div>;
 }
 
 function AssignmentDialog({ dialog, setDialog, save, employees, shiftTypes, selectShift }) {
   const selectEmployees = (ids) => setDialog({ ...dialog, selected_employee_ids: ids });
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="توزيع الموظفين على الشفتات" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="التاريخ"><input type="date" value={dialog.assignment_date} onChange={(e) => setDialog({ ...dialog, assignment_date: e.target.value })} className="field mt-2" /></Label><Label t="الشفت"><select value={dialog.shift_type_id} onChange={(e) => selectShift(e.target.value)} className="field mt-2">{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select></Label><Label t="نوع الشفت"><input readOnly value={dialog.shift_mode || "ثابت"} className="field mt-2 bg-slate-50" /></Label><Label t="الساعات"><input readOnly value={Number(dialog.total_hours || calculateShiftHours(dialog.start_time, dialog.end_time)).toFixed(2)} className="field mt-2 bg-slate-50" /></Label><Label t="من"><input type="time" value={dialog.start_time} onChange={(e) => setDialog({ ...dialog, start_time: e.target.value })} className="field mt-2" /></Label><Label t="إلى"><input type="time" value={dialog.end_time} onChange={(e) => setDialog({ ...dialog, end_time: e.target.value })} className="field mt-2" /></Label><Label t="ملاحظات"><input value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2" /></Label></div><div className="mt-4 rounded-2xl border p-3"><b className="text-sm">فترات الشفت</b><div className="mt-2 grid gap-2 md:grid-cols-2">{(dialog.shift_periods || []).map((p) => <div key={p.period_id || p.period_name} className="rounded-xl bg-slate-50 p-3 text-sm"><b>{p.period_name}</b><p className="text-slate-500">{p.start_time} - {p.end_time} • {p.total_hours} ساعات</p></div>)}</div><ShiftPeriodTimeline periods={dialog.shift_periods || []} /></div><div className="mt-5 flex flex-wrap gap-2"><button type="button" onClick={() => selectEmployees(employees.map((e) => e.id))} className="btn-secondary">اختيار كل الموظفين</button>{branches.map((b) => <button type="button" key={b} onClick={() => selectEmployees(employees.filter((e) => e.branch === b).map((e) => e.id))} className="btn-secondary">{b}</button>)}</div><div className="mt-4 grid max-h-72 gap-2 overflow-y-auto rounded-2xl border p-3 md:grid-cols-2">{employees.map((e) => <label key={e.id} className="flex items-center gap-2 rounded-xl bg-slate-50 p-2 text-sm"><input type="checkbox" checked={(dialog.selected_employee_ids || []).includes(e.id)} onChange={(ev) => setDialog({ ...dialog, selected_employee_ids: ev.target.checked ? [...(dialog.selected_employee_ids || []), e.id] : (dialog.selected_employee_ids || []).filter((id) => id !== e.id) })} />{e.name} - {e.branch} - {e.job}</label>)}</div><p className="mt-3 rounded-xl bg-blue-50 p-3 text-sm font-bold text-blue-700">عدد الموظفين المختارين: {(dialog.selected_employee_ids || []).length}</p><DialogActions close={() => setDialog(null)} /></form></div>;
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="طھظˆط²ظٹط¹ ط§ظ„ظ…ظˆط¸ظپظٹظ† ط¹ظ„ظ‰ ط§ظ„ط´ظپطھط§طھ" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="ط§ظ„طھط§ط±ظٹط®"><input type="date" value={dialog.assignment_date} onChange={(e) => setDialog({ ...dialog, assignment_date: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ط´ظپطھ"><select value={dialog.shift_type_id} onChange={(e) => selectShift(e.target.value)} className="field mt-2">{shiftTypes.map((s) => <option key={s.shift_type_id} value={s.shift_type_id}>{s.shift_name}</option>)}</select></Label><Label t="ظ†ظˆط¹ ط§ظ„ط´ظپطھ"><input readOnly value={dialog.shift_mode || "ط«ط§ط¨طھ"} className="field mt-2 bg-slate-50" /></Label><Label t="ط§ظ„ط³ط§ط¹ط§طھ"><input readOnly value={Number(dialog.total_hours || calculateShiftHours(dialog.start_time, dialog.end_time)).toFixed(2)} className="field mt-2 bg-slate-50" /></Label><Label t="ظ…ظ†"><input type="time" value={dialog.start_time} onChange={(e) => setDialog({ ...dialog, start_time: e.target.value })} className="field mt-2" /></Label><Label t="ط¥ظ„ظ‰"><input type="time" value={dialog.end_time} onChange={(e) => setDialog({ ...dialog, end_time: e.target.value })} className="field mt-2" /></Label><Label t="ظ…ظ„ط§ط­ط¸ط§طھ"><input value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2" /></Label></div><div className="mt-4 rounded-2xl border p-3"><b className="text-sm">ظپطھط±ط§طھ ط§ظ„ط´ظپطھ</b><div className="mt-2 grid gap-2 md:grid-cols-2">{(dialog.shift_periods || []).map((p) => <div key={p.period_id || p.period_name} className="rounded-xl bg-slate-50 p-3 text-sm"><b>{p.period_name}</b><p className="text-slate-500">{p.start_time} - {p.end_time} â€¢ {p.total_hours} ط³ط§ط¹ط§طھ</p></div>)}</div><ShiftPeriodTimeline periods={dialog.shift_periods || []} /></div><div className="mt-5 flex flex-wrap gap-2"><button type="button" onClick={() => selectEmployees(employees.map((e) => e.id))} className="btn-secondary">ط§ط®طھظٹط§ط± ظƒظ„ ط§ظ„ظ…ظˆط¸ظپظٹظ†</button>{branches.map((b) => <button type="button" key={b} onClick={() => selectEmployees(employees.filter((e) => e.branch === b).map((e) => e.id))} className="btn-secondary">{b}</button>)}</div><div className="mt-4 grid max-h-72 gap-2 overflow-y-auto rounded-2xl border p-3 md:grid-cols-2">{employees.map((e) => <label key={e.id} className="flex items-center gap-2 rounded-xl bg-slate-50 p-2 text-sm"><input type="checkbox" checked={(dialog.selected_employee_ids || []).includes(e.id)} onChange={(ev) => setDialog({ ...dialog, selected_employee_ids: ev.target.checked ? [...(dialog.selected_employee_ids || []), e.id] : (dialog.selected_employee_ids || []).filter((id) => id !== e.id) })} />{e.name} - {e.branch} - {e.job}</label>)}</div><p className="mt-3 rounded-xl bg-blue-50 p-3 text-sm font-bold text-blue-700">ط¹ط¯ط¯ ط§ظ„ظ…ظˆط¸ظپظٹظ† ط§ظ„ظ…ط®طھط§ط±ظٹظ†: {(dialog.selected_employee_ids || []).length}</p><DialogActions close={() => setDialog(null)} /></form></div>;
 }
 
 function ShiftPeriodTimeline({ periods }) {
@@ -5200,7 +5414,7 @@ function DialogTitle({ title, close }) {
   return <div className="mb-5 flex"><h3 className="text-xl font-extrabold">{title}</h3><button type="button" onClick={close} className="mr-auto"><X /></button></div>;
 }
 function DialogActions({ close }) {
-  return <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={close} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ البيانات</button></div>;
+  return <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={close} className="btn-secondary">ط¥ظ„ط؛ط§ط،</button><button className="btn-primary"><Save size={17} /> ط­ظپط¸ ط§ظ„ط¨ظٹط§ظ†ط§طھ</button></div>;
 }
 
 function DailyOperationsPage({ employees, currentUser, can }) {
@@ -5213,7 +5427,7 @@ function DailyOperationsPage({ employees, currentUser, can }) {
   const approve = (row) => dailyOperationsService.approveDailyOperation(row, currentUser?.username || "").then(load).catch((e) => alert(e.message));
   const totalOps = filtered.reduce((s, x) => s + Number(x.operation_count || 0), 0), totalErrors = filtered.reduce((s, x) => s + Number(x.error_count || 0), 0);
   const byBranch = Object.entries(groupCount(filtered, "branch")).map(([name, value]) => ({ name, value }));
-  return <div className="space-y-5"><PageHead title="العمليات اليومية" desc="تسجيل الإنتاجية اليومية وربطها بالـ KPI والحوافز" action={<button disabled={can?.("daily_operations", "can_create") === false} onClick={() => setDialog({ operation_id: `OP-${Date.now()}`, operation_date: new Date().toISOString().slice(0, 10), month: new Date().toISOString().slice(0, 7), employee_id: "", employee_name: "", branch: "", job_name: "", operation_type: operationTypes[0], service_channel: serviceChannels[0], currency: "SAR", operation_count: 0, completed_count: 0, error_count: 0, returned_count: 0, pending_count: 0, customer_complaints: 0, amount: 0, status: "مسودة", notes: "" })} className="btn-primary"><Plus size={18} /> إضافة عملية</button>} /><div className="grid gap-4 md:grid-cols-4"><Mini label="إجمالي العمليات" value={totalOps} I={Gauge} /><Mini label="الأخطاء" value={totalErrors} I={AlertTriangle} /><Mini label="نسبة الأخطاء" value={`${totalOps ? ((totalErrors / totalOps) * 100).toFixed(1) : 0}%`} I={TrendingUp} /><Mini label="المعتمدة" value={filtered.filter((x) => x.status === "معتمدة").length} I={BadgeCheck} /></div><div className="panel flex flex-wrap gap-3 p-4"><input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field max-w-[180px]" /><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field min-w-[180px]" placeholder="الموظف" /><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option>{operationStatuses.map((s) => <option key={s}>{s}</option>)}</select><button onClick={() => exportExcel(filtered, "العمليات اليومية")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="grid gap-5 xl:grid-cols-2"><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الموظف</th><th>الفرع</th><th>العملية</th><th>العدد</th><th>الأخطاء</th><th>الحالة</th><th></th></tr></thead><tbody>{loading ? <tr><td colSpan="8">جاري التحميل...</td></tr> : filtered.map((r) => <tr key={r.operation_id}><td>{r.operation_date}</td><td>{r.employee_name}<p className="text-xs text-slate-400">{r.job_name}</p></td><td>{r.branch}</td><td>{r.operation_type}</td><td>{r.operation_count}</td><td>{r.error_count}</td><td><Status>{r.status}</Status></td><td><button onClick={() => setDialog(r)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => approve(r)} className="p-2 text-green-700"><BadgeCheck size={16} /></button><button disabled={r.status !== "مسودة"} onClick={() => dailyOperationsService.deleteDailyOperation(r.operation_id).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div><Chart title="العمليات حسب الفروع" sub="توزيع سجلات العمليات"><ResponsiveContainer width="100%" height={260}><BarChart data={byBranch}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8,8,0,0]} /></BarChart></ResponsiveContainer></Chart></div>{dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="عملية يومية" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="التاريخ"><input type="date" value={dialog.operation_date} onChange={(e) => setDialog({ ...dialog, operation_date: e.target.value, month: e.target.value.slice(0, 7) })} className="field mt-2" /></Label><Label t="الموظف"><select value={dialog.employee_id} onChange={(e) => pickEmployee(e.target.value)} className="field mt-2"><option value="">اختر الموظف</option>{employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.name} - {emp.id} - {emp.branch}</option>)}</select></Label><Label t="الوظيفة"><input readOnly value={dialog.job_name} className="field mt-2 bg-slate-50" /></Label><Label t="نوع العملية"><select value={dialog.operation_type} onChange={(e) => setDialog({ ...dialog, operation_type: e.target.value })} className="field mt-2">{operationTypes.map((t) => <option key={t}>{t}</option>)}</select></Label><Label t="القناة"><select value={dialog.service_channel} onChange={(e) => setDialog({ ...dialog, service_channel: e.target.value })} className="field mt-2">{serviceChannels.map((t) => <option key={t}>{t}</option>)}</select></Label>{["operation_count","completed_count","pending_count","error_count","returned_count","customer_complaints","amount"].map((k) => <Label key={k} t={k}><input type="number" value={dialog[k] || 0} onChange={(e) => setDialog({ ...dialog, [k]: e.target.value })} className="field mt-2" /></Label>)}<Label t="ملاحظات"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}</div>;
+  return <div className="space-y-5"><PageHead title="ط§ظ„ط¹ظ…ظ„ظٹط§طھ ط§ظ„ظٹظˆظ…ظٹط©" desc="طھط³ط¬ظٹظ„ ط§ظ„ط¥ظ†طھط§ط¬ظٹط© ط§ظ„ظٹظˆظ…ظٹط© ظˆط±ط¨ط·ظ‡ط§ ط¨ط§ظ„ظ€ KPI ظˆط§ظ„ط­ظˆط§ظپط²" action={<button disabled={can?.("daily_operations", "can_create") === false} onClick={() => setDialog({ operation_id: `OP-${Date.now()}`, operation_date: new Date().toISOString().slice(0, 10), month: new Date().toISOString().slice(0, 7), employee_id: "", employee_name: "", branch: "", job_name: "", operation_type: operationTypes[0], service_channel: serviceChannels[0], currency: "SAR", operation_count: 0, completed_count: 0, error_count: 0, returned_count: 0, pending_count: 0, customer_complaints: 0, amount: 0, status: "ظ…ط³ظˆط¯ط©", notes: "" })} className="btn-primary"><Plus size={18} /> ط¥ط¶ط§ظپط© ط¹ظ…ظ„ظٹط©</button>} /><div className="grid gap-4 md:grid-cols-4"><Mini label="ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ط¹ظ…ظ„ظٹط§طھ" value={totalOps} I={Gauge} /><Mini label="ط§ظ„ط£ط®ط·ط§ط،" value={totalErrors} I={AlertTriangle} /><Mini label="ظ†ط³ط¨ط© ط§ظ„ط£ط®ط·ط§ط،" value={`${totalOps ? ((totalErrors / totalOps) * 100).toFixed(1) : 0}%`} I={TrendingUp} /><Mini label="ط§ظ„ظ…ط¹طھظ…ط¯ط©" value={filtered.filter((x) => x.status === "ظ…ط¹طھظ…ط¯ط©").length} I={BadgeCheck} /></div><div className="panel flex flex-wrap gap-3 p-4"><input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field max-w-[180px]" /><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">ظƒظ„ ط§ظ„ظپط±ظˆط¹</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field min-w-[180px]" placeholder="ط§ظ„ظ…ظˆط¸ظپ" /><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[160px]"><option value="all">ظƒظ„ ط§ظ„ط­ط§ظ„ط§طھ</option>{operationStatuses.map((s) => <option key={s}>{s}</option>)}</select><button onClick={() => exportExcel(filtered, "ط§ظ„ط¹ظ…ظ„ظٹط§طھ ط§ظ„ظٹظˆظ…ظٹط©")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="grid gap-5 xl:grid-cols-2"><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>ط§ظ„طھط§ط±ظٹط®</th><th>ط§ظ„ظ…ظˆط¸ظپ</th><th>ط§ظ„ظپط±ط¹</th><th>ط§ظ„ط¹ظ…ظ„ظٹط©</th><th>ط§ظ„ط¹ط¯ط¯</th><th>ط§ظ„ط£ط®ط·ط§ط،</th><th>ط§ظ„ط­ط§ظ„ط©</th><th></th></tr></thead><tbody>{loading ? <tr><td colSpan="8">ط¬ط§ط±ظٹ ط§ظ„طھط­ظ…ظٹظ„...</td></tr> : filtered.map((r) => <tr key={r.operation_id}><td>{r.operation_date}</td><td>{r.employee_name}<p className="text-xs text-slate-400">{r.job_name}</p></td><td>{r.branch}</td><td>{r.operation_type}</td><td>{r.operation_count}</td><td>{r.error_count}</td><td><Status>{r.status}</Status></td><td><button onClick={() => setDialog(r)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => approve(r)} className="p-2 text-green-700"><BadgeCheck size={16} /></button><button disabled={r.status !== "ظ…ط³ظˆط¯ط©"} onClick={() => dailyOperationsService.deleteDailyOperation(r.operation_id).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div><Chart title="ط§ظ„ط¹ظ…ظ„ظٹط§طھ ط­ط³ط¨ ط§ظ„ظپط±ظˆط¹" sub="طھظˆط²ظٹط¹ ط³ط¬ظ„ط§طھ ط§ظ„ط¹ظ…ظ„ظٹط§طھ"><ResponsiveContainer width="100%" height={260}><BarChart data={byBranch}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8,8,0,0]} /></BarChart></ResponsiveContainer></Chart></div>{dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="ط¹ظ…ظ„ظٹط© ظٹظˆظ…ظٹط©" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="ط§ظ„طھط§ط±ظٹط®"><input type="date" value={dialog.operation_date} onChange={(e) => setDialog({ ...dialog, operation_date: e.target.value, month: e.target.value.slice(0, 7) })} className="field mt-2" /></Label><Label t="ط§ظ„ظ…ظˆط¸ظپ"><select value={dialog.employee_id} onChange={(e) => pickEmployee(e.target.value)} className="field mt-2"><option value="">ط§ط®طھط± ط§ظ„ظ…ظˆط¸ظپ</option>{employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.name} - {emp.id} - {emp.branch}</option>)}</select></Label><Label t="ط§ظ„ظˆط¸ظٹظپط©"><input readOnly value={dialog.job_name} className="field mt-2 bg-slate-50" /></Label><Label t="ظ†ظˆط¹ ط§ظ„ط¹ظ…ظ„ظٹط©"><select value={dialog.operation_type} onChange={(e) => setDialog({ ...dialog, operation_type: e.target.value })} className="field mt-2">{operationTypes.map((t) => <option key={t}>{t}</option>)}</select></Label><Label t="ط§ظ„ظ‚ظ†ط§ط©"><select value={dialog.service_channel} onChange={(e) => setDialog({ ...dialog, service_channel: e.target.value })} className="field mt-2">{serviceChannels.map((t) => <option key={t}>{t}</option>)}</select></Label>{["operation_count","completed_count","pending_count","error_count","returned_count","customer_complaints","amount"].map((k) => <Label key={k} t={k}><input type="number" value={dialog[k] || 0} onChange={(e) => setDialog({ ...dialog, [k]: e.target.value })} className="field mt-2" /></Label>)}<Label t="ظ…ظ„ط§ط­ط¸ط§طھ"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}</div>;
 }
 
 function PerformanceCriteriaPage({ can }) {
@@ -5222,7 +5436,7 @@ function PerformanceCriteriaPage({ can }) {
   useEffect(() => { load().catch((e) => alert(e.message)); }, []);
   const rows = criteriaRows.filter((r) => r.job_name === selectedJob), totalWeight = performanceCriteriaService.validateCriteriaWeights(rows);
   const saveCriterion = async (e) => { e.preventDefault(); try { await performanceCriteriaService.saveKpiCriterion(dialog); setDialog(null); load(); } catch (err) { alert(err.message); } };
-  return <div className="space-y-5"><PageHead title="معايير الأداء" desc="معايير KPI عادلة ومنفصلة حسب الوظيفة" action={<div className="flex gap-2"><button onClick={() => performanceCriteriaService.seedDefaults().then(load).catch((e) => alert(e.message))} className="btn-secondary">توليد المعايير الافتراضية</button><button disabled={can?.("performance_criteria", "can_create") === false} onClick={() => setDialog({ job_name: selectedJob, criterion_name: "", weight: 10, max_score: 100, scoring_type: scoringTypes[0], target_value: 100, excellent_threshold: 100, good_threshold: 80, acceptable_threshold: 60, affects_incentive: true, is_active: true })} className="btn-primary"><Plus size={18} /> إضافة معيار</button></div>} /><div className="panel flex flex-wrap gap-3 p-4"><select value={selectedJob} onChange={(e) => setSelectedJob(e.target.value)} className="field max-w-md">{[...new Set([...templates.map((t) => t.job_name), ...Object.keys(defaultJobKpis)])].map((j) => <option key={j}>{j}</option>)}</select><span className={`rounded-xl px-4 py-2 text-sm font-bold ${totalWeight === 100 ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>إجمالي الأوزان: {totalWeight}%</span></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>المعيار</th><th>الوزن</th><th>طريقة الاحتساب</th><th>المستهدف</th><th>الحافز</th><th>الحالة</th><th></th></tr></thead><tbody>{rows.map((r) => <tr key={r.criterion_id}><td>{r.criterion_name}</td><td>{r.weight}%</td><td>{r.scoring_type}</td><td>{r.target_value}</td><td>{r.affects_incentive ? "نعم" : "لا"}</td><td><Status>{r.is_active ? "نشط" : "معطل"}</Status></td><td><button onClick={() => setDialog(r)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => performanceCriteriaService.deleteKpiCriterion(r.criterion_id).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div>{dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={saveCriterion} className="panel w-full max-w-4xl p-6"><DialogTitle title="معيار أداء" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="الوظيفة"><input value={dialog.job_name} onChange={(e) => setDialog({ ...dialog, job_name: e.target.value })} className="field mt-2" /></Label><Label t="اسم المعيار"><input required value={dialog.criterion_name} onChange={(e) => setDialog({ ...dialog, criterion_name: e.target.value })} className="field mt-2" /></Label><Label t="الوزن"><input type="number" value={dialog.weight} onChange={(e) => setDialog({ ...dialog, weight: e.target.value })} className="field mt-2" /></Label><Label t="طريقة الاحتساب"><select value={dialog.scoring_type} onChange={(e) => setDialog({ ...dialog, scoring_type: e.target.value })} className="field mt-2">{scoringTypes.map((s) => <option key={s}>{s}</option>)}</select></Label><Label t="المستهدف"><input type="number" value={dialog.target_value} onChange={(e) => setDialog({ ...dialog, target_value: e.target.value })} className="field mt-2" /></Label><Label t="حد ممتاز"><input type="number" value={dialog.excellent_threshold} onChange={(e) => setDialog({ ...dialog, excellent_threshold: e.target.value })} className="field mt-2" /></Label><Label t="حد جيد"><input type="number" value={dialog.good_threshold} onChange={(e) => setDialog({ ...dialog, good_threshold: e.target.value })} className="field mt-2" /></Label><Label t="حد مقبول"><input type="number" value={dialog.acceptable_threshold} onChange={(e) => setDialog({ ...dialog, acceptable_threshold: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}</div>;
+  return <div className="space-y-5"><PageHead title="ظ…ط¹ط§ظٹظٹط± ط§ظ„ط£ط¯ط§ط،" desc="ظ…ط¹ط§ظٹظٹط± KPI ط¹ط§ط¯ظ„ط© ظˆظ…ظ†ظپطµظ„ط© ط­ط³ط¨ ط§ظ„ظˆط¸ظٹظپط©" action={<div className="flex gap-2"><button onClick={() => performanceCriteriaService.seedDefaults().then(load).catch((e) => alert(e.message))} className="btn-secondary">طھظˆظ„ظٹط¯ ط§ظ„ظ…ط¹ط§ظٹظٹط± ط§ظ„ط§ظپطھط±ط§ط¶ظٹط©</button><button disabled={can?.("performance_criteria", "can_create") === false} onClick={() => setDialog({ job_name: selectedJob, criterion_name: "", weight: 10, max_score: 100, scoring_type: scoringTypes[0], target_value: 100, excellent_threshold: 100, good_threshold: 80, acceptable_threshold: 60, affects_incentive: true, is_active: true })} className="btn-primary"><Plus size={18} /> ط¥ط¶ط§ظپط© ظ…ط¹ظٹط§ط±</button></div>} /><div className="panel flex flex-wrap gap-3 p-4"><select value={selectedJob} onChange={(e) => setSelectedJob(e.target.value)} className="field max-w-md">{[...new Set([...templates.map((t) => t.job_name), ...Object.keys(defaultJobKpis)])].map((j) => <option key={j}>{j}</option>)}</select><span className={`rounded-xl px-4 py-2 text-sm font-bold ${totalWeight === 100 ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ط£ظˆط²ط§ظ†: {totalWeight}%</span></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>ط§ظ„ظ…ط¹ظٹط§ط±</th><th>ط§ظ„ظˆط²ظ†</th><th>ط·ط±ظٹظ‚ط© ط§ظ„ط§ط­طھط³ط§ط¨</th><th>ط§ظ„ظ…ط³طھظ‡ط¯ظپ</th><th>ط§ظ„ط­ط§ظپط²</th><th>ط§ظ„ط­ط§ظ„ط©</th><th></th></tr></thead><tbody>{rows.map((r) => <tr key={r.criterion_id}><td>{r.criterion_name}</td><td>{r.weight}%</td><td>{r.scoring_type}</td><td>{r.target_value}</td><td>{r.affects_incentive ? "ظ†ط¹ظ…" : "ظ„ط§"}</td><td><Status>{r.is_active ? "ظ†ط´ط·" : "ظ…ط¹ط·ظ„"}</Status></td><td><button onClick={() => setDialog(r)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => performanceCriteriaService.deleteKpiCriterion(r.criterion_id).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div>{dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={saveCriterion} className="panel w-full max-w-4xl p-6"><DialogTitle title="ظ…ط¹ظٹط§ط± ط£ط¯ط§ط،" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="ط§ظ„ظˆط¸ظٹظپط©"><input value={dialog.job_name} onChange={(e) => setDialog({ ...dialog, job_name: e.target.value })} className="field mt-2" /></Label><Label t="ط§ط³ظ… ط§ظ„ظ…ط¹ظٹط§ط±"><input required value={dialog.criterion_name} onChange={(e) => setDialog({ ...dialog, criterion_name: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ظˆط²ظ†"><input type="number" value={dialog.weight} onChange={(e) => setDialog({ ...dialog, weight: e.target.value })} className="field mt-2" /></Label><Label t="ط·ط±ظٹظ‚ط© ط§ظ„ط§ط­طھط³ط§ط¨"><select value={dialog.scoring_type} onChange={(e) => setDialog({ ...dialog, scoring_type: e.target.value })} className="field mt-2">{scoringTypes.map((s) => <option key={s}>{s}</option>)}</select></Label><Label t="ط§ظ„ظ…ط³طھظ‡ط¯ظپ"><input type="number" value={dialog.target_value} onChange={(e) => setDialog({ ...dialog, target_value: e.target.value })} className="field mt-2" /></Label><Label t="ط­ط¯ ظ…ظ…طھط§ط²"><input type="number" value={dialog.excellent_threshold} onChange={(e) => setDialog({ ...dialog, excellent_threshold: e.target.value })} className="field mt-2" /></Label><Label t="ط­ط¯ ط¬ظٹط¯"><input type="number" value={dialog.good_threshold} onChange={(e) => setDialog({ ...dialog, good_threshold: e.target.value })} className="field mt-2" /></Label><Label t="ط­ط¯ ظ…ظ‚ط¨ظˆظ„"><input type="number" value={dialog.acceptable_threshold} onChange={(e) => setDialog({ ...dialog, acceptable_threshold: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ط­ط§ظ„ط©"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">ظ†ط´ط·</option><option value="false">ظ…ط¹ط·ظ„</option></select></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}</div>;
 }
 
 function KpiScoresPage({ employees }) {
@@ -5230,18 +5444,18 @@ function KpiScoresPage({ employees }) {
   const load = () => kpiCalculationService.loadKpiScores(month).then(setScores).catch((e) => alert(e.message));
   useEffect(() => { load(); }, [month]);
   const grouped = Object.entries(scores.reduce((acc, row) => { const key = row.employee_name || row.employee_id; acc[key] = (acc[key] || 0) + row.weighted_score; return acc; }, {})).map(([name, total]) => ({ name, total: Number(total.toFixed(2)) })).sort((a, b) => b.total - a.total);
-  return <div className="space-y-5"><PageHead title="درجات KPI" desc="احتساب تلقائي من العمليات اليومية حسب وظيفة الموظف" action={<button onClick={() => kpiCalculationService.recalculateMonthKpis(employees, month).then(setScores).catch((e) => alert(e.message))} className="btn-primary"><Gauge size={18} /> إعادة حساب الشهر</button>} /><div className="panel flex gap-3 p-4"><input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="field max-w-[180px]" /><button onClick={() => exportExcel(scores, "درجات KPI")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="grid gap-5 xl:grid-cols-2"><Chart title="أفضل الموظفين حسب KPI" sub="المقارنة داخل معايير كل وظيفة"><ResponsiveContainer width="100%" height={280}><BarChart data={grouped.slice(0, 10)}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis /><Tooltip /><Bar dataKey="total" fill="#7f1d1d" radius={[8,8,0,0]} /></BarChart></ResponsiveContainer></Chart><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>الموظف</th><th>الوظيفة</th><th>المعيار</th><th>القيمة</th><th>الدرجة</th><th>الموزونة</th></tr></thead><tbody>{scores.map((r) => <tr key={r.score_id}><td>{r.employee_name}</td><td>{r.job_name}</td><td>{r.criterion_name}</td><td>{r.actual_value}</td><td>{r.score}</td><td>{r.weighted_score.toFixed(2)}</td></tr>)}</tbody></table></div></div></div></div>;
+  return <div className="space-y-5"><PageHead title="ط¯ط±ط¬ط§طھ KPI" desc="ط§ط­طھط³ط§ط¨ طھظ„ظ‚ط§ط¦ظٹ ظ…ظ† ط§ظ„ط¹ظ…ظ„ظٹط§طھ ط§ظ„ظٹظˆظ…ظٹط© ط­ط³ط¨ ظˆط¸ظٹظپط© ط§ظ„ظ…ظˆط¸ظپ" action={<button onClick={() => kpiCalculationService.recalculateMonthKpis(employees, month).then(setScores).catch((e) => alert(e.message))} className="btn-primary"><Gauge size={18} /> ط¥ط¹ط§ط¯ط© ط­ط³ط§ط¨ ط§ظ„ط´ظ‡ط±</button>} /><div className="panel flex gap-3 p-4"><input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="field max-w-[180px]" /><button onClick={() => exportExcel(scores, "ط¯ط±ط¬ط§طھ KPI")} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button></div><div className="grid gap-5 xl:grid-cols-2"><Chart title="ط£ظپط¶ظ„ ط§ظ„ظ…ظˆط¸ظپظٹظ† ط­ط³ط¨ KPI" sub="ط§ظ„ظ…ظ‚ط§ط±ظ†ط© ط¯ط§ط®ظ„ ظ…ط¹ط§ظٹظٹط± ظƒظ„ ظˆط¸ظٹظپط©"><ResponsiveContainer width="100%" height={280}><BarChart data={grouped.slice(0, 10)}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis /><Tooltip /><Bar dataKey="total" fill="#7f1d1d" radius={[8,8,0,0]} /></BarChart></ResponsiveContainer></Chart><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>ط§ظ„ظ…ظˆط¸ظپ</th><th>ط§ظ„ظˆط¸ظٹظپط©</th><th>ط§ظ„ظ…ط¹ظٹط§ط±</th><th>ط§ظ„ظ‚ظٹظ…ط©</th><th>ط§ظ„ط¯ط±ط¬ط©</th><th>ط§ظ„ظ…ظˆط²ظˆظ†ط©</th></tr></thead><tbody>{scores.map((r) => <tr key={r.score_id}><td>{r.employee_name}</td><td>{r.job_name}</td><td>{r.criterion_name}</td><td>{r.actual_value}</td><td>{r.score}</td><td>{r.weighted_score.toFixed(2)}</td></tr>)}</tbody></table></div></div></div></div>;
 }
 
 function AIAssistantWidget({ currentUser, page }) {
   const [open, setOpen] = useState(false), [session, setSession] = useState(null), [messages, setMessages] = useState([]), [input, setInput] = useState(""), [loading, setLoading] = useState(false);
-  const suggestions = ["ما ملخص أداء الموظفين هذا الشهر؟", "ما الأصناف التي تحتاج شراء؟", "ما أكثر فرع نشاطًا؟", "اقترح معايير تقييم لمدير فرع."];
+  const suggestions = ["ظ…ط§ ظ…ظ„ط®طµ ط£ط¯ط§ط، ط§ظ„ظ…ظˆط¸ظپظٹظ† ظ‡ط°ط§ ط§ظ„ط´ظ‡ط±طں", "ظ…ط§ ط§ظ„ط£طµظ†ط§ظپ ط§ظ„طھظٹ طھط­طھط§ط¬ ط´ط±ط§ط،طں", "ظ…ط§ ط£ظƒط«ط± ظپط±ط¹ ظ†ط´ط§ط·ظ‹ط§طں", "ط§ظ‚طھط±ط­ ظ…ط¹ط§ظٹظٹط± طھظ‚ظٹظٹظ… ظ„ظ…ط¯ظٹط± ظپط±ط¹."];
   const send = async (text = input) => {
     if (!text.trim()) return;
     setLoading(true);
     try {
       let current = session;
-      if (!current) { current = await aiAssistantService.createChatSession(currentUser?.user_id || currentUser?.username || "", "محادثة المساعد"); setSession(current); }
+      if (!current) { current = await aiAssistantService.createChatSession(currentUser?.user_id || currentUser?.username || "", "ظ…ط­ط§ط¯ط«ط© ط§ظ„ظ…ط³ط§ط¹ط¯"); setSession(current); }
       const userMsg = { session_id: current.session_id, user_id: currentUser?.user_id || "", role: "user", message: text, context: { page } };
       setMessages((m) => [...m, userMsg]); setInput(""); await aiAssistantService.saveChatMessage(userMsg);
       const reply = await aiAssistantService.generateAssistantReply(text);
@@ -5249,10 +5463,10 @@ function AIAssistantWidget({ currentUser, page }) {
       await aiAssistantService.saveChatMessage(assistantMsg); setMessages((m) => [...m, assistantMsg]);
     } catch (e) { alert(e.message); } finally { setLoading(false); }
   };
-  return <div className="fixed bottom-5 left-5 z-40 no-print"><button onClick={() => setOpen(!open)} className="grid h-14 w-14 place-items-center rounded-full bg-brand-700 text-white shadow-xl"><MessageSquareWarning /></button>{open && <div className="absolute bottom-16 left-0 w-[360px] overflow-hidden rounded-2xl border bg-white shadow-2xl"><div className="bg-brand-700 p-4 text-white"><div className="flex"><b>المساعد الذكي</b><button onClick={() => setMessages([])} className="mr-auto text-xs">مسح</button></div><p className="mt-1 text-xs opacity-80">يعمل حاليًا بوضع التحليل الداخلي بدون اتصال خارجي.</p></div><div className="h-80 space-y-2 overflow-y-auto p-3">{!messages.length && <div className="space-y-2">{suggestions.map((s) => <button key={s} onClick={() => send(s)} className="w-full rounded-xl bg-slate-50 p-2 text-right text-xs">{s}</button>)}</div>}{messages.map((m, i) => <div key={i} className={`rounded-xl p-3 text-sm ${m.role === "user" ? "bg-brand-50 text-brand-900" : "bg-slate-50"}`}>{m.message}</div>)}{loading && <p className="text-xs text-slate-400">المساعد يكتب...</p>}</div><div className="flex gap-2 border-t p-3"><input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} className="field" placeholder="اكتب سؤالك..." /><button onClick={() => send()} className="btn-primary">إرسال</button></div></div>}</div>;
+  return <div className="fixed bottom-5 left-5 z-40 no-print"><button onClick={() => setOpen(!open)} className="grid h-14 w-14 place-items-center rounded-full bg-brand-700 text-white shadow-xl"><MessageSquareWarning /></button>{open && <div className="absolute bottom-16 left-0 w-[360px] overflow-hidden rounded-2xl border bg-white shadow-2xl"><div className="bg-brand-700 p-4 text-white"><div className="flex"><b>ط§ظ„ظ…ط³ط§ط¹ط¯ ط§ظ„ط°ظƒظٹ</b><button onClick={() => setMessages([])} className="mr-auto text-xs">ظ…ط³ط­</button></div><p className="mt-1 text-xs opacity-80">ظٹط¹ظ…ظ„ ط­ط§ظ„ظٹظ‹ط§ ط¨ظˆط¶ط¹ ط§ظ„طھط­ظ„ظٹظ„ ط§ظ„ط¯ط§ط®ظ„ظٹ ط¨ط¯ظˆظ† ط§طھطµط§ظ„ ط®ط§ط±ط¬ظٹ.</p></div><div className="h-80 space-y-2 overflow-y-auto p-3">{!messages.length && <div className="space-y-2">{suggestions.map((s) => <button key={s} onClick={() => send(s)} className="w-full rounded-xl bg-slate-50 p-2 text-right text-xs">{s}</button>)}</div>}{messages.map((m, i) => <div key={i} className={`rounded-xl p-3 text-sm ${m.role === "user" ? "bg-brand-50 text-brand-900" : "bg-slate-50"}`}>{m.message}</div>)}{loading && <p className="text-xs text-slate-400">ط§ظ„ظ…ط³ط§ط¹ط¯ ظٹظƒطھط¨...</p>}</div><div className="flex gap-2 border-t p-3"><input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} className="field" placeholder="ط§ظƒطھط¨ ط³ط¤ط§ظ„ظƒ..." /><button onClick={() => send()} className="btn-primary">ط¥ط±ط³ط§ظ„</button></div></div>}</div>;
 }
 
-﻿const recruitmentFieldSets = {
+const recruitmentFieldSets = {
   job_postings: ["job_title", "department", "branch", "job_type", "vacancies_count", "salary_range_from", "salary_range_to", "requirements", "responsibilities", "status", "opened_at", "closed_at", "notes"],
   applications: ["application_number", "job_posting_id", "job_title", "applicant_name", "phone", "email", "address", "qualification", "specialization", "experience_years", "previous_employer", "expected_salary", "application_source", "cv_url", "status", "notes"],
   candidate_evaluations: ["application_id", "applicant_name", "job_title", "evaluator_name", "evaluation_date", "appearance_score", "communication_score", "technical_score", "experience_score", "culture_fit_score", "honesty_score", "pressure_handling_score", "computer_skills_score", "customer_service_score", "recommendation", "strengths", "weaknesses", "notes"],
@@ -5263,7 +5477,7 @@ function AIAssistantWidget({ currentUser, page }) {
   tests: ["test_name", "job_title", "test_type", "max_score", "pass_score", "instructions", "is_active"],
   welcome_messages: ["employee_id", "employee_name", "job", "branch", "start_date", "message_template", "whatsapp_message", "status"],
 };
-const recruitmentLabels = { job_title: "الوظيفة", department: "القسم", branch: "الفرع", job_type: "نوع الوظيفة", vacancies_count: "عدد الشواغر", salary_range_from: "الراتب من", salary_range_to: "الراتب إلى", requirements: "المتطلبات", responsibilities: "المسؤوليات", status: "الحالة", opened_at: "تاريخ الفتح", closed_at: "تاريخ الإغلاق", notes: "ملاحظات", application_number: "رقم الطلب", job_posting_id: "الوظيفة", applicant_name: "اسم المرشح", phone: "الهاتف", email: "البريد", address: "العنوان", qualification: "المؤهل", specialization: "التخصص", experience_years: "سنوات الخبرة", previous_employer: "جهة العمل السابقة", expected_salary: "الراتب المتوقع", application_source: "مصدر الطلب", cv_url: "رابط CV", evaluator_name: "المقيّم", evaluation_date: "تاريخ التقييم", appearance_score: "المظهر", communication_score: "التواصل", technical_score: "الفني", experience_score: "الخبرة", culture_fit_score: "ملاءمة الثقافة", honesty_score: "الأمانة", pressure_handling_score: "تحمل الضغط", computer_skills_score: "الحاسب", customer_service_score: "خدمة العملاء", recommendation: "التوصية", strengths: "نقاط القوة", weaknesses: "نقاط الضعف", template_name: "اسم القالب", salary: "الراتب", allowances: "البدلات", probation_period: "فترة التجربة", working_hours: "ساعات العمل", start_date: "تاريخ المباشرة", offer_valid_until: "صلاحية العرض", terms: "الشروط", template_body: "نص الخطاب", is_active: "نشط", offer_number: "رقم العرض", sent_at: "تاريخ الإرسال", accepted_at: "تاريخ القبول", rejected_at: "تاريخ الرفض", contract_number: "رقم العقد", offer_id: "العرض", employee_name: "اسم الموظف", contract_start_date: "بداية العقد", contract_end_date: "نهاية العقد", contract_body: "نص العقد", year: "السنة", month: "الشهر", required_count: "العدد المطلوب", current_count: "العدد الحالي", priority: "الأولوية", reason: "السبب", approved_by: "اعتمد بواسطة", test_name: "اسم الاختبار", test_type: "نوع الاختبار", max_score: "الدرجة القصوى", pass_score: "درجة النجاح", instructions: "التعليمات", employee_id: "رقم الموظف", job: "الوظيفة", message_template: "قالب الرسالة", whatsapp_message: "رسالة واتساب" };
+const recruitmentLabels = { job_title: "ط§ظ„ظˆط¸ظٹظپط©", department: "ط§ظ„ظ‚ط³ظ…", branch: "ط§ظ„ظپط±ط¹", job_type: "ظ†ظˆط¹ ط§ظ„ظˆط¸ظٹظپط©", vacancies_count: "ط¹ط¯ط¯ ط§ظ„ط´ظˆط§ط؛ط±", salary_range_from: "ط§ظ„ط±ط§طھط¨ ظ…ظ†", salary_range_to: "ط§ظ„ط±ط§طھط¨ ط¥ظ„ظ‰", requirements: "ط§ظ„ظ…طھط·ظ„ط¨ط§طھ", responsibilities: "ط§ظ„ظ…ط³ط¤ظˆظ„ظٹط§طھ", status: "ط§ظ„ط­ط§ظ„ط©", opened_at: "طھط§ط±ظٹط® ط§ظ„ظپطھط­", closed_at: "طھط§ط±ظٹط® ط§ظ„ط¥ط؛ظ„ط§ظ‚", notes: "ظ…ظ„ط§ط­ط¸ط§طھ", application_number: "ط±ظ‚ظ… ط§ظ„ط·ظ„ط¨", job_posting_id: "ط§ظ„ظˆط¸ظٹظپط©", applicant_name: "ط§ط³ظ… ط§ظ„ظ…ط±ط´ط­", phone: "ط§ظ„ظ‡ط§طھظپ", email: "ط§ظ„ط¨ط±ظٹط¯", address: "ط§ظ„ط¹ظ†ظˆط§ظ†", qualification: "ط§ظ„ظ…ط¤ظ‡ظ„", specialization: "ط§ظ„طھط®طµطµ", experience_years: "ط³ظ†ظˆط§طھ ط§ظ„ط®ط¨ط±ط©", previous_employer: "ط¬ظ‡ط© ط§ظ„ط¹ظ…ظ„ ط§ظ„ط³ط§ط¨ظ‚ط©", expected_salary: "ط§ظ„ط±ط§طھط¨ ط§ظ„ظ…طھظˆظ‚ط¹", application_source: "ظ…طµط¯ط± ط§ظ„ط·ظ„ط¨", cv_url: "ط±ط§ط¨ط· CV", evaluator_name: "ط§ظ„ظ…ظ‚ظٹظ‘ظ…", evaluation_date: "طھط§ط±ظٹط® ط§ظ„طھظ‚ظٹظٹظ…", appearance_score: "ط§ظ„ظ…ط¸ظ‡ط±", communication_score: "ط§ظ„طھظˆط§طµظ„", technical_score: "ط§ظ„ظپظ†ظٹ", experience_score: "ط§ظ„ط®ط¨ط±ط©", culture_fit_score: "ظ…ظ„ط§ط،ظ…ط© ط§ظ„ط«ظ‚ط§ظپط©", honesty_score: "ط§ظ„ط£ظ…ط§ظ†ط©", pressure_handling_score: "طھط­ظ…ظ„ ط§ظ„ط¶ط؛ط·", computer_skills_score: "ط§ظ„ط­ط§ط³ط¨", customer_service_score: "ط®ط¯ظ…ط© ط§ظ„ط¹ظ…ظ„ط§ط،", recommendation: "ط§ظ„طھظˆطµظٹط©", strengths: "ظ†ظ‚ط§ط· ط§ظ„ظ‚ظˆط©", weaknesses: "ظ†ظ‚ط§ط· ط§ظ„ط¶ط¹ظپ", template_name: "ط§ط³ظ… ط§ظ„ظ‚ط§ظ„ط¨", salary: "ط§ظ„ط±ط§طھط¨", allowances: "ط§ظ„ط¨ط¯ظ„ط§طھ", probation_period: "ظپطھط±ط© ط§ظ„طھط¬ط±ط¨ط©", working_hours: "ط³ط§ط¹ط§طھ ط§ظ„ط¹ظ…ظ„", start_date: "طھط§ط±ظٹط® ط§ظ„ظ…ط¨ط§ط´ط±ط©", offer_valid_until: "طµظ„ط§ط­ظٹط© ط§ظ„ط¹ط±ط¶", terms: "ط§ظ„ط´ط±ظˆط·", template_body: "ظ†طµ ط§ظ„ط®ط·ط§ط¨", is_active: "ظ†ط´ط·", offer_number: "ط±ظ‚ظ… ط§ظ„ط¹ط±ط¶", sent_at: "طھط§ط±ظٹط® ط§ظ„ط¥ط±ط³ط§ظ„", accepted_at: "طھط§ط±ظٹط® ط§ظ„ظ‚ط¨ظˆظ„", rejected_at: "طھط§ط±ظٹط® ط§ظ„ط±ظپط¶", contract_number: "ط±ظ‚ظ… ط§ظ„ط¹ظ‚ط¯", offer_id: "ط§ظ„ط¹ط±ط¶", employee_name: "ط§ط³ظ… ط§ظ„ظ…ظˆط¸ظپ", contract_start_date: "ط¨ط¯ط§ظٹط© ط§ظ„ط¹ظ‚ط¯", contract_end_date: "ظ†ظ‡ط§ظٹط© ط§ظ„ط¹ظ‚ط¯", contract_body: "ظ†طµ ط§ظ„ط¹ظ‚ط¯", year: "ط§ظ„ط³ظ†ط©", month: "ط§ظ„ط´ظ‡ط±", required_count: "ط§ظ„ط¹ط¯ط¯ ط§ظ„ظ…ط·ظ„ظˆط¨", current_count: "ط§ظ„ط¹ط¯ط¯ ط§ظ„ط­ط§ظ„ظٹ", priority: "ط§ظ„ط£ظˆظ„ظˆظٹط©", reason: "ط§ظ„ط³ط¨ط¨", approved_by: "ط§ط¹طھظ…ط¯ ط¨ظˆط§ط³ط·ط©", test_name: "ط§ط³ظ… ط§ظ„ط§ط®طھط¨ط§ط±", test_type: "ظ†ظˆط¹ ط§ظ„ط§ط®طھط¨ط§ط±", max_score: "ط§ظ„ط¯ط±ط¬ط© ط§ظ„ظ‚طµظˆظ‰", pass_score: "ط¯ط±ط¬ط© ط§ظ„ظ†ط¬ط§ط­", instructions: "ط§ظ„طھط¹ظ„ظٹظ…ط§طھ", employee_id: "ط±ظ‚ظ… ط§ظ„ظ…ظˆط¸ظپ", job: "ط§ظ„ظˆط¸ظٹظپط©", message_template: "ظ‚ط§ظ„ط¨ ط§ظ„ط±ط³ط§ظ„ط©", whatsapp_message: "ط±ط³ط§ظ„ط© ظˆط§طھط³ط§ط¨" };
 const recruitmentPrimary = { job_postings: "job_posting_id", applications: "application_id", candidate_evaluations: "evaluation_id", offer_templates: "template_id", job_offers: "offer_id", contracts: "contract_id", manpower_plans: "manpower_plan_id", tests: "test_id", welcome_messages: "welcome_message_id" };
 
 function RecruitmentPage({ employees, currentUser, canNode }) {
@@ -5276,11 +5490,11 @@ function RecruitmentPage({ employees, currentUser, canNode }) {
   const load = async () => {
     const entries = await Promise.all(["job_postings", "applications", "candidate_evaluations", "offer_templates", "job_offers", "contracts", "manpower_plans", "tests", "welcome_messages"].map((type) => recruitmentService.list(type).then((data) => [type, data]).catch(() => [type, []])));
     setRows(Object.fromEntries(entries));
-    setProbation(await recruitmentService.loadProbationEmployees().catch(() => employees.filter((e) => e.status === "تحت التجربة")));
+    setProbation(await recruitmentService.loadProbationEmployees().catch(() => employees.filter((e) => e.status === "طھط­طھ ط§ظ„طھط¬ط±ط¨ط©")));
   };
   useEffect(() => { load(); }, []);
   useEffect(() => { if (visibleTabs.length && !visibleTabs.some(([id]) => id === tab)) setTab(visibleTabs[0][0]); }, [visibleTabs.map((x) => x[0]).join(","), tab]);
-  if (!visibleTabs.length) return <div className="panel p-6 text-center font-bold text-slate-500">لا توجد صلاحيات مفعلة لوحدة التوظيف.</div>;
+  if (!visibleTabs.length) return <div className="panel p-6 text-center font-bold text-slate-500">ظ„ط§ طھظˆط¬ط¯ طµظ„ط§ط­ظٹط§طھ ظ…ظپط¹ظ„ط© ظ„ظˆط­ط¯ط© ط§ظ„طھظˆط¸ظٹظپ.</div>;
   const nodeKey = visibleTabs.find(([id]) => id === tab)?.[2] || "";
   const canCreate = canNode?.(nodeKey, "can_create") !== false;
   const canEdit = canNode?.(nodeKey, "can_edit") !== false;
@@ -5301,7 +5515,7 @@ function RecruitmentPage({ employees, currentUser, canNode }) {
     } catch (error) { alert(error.message); }
   };
   const remove = async (row) => {
-    if (!confirm("هل تريد حذف السجل؟")) return;
+    if (!confirm("ظ‡ظ„ طھط±ظٹط¯ ط­ط°ظپ ط§ظ„ط³ط¬ظ„طں")) return;
     try {
       await recruitmentService.remove(tab, row[recruitmentPrimary[tab]]);
       setRows((all) => ({ ...all, [tab]: (all[tab] || []).filter((r) => r[recruitmentPrimary[tab]] !== row[recruitmentPrimary[tab]]) }));
@@ -5309,39 +5523,39 @@ function RecruitmentPage({ employees, currentUser, canNode }) {
   };
   const reports = generateRecruitmentReports({ jobPostings: rows.job_postings || [], applications: rows.applications || [], evaluations: rows.candidate_evaluations || [], offers: rows.job_offers || [], contracts: rows.contracts || [], plans: rows.manpower_plans || [], probationEmployees: probation });
   const cols = tab === "probation_employees" ? ["id", "name", "job", "branch", "hireDate", "manager"] : (recruitmentFieldSets[tab] || ["job_title", "applicant_name", "branch", "status"]).slice(0, 7);
-  return <div className="space-y-5"><PageHead title="طلبات التوظيف" desc="إدارة دورة التوظيف من الاحتياج حتى التعيين ورسائل الترحيب" action={<button disabled={!canCreate} onClick={openAdd} className="btn-primary"><Plus size={18} /> إضافة</button>} /><div className="panel flex flex-wrap gap-2 p-3">{visibleTabs.map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === id ? "bg-brand-700 text-white" : "bg-slate-50 text-slate-600"}`}>{label}</button>)}</div>{tab === "reports" ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{Object.entries(reports).map(([key, report]) => <div key={key} className="panel p-4"><h3 className="font-extrabold">{report.title}</h3><p className="mt-2 text-sm text-slate-500">عدد السجلات: {report.rows.length}</p><div className="mt-4 flex gap-2"><button onClick={() => exportExcel(report.rows, report.title)} className="btn-secondary">Excel</button><button onClick={() => printDocument(report.title, rowsToReportHtml(report.title, report.rows, []))} className="btn-primary">طباعة</button></div></div>)}</div> : <><div className="panel flex flex-wrap gap-3 p-4"><input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="بحث..." /><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[180px]"><option value="all">كل الحالات</option>{[...new Set(tableRows.map((r) => r.status).filter(Boolean))].map((s) => <option key={s}>{s}</option>)}</select><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[180px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><button onClick={() => exportExcel(filtered, "طلبات التوظيف")} className="btn-secondary">Excel</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr>{cols.map((c) => <th key={c}>{recruitmentLabels[c] || c}</th>)}<th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((row, i) => <tr key={row[recruitmentPrimary[tab]] || row.id || i}>{cols.map((c) => <td key={c}>{String(row[c] ?? "")}</td>)}<td><Status>{row.status || row.evaluation_status || row.recommendation || "—"}</Status></td><td><button disabled={!canEdit || tab === "probation_employees"} onClick={() => setDialog({ type: tab, ...row })} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canDelete || tab === "probation_employees"} onClick={() => remove(row)} className="p-2 text-red-600"><Trash2 size={16} /></button>{tab === "contracts" && <button onClick={() => recruitmentService.convertContractToEmployee(row).then(() => alert("تم تحويل المرشح إلى موظف")).catch((e) => alert(e.message))} className="p-2 text-green-700">تعيين</button>}{tab === "welcome_messages" && <button onClick={() => navigator.clipboard?.writeText(row.whatsapp_message || row.message_template || "")} className="p-2 text-slate-600">نسخ</button>}</td></tr>)}</tbody></table></div></div></>}{dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="بيانات التوظيف" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3">{(recruitmentFieldSets[dialog.type] || []).map((key) => <Label key={key} t={recruitmentLabels[key] || key}>{key.includes("body") || key.includes("notes") || key.includes("requirements") || key.includes("responsibilities") || key.includes("message") || key.includes("terms") || key.includes("instructions") ? <textarea value={dialog[key] || ""} onChange={(e) => setDialog({ ...dialog, [key]: e.target.value })} className="field mt-2 !h-auto py-3" /> : key === "is_active" ? <select value={String(dialog[key] !== false)} onChange={(e) => setDialog({ ...dialog, [key]: e.target.value === "true" })} className="field mt-2"><option value="true">نعم</option><option value="false">لا</option></select> : <input type={key.includes("date") || key.endsWith("_at") ? "date" : key.includes("score") || key.includes("salary") || key.includes("count") || key.includes("year") || key.includes("month") ? "number" : "text"} value={dialog[key] || ""} onChange={(e) => setDialog({ ...dialog, [key]: e.target.value })} onBlur={() => dialog.type === "welcome_messages" && setDialog((d) => ({ ...d, whatsapp_message: d.whatsapp_message || generateWelcomeMessage(d) }))} className="field mt-2" />}</Label>)}</div><DialogActions close={() => setDialog(null)} /></form></div>}</div>;
+  return <div className="space-y-5"><PageHead title="ط·ظ„ط¨ط§طھ ط§ظ„طھظˆط¸ظٹظپ" desc="ط¥ط¯ط§ط±ط© ط¯ظˆط±ط© ط§ظ„طھظˆط¸ظٹظپ ظ…ظ† ط§ظ„ط§ط­طھظٹط§ط¬ ط­طھظ‰ ط§ظ„طھط¹ظٹظٹظ† ظˆط±ط³ط§ط¦ظ„ ط§ظ„طھط±ط­ظٹط¨" action={<button disabled={!canCreate} onClick={openAdd} className="btn-primary"><Plus size={18} /> ط¥ط¶ط§ظپط©</button>} /><div className="panel flex flex-wrap gap-2 p-3">{visibleTabs.map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === id ? "bg-brand-700 text-white" : "bg-slate-50 text-slate-600"}`}>{label}</button>)}</div>{tab === "reports" ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{Object.entries(reports).map(([key, report]) => <div key={key} className="panel p-4"><h3 className="font-extrabold">{report.title}</h3><p className="mt-2 text-sm text-slate-500">ط¹ط¯ط¯ ط§ظ„ط³ط¬ظ„ط§طھ: {report.rows.length}</p><div className="mt-4 flex gap-2"><button onClick={() => exportExcel(report.rows, report.title)} className="btn-secondary">Excel</button><button onClick={() => printDocument(report.title, rowsToReportHtml(report.title, report.rows, []))} className="btn-primary">ط·ط¨ط§ط¹ط©</button></div></div>)}</div> : <><div className="panel flex flex-wrap gap-3 p-4"><input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="ط¨ط­ط«..." /><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[180px]"><option value="all">ظƒظ„ ط§ظ„ط­ط§ظ„ط§طھ</option>{[...new Set(tableRows.map((r) => r.status).filter(Boolean))].map((s) => <option key={s}>{s}</option>)}</select><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[180px]"><option value="all">ظƒظ„ ط§ظ„ظپط±ظˆط¹</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><button onClick={() => exportExcel(filtered, "ط·ظ„ط¨ط§طھ ط§ظ„طھظˆط¸ظٹظپ")} className="btn-secondary">Excel</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr>{cols.map((c) => <th key={c}>{recruitmentLabels[c] || c}</th>)}<th>ط§ظ„ط­ط§ظ„ط©</th><th></th></tr></thead><tbody>{filtered.map((row, i) => <tr key={row[recruitmentPrimary[tab]] || row.id || i}>{cols.map((c) => <td key={c}>{String(row[c] ?? "")}</td>)}<td><Status>{row.status || row.evaluation_status || row.recommendation || "â€”"}</Status></td><td><button disabled={!canEdit || tab === "probation_employees"} onClick={() => setDialog({ type: tab, ...row })} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canDelete || tab === "probation_employees"} onClick={() => remove(row)} className="p-2 text-red-600"><Trash2 size={16} /></button>{tab === "contracts" && <button onClick={() => recruitmentService.convertContractToEmployee(row).then(() => alert("طھظ… طھط­ظˆظٹظ„ ط§ظ„ظ…ط±ط´ط­ ط¥ظ„ظ‰ ظ…ظˆط¸ظپ")).catch((e) => alert(e.message))} className="p-2 text-green-700">طھط¹ظٹظٹظ†</button>}{tab === "welcome_messages" && <button onClick={() => navigator.clipboard?.writeText(row.whatsapp_message || row.message_template || "")} className="p-2 text-slate-600">ظ†ط³ط®</button>}</td></tr>)}</tbody></table></div></div></>}{dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="ط¨ظٹط§ظ†ط§طھ ط§ظ„طھظˆط¸ظٹظپ" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3">{(recruitmentFieldSets[dialog.type] || []).map((key) => <Label key={key} t={recruitmentLabels[key] || key}>{key.includes("body") || key.includes("notes") || key.includes("requirements") || key.includes("responsibilities") || key.includes("message") || key.includes("terms") || key.includes("instructions") ? <textarea value={dialog[key] || ""} onChange={(e) => setDialog({ ...dialog, [key]: e.target.value })} className="field mt-2 !h-auto py-3" /> : key === "is_active" ? <select value={String(dialog[key] !== false)} onChange={(e) => setDialog({ ...dialog, [key]: e.target.value === "true" })} className="field mt-2"><option value="true">ظ†ط¹ظ…</option><option value="false">ظ„ط§</option></select> : <input type={key.includes("date") || key.endsWith("_at") ? "date" : key.includes("score") || key.includes("salary") || key.includes("count") || key.includes("year") || key.includes("month") ? "number" : "text"} value={dialog[key] || ""} onChange={(e) => setDialog({ ...dialog, [key]: e.target.value })} onBlur={() => dialog.type === "welcome_messages" && setDialog((d) => ({ ...d, whatsapp_message: d.whatsapp_message || generateWelcomeMessage(d) }))} className="field mt-2" />}</Label>)}</div><DialogActions close={() => setDialog(null)} /></form></div>}</div>;
 }
 
 function UserEditorModal({ dialog, setDialog, saveUser, employeeOptions, selectEmployee, roles = systemRoles }) {
-  const isAdmin = String(dialog.role || "").includes("مدير النظام") || String(dialog.role || "").includes("ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…");
+  const isAdmin = String(dialog.role || "").includes("ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…") || String(dialog.role || "").includes("ط¸â€¦ط·آ¯ط¸ظ¹ط·آ± ط·آ§ط¸â€‍ط¸â€ ط·آ¸ط·آ§ط¸â€¦");
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
       <form onSubmit={saveUser} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6">
-        <DialogTitle title="بيانات المستخدم" close={() => setDialog(null)} />
+        <DialogTitle title="ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ط³طھط®ط¯ظ…" close={() => setDialog(null)} />
         <div className="grid gap-4 md:grid-cols-2">
-          <Label t="اسم الموظف">
+          <Label t="ط§ط³ظ… ط§ظ„ظ…ظˆط¸ظپ">
             <select value={dialog.employee_id || ""} onChange={(e) => selectEmployee(e.target.value)} className="field mt-2">
-              <option value="">اختر الموظف</option>
+              <option value="">ط§ط®طھط± ط§ظ„ظ…ظˆط¸ظپ</option>
               {employeeOptions.map((emp) => (
                 <option key={emp.id} value={emp.id}>
-                  {emp.name} - {emp.id} - {emp.branch || "بدون فرع"} - {emp.job || "بدون وظيفة"}
+                  {emp.name} - {emp.id} - {emp.branch || "ط¨ط¯ظˆظ† ظپط±ط¹"} - {emp.job || "ط¨ط¯ظˆظ† ظˆط¸ظٹظپط©"}
                 </option>
               ))}
             </select>
-            {!employeeOptions.length && <p className="mt-2 rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-700">لا توجد بيانات موظفين، يرجى إضافة موظفين أولًا</p>}
+            {!employeeOptions.length && <p className="mt-2 rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-700">ظ„ط§ طھظˆط¬ط¯ ط¨ظٹط§ظ†ط§طھ ظ…ظˆط¸ظپظٹظ†طŒ ظٹط±ط¬ظ‰ ط¥ط¶ط§ظپط© ظ…ظˆط¸ظپظٹظ† ط£ظˆظ„ظ‹ط§</p>}
           </Label>
-          <Label t="اسم الموظف المحدد">
+          <Label t="ط§ط³ظ… ط§ظ„ظ…ظˆط¸ظپ ط§ظ„ظ…ط­ط¯ط¯">
             <input readOnly={!isAdmin} value={dialog.employee_name || dialog.name || ""} onChange={(e) => setDialog({ ...dialog, employee_name: e.target.value, name: e.target.value })} className={`field mt-2 ${isAdmin ? "" : "bg-slate-50"}`} />
           </Label>
-          <Label t="الرقم الوظيفي"><input readOnly value={dialog.employee_id || ""} className="field mt-2 bg-slate-50" /></Label>
-          <Label t="اسم المستخدم"><input required value={dialog.username || ""} onChange={(e) => setDialog({ ...dialog, username: e.target.value })} className="field mt-2" /></Label>
-          <Label t="كلمة المرور"><input required type="password" value={dialog.password || ""} onChange={(e) => setDialog({ ...dialog, password: e.target.value })} className="field mt-2" /></Label>
-          <Label t="الدور"><select value={dialog.role || "الموظف"} onChange={(e) => setDialog({ ...dialog, role: e.target.value })} className="field mt-2">{roles.map((role) => <option key={role}>{role}</option>)}</select></Label>
-          <Label t="الفرع"><input readOnly={!isAdmin} value={dialog.branch || ""} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className={`field mt-2 ${isAdmin ? "" : "bg-slate-50"}`} /></Label>
-          <Label t="الوظيفة"><input readOnly={!isAdmin} value={dialog.job || ""} onChange={(e) => setDialog({ ...dialog, job: e.target.value })} className={`field mt-2 ${isAdmin ? "" : "bg-slate-50"}`} /></Label>
-          <Label t="البريد الإلكتروني"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label>
-          <Label t="الهاتف"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label>
-          <Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label>
+          <Label t="ط§ظ„ط±ظ‚ظ… ط§ظ„ظˆط¸ظٹظپظٹ"><input readOnly value={dialog.employee_id || ""} className="field mt-2 bg-slate-50" /></Label>
+          <Label t="ط§ط³ظ… ط§ظ„ظ…ط³طھط®ط¯ظ…"><input required value={dialog.username || ""} onChange={(e) => setDialog({ ...dialog, username: e.target.value })} className="field mt-2" /></Label>
+          <Label t="ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط±"><input required type="password" value={dialog.password || ""} onChange={(e) => setDialog({ ...dialog, password: e.target.value })} className="field mt-2" /></Label>
+          <Label t="ط§ظ„ط¯ظˆط±"><select value={dialog.role || "ط§ظ„ظ…ظˆط¸ظپ"} onChange={(e) => setDialog({ ...dialog, role: e.target.value })} className="field mt-2">{roles.map((role) => <option key={role}>{role}</option>)}</select></Label>
+          <Label t="ط§ظ„ظپط±ط¹"><input readOnly={!isAdmin} value={dialog.branch || ""} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className={`field mt-2 ${isAdmin ? "" : "bg-slate-50"}`} /></Label>
+          <Label t="ط§ظ„ظˆط¸ظٹظپط©"><input readOnly={!isAdmin} value={dialog.job || ""} onChange={(e) => setDialog({ ...dialog, job: e.target.value })} className={`field mt-2 ${isAdmin ? "" : "bg-slate-50"}`} /></Label>
+          <Label t="ط§ظ„ط¨ط±ظٹط¯ ط§ظ„ط¥ظ„ظƒطھط±ظˆظ†ظٹ"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label>
+          <Label t="ط§ظ„ظ‡ط§طھظپ"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label>
+          <Label t="ط§ظ„ط­ط§ظ„ط©"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">ظ†ط´ط·</option><option value="false">ظ…ط¹ط·ظ„</option></select></Label>
         </div>
         <DialogActions close={() => setDialog(null)} />
       </form>
@@ -5416,11 +5630,11 @@ function TreePermissionsPanel({ selectedRole, setSelectedRole, treeNodes, treePe
     return (
       <div key={node.node_key}>
         <div className={`flex items-center gap-2 rounded-xl px-2 py-2 text-sm ${selectedNode?.node_key === node.node_key ? "bg-brand-50 text-brand-800" : "hover:bg-slate-50"}`} style={{ paddingRight: 8 + level * 18 }}>
-          <button type="button" onClick={() => hasChildren && toggleExpand(node.node_key)} className="grid h-6 w-6 place-items-center rounded-lg bg-slate-100 text-slate-600">{hasChildren ? (isOpen ? "−" : "+") : "•"}</button>
+          <button type="button" onClick={() => hasChildren && toggleExpand(node.node_key)} className="grid h-6 w-6 place-items-center rounded-lg bg-slate-100 text-slate-600">{hasChildren ? (isOpen ? "âˆ’" : "+") : "â€¢"}</button>
           <input type="checkbox" disabled={!canEdit} checked={state === "checked"} ref={(el) => { if (el) el.indeterminate = state === "partial"; }} onChange={(e) => setNodeViewRecursive(node, e.target.checked)} />
           <button type="button" onClick={() => setSelectedNodeKey(node.node_key)} className="flex-1 text-right">
             <b>{node.node_name}</b>
-            <p className="text-[11px] text-slate-400">{node.node_type} · {node.node_key}</p>
+            <p className="text-[11px] text-slate-400">{node.node_type} آ· {node.node_key}</p>
           </button>
         </div>
         {hasChildren && isOpen && <div>{node.children.map((child) => renderNode(child, level + 1))}</div>}
@@ -5431,31 +5645,31 @@ function TreePermissionsPanel({ selectedRole, setSelectedRole, treeNodes, treePe
   return (
     <div className="panel p-4 xl:col-span-2">
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <h3 className="text-lg font-extrabold">شجرة الصلاحيات التفصيلية</h3>
+        <h3 className="text-lg font-extrabold">ط´ط¬ط±ط© ط§ظ„طµظ„ط§ط­ظٹط§طھ ط§ظ„طھظپطµظٹظ„ظٹط©</h3>
         <select value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)} className="field mr-auto max-w-[220px]">{roles.map((r) => <option key={r}>{r}</option>)}</select>
-        <select className="field max-w-[220px]"><option>كل مستخدمي الدور</option>{selectedUserOptions.map((u) => <option key={u.user_id}>{u.employee_name || u.username}</option>)}</select>
-        <input value={search} onChange={(e) => setSearch(e.target.value)} className="field max-w-[240px]" placeholder="بحث داخل الشجرة..." />
+        <select className="field max-w-[220px]"><option>ظƒظ„ ظ…ط³طھط®ط¯ظ…ظٹ ط§ظ„ط¯ظˆط±</option>{selectedUserOptions.map((u) => <option key={u.user_id}>{u.employee_name || u.username}</option>)}</select>
+        <input value={search} onChange={(e) => setSearch(e.target.value)} className="field max-w-[240px]" placeholder="ط¨ط­ط« ط¯ط§ط®ظ„ ط§ظ„ط´ط¬ط±ط©..." />
       </div>
       <div className="mb-4 flex flex-wrap gap-2">
-        <button disabled={!canEdit} onClick={() => setAll(true)} className="btn-secondary">تحديد الكل</button>
-        <button disabled={!canEdit} onClick={() => setAll(false)} className="btn-secondary">مسح الكل</button>
-        <button onClick={() => setExpanded(flatNodes.map((n) => n.node_key))} className="btn-secondary">توسيع الكل</button>
-        <button onClick={() => setExpanded([])} className="btn-secondary">طي الكل</button>
-        <select value={copyFromRole} onChange={(e) => setCopyFromRole(e.target.value)} className="field max-w-[200px]"><option value="">نسخ من دور...</option>{roles.filter((r) => r !== selectedRole).map((r) => <option key={r}>{r}</option>)}</select>
-        <button disabled={!canEdit || !copyFromRole} onClick={() => onCopy(copyFromRole)} className="btn-secondary">نسخ الصلاحيات</button>
-        <button disabled={!canEdit} onClick={onReset} className="btn-secondary">إعادة ضبط الدور</button>
-        <button disabled={!canEdit || loading} onClick={onSave} className="btn-primary"><Save size={17} /> حفظ الصلاحيات</button>
+        <button disabled={!canEdit} onClick={() => setAll(true)} className="btn-secondary">طھط­ط¯ظٹط¯ ط§ظ„ظƒظ„</button>
+        <button disabled={!canEdit} onClick={() => setAll(false)} className="btn-secondary">ظ…ط³ط­ ط§ظ„ظƒظ„</button>
+        <button onClick={() => setExpanded(flatNodes.map((n) => n.node_key))} className="btn-secondary">طھظˆط³ظٹط¹ ط§ظ„ظƒظ„</button>
+        <button onClick={() => setExpanded([])} className="btn-secondary">ط·ظٹ ط§ظ„ظƒظ„</button>
+        <select value={copyFromRole} onChange={(e) => setCopyFromRole(e.target.value)} className="field max-w-[200px]"><option value="">ظ†ط³ط® ظ…ظ† ط¯ظˆط±...</option>{roles.filter((r) => r !== selectedRole).map((r) => <option key={r}>{r}</option>)}</select>
+        <button disabled={!canEdit || !copyFromRole} onClick={() => onCopy(copyFromRole)} className="btn-secondary">ظ†ط³ط® ط§ظ„طµظ„ط§ط­ظٹط§طھ</button>
+        <button disabled={!canEdit} onClick={onReset} className="btn-secondary">ط¥ط¹ط§ط¯ط© ط¶ط¨ط· ط§ظ„ط¯ظˆط±</button>
+        <button disabled={!canEdit || loading} onClick={onSave} className="btn-primary"><Save size={17} /> ط­ظپط¸ ط§ظ„طµظ„ط§ط­ظٹط§طھ</button>
       </div>
-      {loading ? <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">جاري تحميل شجرة الصلاحيات...</p> : (
+      {loading ? <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">ط¬ط§ط±ظٹ طھط­ظ…ظٹظ„ ط´ط¬ط±ط© ط§ظ„طµظ„ط§ط­ظٹط§طھ...</p> : (
         <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
           <div className="max-h-[620px] overflow-y-auto rounded-2xl border border-slate-100 bg-white p-3">{visibleTree.map((node) => renderNode(node))}</div>
           <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-            {!selectedNode || !selectedPerm ? <p className="text-sm text-slate-500">اختر بندًا من الشجرة لتعديل صلاحياته.</p> : (
+            {!selectedNode || !selectedPerm ? <p className="text-sm text-slate-500">ط§ط®طھط± ط¨ظ†ط¯ظ‹ط§ ظ…ظ† ط§ظ„ط´ط¬ط±ط© ظ„طھط¹ط¯ظٹظ„ طµظ„ط§ط­ظٹط§طھظ‡.</p> : (
               <div className="space-y-4">
                 <div className="rounded-2xl bg-white p-4">
-                  <p className="text-xs text-slate-400">البند المحدد</p>
+                  <p className="text-xs text-slate-400">ط§ظ„ط¨ظ†ط¯ ط§ظ„ظ…ط­ط¯ط¯</p>
                   <h4 className="text-xl font-extrabold text-brand-800">{selectedNode.node_name}</h4>
-                  <p className="mt-1 text-xs text-slate-500">المفتاح: {selectedNode.node_key} · النوع: {selectedNode.node_type} · الصفحة: {selectedNode.page_key || "—"}</p>
+                  <p className="mt-1 text-xs text-slate-500">ط§ظ„ظ…ظپطھط§ط­: {selectedNode.node_key} آ· ط§ظ„ظ†ظˆط¹: {selectedNode.node_type} آ· ط§ظ„طµظپط­ط©: {selectedNode.page_key || "â€”"}</p>
                 </div>
                 <div className="grid gap-3 md:grid-cols-3">
                   {permissionActions.map(([key, label]) => (
@@ -5466,20 +5680,20 @@ function TreePermissionsPanel({ selectedRole, setSelectedRole, treeNodes, treePe
                   ))}
                 </div>
                 <div className="grid gap-4 md:grid-cols-3">
-                  <Label t="نطاق البيانات">
+                  <Label t="ظ†ط·ط§ظ‚ ط§ظ„ط¨ظٹط§ظ†ط§طھ">
                     <select disabled={!canEdit} value={selectedPerm.data_scope || "own"} onChange={(e) => updatePermission(selectedNode.node_key, { data_scope: e.target.value })} className="field mt-2">{dataScopes.map(([k, label]) => <option key={k} value={k}>{label}</option>)}</select>
                   </Label>
-                  <Label t="الفروع المسموحة">
+                  <Label t="ط§ظ„ظپط±ظˆط¹ ط§ظ„ظ…ط³ظ…ظˆط­ط©">
                     <select multiple disabled={!canEdit} value={selectedPerm.allowed_branches || []} onChange={(e) => updatePermission(selectedNode.node_key, { allowed_branches: Array.from(e.target.selectedOptions).map((o) => o.value) })} className="field mt-2 !h-32">{branchOptions.map((b) => <option key={b}>{b}</option>)}</select>
                   </Label>
-                  <Label t="الأقسام المسموحة">
+                  <Label t="ط§ظ„ط£ظ‚ط³ط§ظ… ط§ظ„ظ…ط³ظ…ظˆط­ط©">
                     <select multiple disabled={!canEdit} value={selectedPerm.allowed_departments || []} onChange={(e) => updatePermission(selectedNode.node_key, { allowed_departments: Array.from(e.target.selectedOptions).map((o) => o.value) })} className="field mt-2 !h-32">{departmentOptions.map((d) => <option key={d}>{d}</option>)}</select>
                   </Label>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button disabled={!canEdit} onClick={onSave} className="btn-primary"><Save size={17} /> حفظ المحدد</button>
-                  <button disabled={!canEdit} onClick={applySelectedToChildren} className="btn-secondary">تطبيق على الفروع التابعة</button>
-                  <button disabled={!canEdit} onClick={clearNode} className="btn-secondary">مسح صلاحيات البند</button>
+                  <button disabled={!canEdit} onClick={onSave} className="btn-primary"><Save size={17} /> ط­ظپط¸ ط§ظ„ظ…ط­ط¯ط¯</button>
+                  <button disabled={!canEdit} onClick={applySelectedToChildren} className="btn-secondary">طھط·ط¨ظٹظ‚ ط¹ظ„ظ‰ ط§ظ„ظپط±ظˆط¹ ط§ظ„طھط§ط¨ط¹ط©</button>
+                  <button disabled={!canEdit} onClick={clearNode} className="btn-secondary">ظ…ط³ط­ طµظ„ط§ط­ظٹط§طھ ط§ظ„ط¨ظ†ط¯</button>
                 </div>
               </div>
             )}
@@ -5498,20 +5712,20 @@ function RoleManagementPanel({ roles, users, canEdit, onSaveRole, onDeleteRole, 
   return (
     <div className="panel p-4 xl:col-span-2">
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <h3 className="text-lg font-extrabold">إدارة الأدوار</h3>
-        <input value={q} onChange={(e) => setQ(e.target.value)} className="field mr-auto max-w-[260px]" placeholder="بحث في الأدوار..." />
-        <button disabled={!canEdit} onClick={() => setDialog({ role_id: `ROLE-${Date.now()}`, role_name: "", role_description: "", is_system_role: false, is_active: true })} className="btn-primary"><Plus size={17} /> إضافة دور</button>
+        <h3 className="text-lg font-extrabold">ط¥ط¯ط§ط±ط© ط§ظ„ط£ط¯ظˆط§ط±</h3>
+        <input value={q} onChange={(e) => setQ(e.target.value)} className="field mr-auto max-w-[260px]" placeholder="ط¨ط­ط« ظپظٹ ط§ظ„ط£ط¯ظˆط§ط±..." />
+        <button disabled={!canEdit} onClick={() => setDialog({ role_id: `ROLE-${Date.now()}`, role_name: "", role_description: "", is_system_role: false, is_active: true })} className="btn-primary"><Plus size={17} /> ط¥ط¶ط§ظپط© ط¯ظˆط±</button>
       </div>
       <div className="table-wrap">
         <table>
-          <thead><tr><th>الدور</th><th>الوصف</th><th>عدد المستخدمين</th><th>الحالة</th><th>نوع الدور</th><th></th></tr></thead>
+          <thead><tr><th>ط§ظ„ط¯ظˆط±</th><th>ط§ظ„ظˆطµظپ</th><th>ط¹ط¯ط¯ ط§ظ„ظ…ط³طھط®ط¯ظ…ظٹظ†</th><th>ط§ظ„ط­ط§ظ„ط©</th><th>ظ†ظˆط¹ ط§ظ„ط¯ظˆط±</th><th></th></tr></thead>
           <tbody>{filtered.map((role) => {
             const count = users.filter((u) => u.role === role.role_name).length;
-            return <tr key={role.role_id}><td>{role.role_name}</td><td>{role.role_description}</td><td>{count}</td><td><Status>{role.is_active ? "نشط" : "معطل"}</Status></td><td>{role.is_system_role ? "نظامي" : "مخصص"}</td><td><button disabled={!canEdit} onClick={() => setDialog(role)} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canEdit} onClick={() => onDeleteRole(role)} className="p-2 text-red-600">{count ? "تعطيل" : "حذف"}</button><select value={copySource} onChange={(e) => setCopySource(e.target.value)} className="field mx-1 max-w-[160px]"><option value="">نسخ من...</option>{roles.filter((r) => r.role_name !== role.role_name).map((r) => <option key={r.role_id}>{r.role_name}</option>)}</select><button disabled={!copySource} onClick={() => onCopyPermissions(copySource, role.role_name)} className="btn-secondary">نسخ</button></td></tr>;
+            return <tr key={role.role_id}><td>{role.role_name}</td><td>{role.role_description}</td><td>{count}</td><td><Status>{role.is_active ? "ظ†ط´ط·" : "ظ…ط¹ط·ظ„"}</Status></td><td>{role.is_system_role ? "ظ†ط¸ط§ظ…ظٹ" : "ظ…ط®طµطµ"}</td><td><button disabled={!canEdit} onClick={() => setDialog(role)} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canEdit} onClick={() => onDeleteRole(role)} className="p-2 text-red-600">{count ? "طھط¹ط·ظٹظ„" : "ط­ط°ظپ"}</button><select value={copySource} onChange={(e) => setCopySource(e.target.value)} className="field mx-1 max-w-[160px]"><option value="">ظ†ط³ط® ظ…ظ†...</option>{roles.filter((r) => r.role_name !== role.role_name).map((r) => <option key={r.role_id}>{r.role_name}</option>)}</select><button disabled={!copySource} onClick={() => onCopyPermissions(copySource, role.role_name)} className="btn-secondary">ظ†ط³ط®</button></td></tr>;
           })}</tbody>
         </table>
       </div>
-      {dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={(e) => { e.preventDefault(); onSaveRole(dialog).then(() => setDialog(null)); }} className="panel w-full max-w-2xl p-6"><DialogTitle title="بيانات الدور" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-2"><Label t="اسم الدور"><input required disabled={dialog.is_system_role} value={dialog.role_name} onChange={(e) => setDialog({ ...dialog, role_name: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label><Label t="الوصف"><textarea value={dialog.role_description || ""} onChange={(e) => setDialog({ ...dialog, role_description: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}
+      {dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={(e) => { e.preventDefault(); onSaveRole(dialog).then(() => setDialog(null)); }} className="panel w-full max-w-2xl p-6"><DialogTitle title="ط¨ظٹط§ظ†ط§طھ ط§ظ„ط¯ظˆط±" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-2"><Label t="ط§ط³ظ… ط§ظ„ط¯ظˆط±"><input required disabled={dialog.is_system_role} value={dialog.role_name} onChange={(e) => setDialog({ ...dialog, role_name: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ط­ط§ظ„ط©"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">ظ†ط´ط·</option><option value="false">ظ…ط¹ط·ظ„</option></select></Label><Label t="ط§ظ„ظˆطµظپ"><textarea value={dialog.role_description || ""} onChange={(e) => setDialog({ ...dialog, role_description: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}
     </div>
   );
 }
@@ -5587,10 +5801,10 @@ function UsersPermissionsPage({ employees, can }) {
   };
   const saveUser = async (e) => {
     e.preventDefault();
-    if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
-    if (!dialog.employee_id && !String(dialog.role || "").includes("مدير النظام") && !String(dialog.role || "").includes("ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…")) return alert("يجب اختيار الموظف");
-    if (!dialog.username) return alert("يجب إدخال اسم المستخدم");
-    if (!dialog.role) return alert("يجب تحديد الدور");
+    if (!canEdit) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
+    if (!dialog.employee_id && !String(dialog.role || "").includes("ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…") && !String(dialog.role || "").includes("ط¸â€¦ط·آ¯ط¸ظ¹ط·آ± ط·آ§ط¸â€‍ط¸â€ ط·آ¸ط·آ§ط¸â€¦")) return alert("ظٹط¬ط¨ ط§ط®طھظٹط§ط± ط§ظ„ظ…ظˆط¸ظپ");
+    if (!dialog.username) return alert("ظٹط¬ط¨ ط¥ط¯ط®ط§ظ„ ط§ط³ظ… ط§ظ„ظ…ط³طھط®ط¯ظ…");
+    if (!dialog.role) return alert("ظٹط¬ط¨ طھط­ط¯ظٹط¯ ط§ظ„ط¯ظˆط±");
     try {
       const selectedEmployee = employeeOptions.find((employee) => employee.id === dialog.employee_id || employee.employee_id === dialog.employee_id);
       const saved = await adminService.saveUser(dialog, selectedEmployee);
@@ -5604,7 +5818,7 @@ function UsersPermissionsPage({ employees, can }) {
     }
   };
   const inventoryDefaultRows = defaultInventoryPermissions();
-  const permissionRows = permissionPages.map((page) => permissions.find((p) => p.role === selectedRole && p.page_key === page) || (selectedRole === "مسؤول المخزون" ? inventoryDefaultRows.find((p) => p.page_key === page) : null) || {
+  const permissionRows = permissionPages.map((page) => permissions.find((p) => p.role === selectedRole && p.page_key === page) || (selectedRole === "ظ…ط³ط¤ظˆظ„ ط§ظ„ظ…ط®ط²ظˆظ†" ? inventoryDefaultRows.find((p) => p.page_key === page) : null) || {
     id: `${selectedRole}-${page}`,
     role: selectedRole,
     page_key: page,
@@ -5647,11 +5861,11 @@ function UsersPermissionsPage({ employees, can }) {
     });
   };
   const savePermissions = async () => {
-    if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!canEdit) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
     try {
       const saved = await adminService.savePermissions(permissionRows);
       setPermissions((list) => [...list.filter((p) => p.role !== selectedRole), ...saved]);
-      alert("تم حفظ الصلاحيات");
+      alert("طھظ… ط­ظپط¸ ط§ظ„طµظ„ط§ط­ظٹط§طھ");
     } catch (e) {
       alert(e.message);
     }
@@ -5672,7 +5886,7 @@ function UsersPermissionsPage({ employees, can }) {
     setPermissions((list) => [...list.filter((p) => p.role !== selectedRole), ...savedLegacy]);
   };
   const saveTreePermissions = async () => {
-    if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!canEdit) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
     try {
       setTreeLoading(true);
       const flat = flattenPermissionTree(treeNodes);
@@ -5680,7 +5894,7 @@ function UsersPermissionsPage({ employees, can }) {
       const saved = await treePermissionsService.saveBulkNodePermissions(selectedRole, roleRows);
       setTreePermissions(saved);
       await syncLegacyPermissions(saved);
-      alert("تم حفظ صلاحيات الشجرة بنجاح");
+      alert("طھظ… ط­ظپط¸ طµظ„ط§ط­ظٹط§طھ ط§ظ„ط´ط¬ط±ط© ط¨ظ†ط¬ط§ط­");
     } catch (e) {
       alert(e.message);
     } finally {
@@ -5688,14 +5902,14 @@ function UsersPermissionsPage({ employees, can }) {
     }
   };
   const resetTreePermissions = async () => {
-    if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
-    if (!confirm("هل تريد إعادة ضبط صلاحيات هذا الدور؟")) return;
+    if (!canEdit) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
+    if (!confirm("ظ‡ظ„ طھط±ظٹط¯ ط¥ط¹ط§ط¯ط© ط¶ط¨ط· طµظ„ط§ط­ظٹط§طھ ظ‡ط°ط§ ط§ظ„ط¯ظˆط±طں")) return;
     try {
       setTreeLoading(true);
       const saved = await treePermissionsService.resetRolePermissions(selectedRole);
       setTreePermissions(saved);
       await syncLegacyPermissions(saved);
-      alert("تمت إعادة ضبط صلاحيات الدور");
+      alert("طھظ…طھ ط¥ط¹ط§ط¯ط© ط¶ط¨ط· طµظ„ط§ط­ظٹط§طھ ط§ظ„ط¯ظˆط±");
     } catch (e) {
       alert(e.message);
     } finally {
@@ -5703,14 +5917,14 @@ function UsersPermissionsPage({ employees, can }) {
     }
   };
   const copyTreePermissions = async (sourceRole) => {
-    if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!canEdit) return alert("ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© طھظ†ظپظٹط° ظ‡ط°ط§ ط§ظ„ط¥ط¬ط±ط§ط،");
     if (!sourceRole) return;
     try {
       setTreeLoading(true);
       const saved = await treePermissionsService.copyRolePermissions(sourceRole, selectedRole);
       setTreePermissions(saved);
       await syncLegacyPermissions(saved);
-      alert("تم نسخ الصلاحيات إلى الدور المحدد");
+      alert("طھظ… ظ†ط³ط® ط§ظ„طµظ„ط§ط­ظٹط§طھ ط¥ظ„ظ‰ ط§ظ„ط¯ظˆط± ط§ظ„ظ…ط­ط¯ط¯");
     } catch (e) {
       alert(e.message);
     } finally {
@@ -5720,18 +5934,18 @@ function UsersPermissionsPage({ employees, can }) {
 
   return (
     <div className="space-y-5">
-      <PageHead title="المستخدمون والصلاحيات" desc="إدارة مستخدمي النظام ومصفوفة صلاحيات الأدوار" action={<button disabled={!canEdit} onClick={() => setDialog({ user_id: `USR-${Date.now()}`, employee_id: "", employee_name: "", username: "", password: "", role: "الموظف", branch: "", job: "", email: "", phone: "", is_active: true })} className="btn-primary"><Plus size={18} /> إضافة مستخدم</button>} />
+      <PageHead title="ط§ظ„ظ…ط³طھط®ط¯ظ…ظˆظ† ظˆط§ظ„طµظ„ط§ط­ظٹط§طھ" desc="ط¥ط¯ط§ط±ط© ظ…ط³طھط®ط¯ظ…ظٹ ط§ظ„ظ†ط¸ط§ظ… ظˆظ…طµظپظˆظپط© طµظ„ط§ط­ظٹط§طھ ط§ظ„ط£ط¯ظˆط§ط±" action={<button disabled={!canEdit} onClick={() => setDialog({ user_id: `USR-${Date.now()}`, employee_id: "", employee_name: "", username: "", password: "", role: "ط§ظ„ظ…ظˆط¸ظپ", branch: "", job: "", email: "", phone: "", is_active: true })} className="btn-primary"><Plus size={18} /> ط¥ط¶ط§ظپط© ظ…ط³طھط®ط¯ظ…</button>} />
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
       <div className="panel flex flex-wrap gap-3 p-4">
-        <input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="بحث بالاسم أو اسم المستخدم أو الرقم..." />
-        <select value={filters.role} onChange={(e) => setFilters({ ...filters, role: e.target.value })} className="field max-w-[190px]"><option value="all">كل الأدوار</option>{roleOptions.map((r) => <option key={r}>{r}</option>)}</select>
-        <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select>
-        <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option><option value="true">نشط</option><option value="false">معطل</option></select>
+        <input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="ط¨ط­ط« ط¨ط§ظ„ط§ط³ظ… ط£ظˆ ط§ط³ظ… ط§ظ„ظ…ط³طھط®ط¯ظ… ط£ظˆ ط§ظ„ط±ظ‚ظ…..." />
+        <select value={filters.role} onChange={(e) => setFilters({ ...filters, role: e.target.value })} className="field max-w-[190px]"><option value="all">ظƒظ„ ط§ظ„ط£ط¯ظˆط§ط±</option>{roleOptions.map((r) => <option key={r}>{r}</option>)}</select>
+        <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">ظƒظ„ ط§ظ„ظپط±ظˆط¹</option>{branches.map((b) => <option key={b}>{b}</option>)}</select>
+        <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[160px]"><option value="all">ظƒظ„ ط§ظ„ط­ط§ظ„ط§طھ</option><option value="true">ظ†ط´ط·</option><option value="false">ظ…ط¹ط·ظ„</option></select>
       </div>
       <div className="grid gap-5 xl:grid-cols-2">
         <div className="panel p-4">
-          <h3 className="mb-3 font-extrabold">المستخدمون</h3>
-          {loading ? <p className="text-sm text-slate-400">جاري التحميل...</p> : <div className="table-wrap"><table><thead><tr><th>المستخدم</th><th>الموظف</th><th>الدور</th><th>الفرع</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((u) => <tr key={u.user_id}><td>{u.username}</td><td>{u.employee_name}<p className="text-xs text-slate-400">{u.employee_id}</p></td><td>{u.role}</td><td>{u.branch}</td><td><Status>{u.is_active ? "نشط" : "معطل"}</Status></td><td><button disabled={!canEdit} onClick={() => setDialog(u)} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canEdit} onClick={() => adminService.saveUser({ ...u, is_active: !u.is_active }).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600">{u.is_active ? "تعطيل" : "تفعيل"}</button></td></tr>)}</tbody></table></div>}
+          <h3 className="mb-3 font-extrabold">ط§ظ„ظ…ط³طھط®ط¯ظ…ظˆظ†</h3>
+          {loading ? <p className="text-sm text-slate-400">ط¬ط§ط±ظٹ ط§ظ„طھط­ظ…ظٹظ„...</p> : <div className="table-wrap"><table><thead><tr><th>ط§ظ„ظ…ط³طھط®ط¯ظ…</th><th>ط§ظ„ظ…ظˆط¸ظپ</th><th>ط§ظ„ط¯ظˆط±</th><th>ط§ظ„ظپط±ط¹</th><th>ط§ظ„ط­ط§ظ„ط©</th><th></th></tr></thead><tbody>{filtered.map((u) => <tr key={u.user_id}><td>{u.username}</td><td>{u.employee_name}<p className="text-xs text-slate-400">{u.employee_id}</p></td><td>{u.role}</td><td>{u.branch}</td><td><Status>{u.is_active ? "ظ†ط´ط·" : "ظ…ط¹ط·ظ„"}</Status></td><td><button disabled={!canEdit} onClick={() => setDialog(u)} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canEdit} onClick={() => adminService.saveUser({ ...u, is_active: !u.is_active }).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600">{u.is_active ? "طھط¹ط·ظٹظ„" : "طھظپط¹ظٹظ„"}</button></td></tr>)}</tbody></table></div>}
         </div>
         <TreePermissionsPanel
           selectedRole={selectedRole}
@@ -5749,9 +5963,9 @@ function UsersPermissionsPage({ employees, can }) {
           onCopy={copyTreePermissions}
         />
       </div>
-      <RoleManagementPanel roles={roleRows.length ? roleRows : roleOptions.map((role_name) => ({ role_id: `ROLE-${role_name}`, role_name, role_description: "", is_system_role: systemRoles.includes(role_name), is_active: true }))} users={users} canEdit={canEdit} onSaveRole={async (roleRow) => { const saved = await adminService.saveRole(roleRow); setRoleRows((list) => list.some((r) => r.role_id === saved.role_id) ? list.map((r) => r.role_id === saved.role_id ? saved : r) : [...list, saved]); }} onDeleteRole={async (roleRow) => { const saved = await adminService.deleteRole(roleRow, users); setRoleRows((list) => saved ? list.map((r) => r.role_id === saved.role_id ? saved : r) : list.filter((r) => r.role_id !== roleRow.role_id)); }} onCopyPermissions={async (source, target) => { await treePermissionsService.copyRolePermissions(source, target); alert("تم نسخ صلاحيات الدور"); }} />
+      <RoleManagementPanel roles={roleRows.length ? roleRows : roleOptions.map((role_name) => ({ role_id: `ROLE-${role_name}`, role_name, role_description: "", is_system_role: systemRoles.includes(role_name), is_active: true }))} users={users} canEdit={canEdit} onSaveRole={async (roleRow) => { const saved = await adminService.saveRole(roleRow); setRoleRows((list) => list.some((r) => r.role_id === saved.role_id) ? list.map((r) => r.role_id === saved.role_id ? saved : r) : [...list, saved]); }} onDeleteRole={async (roleRow) => { const saved = await adminService.deleteRole(roleRow, users); setRoleRows((list) => saved ? list.map((r) => r.role_id === saved.role_id ? saved : r) : list.filter((r) => r.role_id !== roleRow.role_id)); }} onCopyPermissions={async (source, target) => { await treePermissionsService.copyRolePermissions(source, target); alert("طھظ… ظ†ط³ط® طµظ„ط§ط­ظٹط§طھ ط§ظ„ط¯ظˆط±"); }} />
       {dialog && <UserEditorModal dialog={dialog} setDialog={setDialog} saveUser={saveUser} employeeOptions={employeeOptions} selectEmployee={selectEmployee} roles={roleOptions} />}
-      {false && dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={saveUser} className="panel w-full max-w-3xl p-6"><div className="mb-5 flex"><h3 className="text-xl font-extrabold">بيانات المستخدم</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div><div className="grid gap-4 md:grid-cols-2"><Label t="ربط الموظف"><select value={dialog.employee_id} onChange={(e) => selectEmployee(e.target.value)} className="field mt-2"><option value="">بدون ربط</option>{employeeOptions.map((e) => <option key={e.id} value={e.id}>{e.name} - {e.id} - {e.branch} - {e.job}</option>)}</select></Label><Label t="اسم الموظف"><input readOnly value={dialog.employee_name || dialog.name || ""} className="field mt-2 bg-slate-50" /></Label><Label t="اسم المستخدم"><input required value={dialog.username} onChange={(e) => setDialog({ ...dialog, username: e.target.value })} className="field mt-2" /></Label><Label t="كلمة المرور"><input required type="password" value={dialog.password || ""} onChange={(e) => setDialog({ ...dialog, password: e.target.value })} className="field mt-2" /></Label><Label t="الدور"><select value={dialog.role} onChange={(e) => setDialog({ ...dialog, role: e.target.value })} className="field mt-2">{systemRoles.map((r) => <option key={r}>{r}</option>)}</select></Label><Label t="الفرع"><input readOnly value={dialog.branch || ""} className="field mt-2 bg-slate-50" /></Label><Label t="الوظيفة"><input readOnly value={dialog.job || ""} className="field mt-2 bg-slate-50" /></Label><Label t="البريد الإلكتروني"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label><Label t="الهاتف"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label></div><div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ البيانات</button></div></form></div>}
+      {false && dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={saveUser} className="panel w-full max-w-3xl p-6"><div className="mb-5 flex"><h3 className="text-xl font-extrabold">ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ط³طھط®ط¯ظ…</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div><div className="grid gap-4 md:grid-cols-2"><Label t="ط±ط¨ط· ط§ظ„ظ…ظˆط¸ظپ"><select value={dialog.employee_id} onChange={(e) => selectEmployee(e.target.value)} className="field mt-2"><option value="">ط¨ط¯ظˆظ† ط±ط¨ط·</option>{employeeOptions.map((e) => <option key={e.id} value={e.id}>{e.name} - {e.id} - {e.branch} - {e.job}</option>)}</select></Label><Label t="ط§ط³ظ… ط§ظ„ظ…ظˆط¸ظپ"><input readOnly value={dialog.employee_name || dialog.name || ""} className="field mt-2 bg-slate-50" /></Label><Label t="ط§ط³ظ… ط§ظ„ظ…ط³طھط®ط¯ظ…"><input required value={dialog.username} onChange={(e) => setDialog({ ...dialog, username: e.target.value })} className="field mt-2" /></Label><Label t="ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط±"><input required type="password" value={dialog.password || ""} onChange={(e) => setDialog({ ...dialog, password: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ط¯ظˆط±"><select value={dialog.role} onChange={(e) => setDialog({ ...dialog, role: e.target.value })} className="field mt-2">{systemRoles.map((r) => <option key={r}>{r}</option>)}</select></Label><Label t="ط§ظ„ظپط±ط¹"><input readOnly value={dialog.branch || ""} className="field mt-2 bg-slate-50" /></Label><Label t="ط§ظ„ظˆط¸ظٹظپط©"><input readOnly value={dialog.job || ""} className="field mt-2 bg-slate-50" /></Label><Label t="ط§ظ„ط¨ط±ظٹط¯ ط§ظ„ط¥ظ„ظƒطھط±ظˆظ†ظٹ"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ظ‡ط§طھظپ"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label><Label t="ط§ظ„ط­ط§ظ„ط©"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">ظ†ط´ط·</option><option value="false">ظ…ط¹ط·ظ„</option></select></Label></div><div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">ط¥ظ„ط؛ط§ط،</button><button className="btn-primary"><Save size={17} /> ط­ظپط¸ ط§ظ„ط¨ظٹط§ظ†ط§طھ</button></div></form></div>}
     </div>
   );
 }
@@ -5774,17 +5988,17 @@ function EnterpriseReportsCenter({ employees, evaluations, can }) {
   }, []);
   const overtimeRows = assignmentEmployees.map((row) => ({ ...assignments.find((a) => a.assignment_id === row.assignment_id), ...row }));
   const reportTypes = [
-    ["employees", "تقرير الموظفين", employees],
-    ["guarantees", "تقرير الضمانات", guarantees],
-    ["overtime", "تقرير العمل الإضافي", overtimeRows],
-    ["evaluations", "تقرير التقييمات", evaluations],
-    ["incentives", "تقرير الحوافز", calcIncentivesSafe(employees, evaluations)],
-    ["branch", "تقرير حسب الفرع", employees],
-    ["employee", "تقرير حسب الموظف", evaluations],
-    ["month", "تقرير حسب الشهر", evaluations],
-    ["branches_compare", "تقرير مقارنة بين الفروع", overtimeRows],
-    ["employees_compare", "تقرير مقارنة بين الموظفين", evaluations],
-    ["months_compare", "تقرير مقارنة بين الأشهر", evaluations],
+    ["employees", "طھظ‚ط±ظٹط± ط§ظ„ظ…ظˆط¸ظپظٹظ†", employees],
+    ["guarantees", "طھظ‚ط±ظٹط± ط§ظ„ط¶ظ…ط§ظ†ط§طھ", guarantees],
+    ["overtime", "طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„ ط§ظ„ط¥ط¶ط§ظپظٹ", overtimeRows],
+    ["evaluations", "طھظ‚ط±ظٹط± ط§ظ„طھظ‚ظٹظٹظ…ط§طھ", evaluations],
+    ["incentives", "طھظ‚ط±ظٹط± ط§ظ„ط­ظˆط§ظپط²", calcIncentivesSafe(employees, evaluations)],
+    ["branch", "طھظ‚ط±ظٹط± ط­ط³ط¨ ط§ظ„ظپط±ط¹", employees],
+    ["employee", "طھظ‚ط±ظٹط± ط­ط³ط¨ ط§ظ„ظ…ظˆط¸ظپ", evaluations],
+    ["month", "طھظ‚ط±ظٹط± ط­ط³ط¨ ط§ظ„ط´ظ‡ط±", evaluations],
+    ["branches_compare", "طھظ‚ط±ظٹط± ظ…ظ‚ط§ط±ظ†ط© ط¨ظٹظ† ط§ظ„ظپط±ظˆط¹", overtimeRows],
+    ["employees_compare", "طھظ‚ط±ظٹط± ظ…ظ‚ط§ط±ظ†ط© ط¨ظٹظ† ط§ظ„ظ…ظˆط¸ظپظٹظ†", evaluations],
+    ["months_compare", "طھظ‚ط±ظٹط± ظ…ظ‚ط§ط±ظ†ط© ط¨ظٹظ† ط§ظ„ط£ط´ظ‡ط±", evaluations],
   ];
   const filterRows = (rows) => rows.filter((r) => {
     const date = r.assignment_date || r.guarantee_date || r.month || r.hireDate || "";
@@ -5799,37 +6013,37 @@ function EnterpriseReportsCenter({ employees, evaluations, can }) {
       (filters.approval === "all" || r.approval_status === filters.approval);
   });
   const reportColumns = [
-    { key: "name", label: "الاسم" },
-    { key: "employee_name", label: "الموظف" },
-    { key: "branch", label: "الفرع" },
-    { key: "job", label: "الوظيفة" },
-    { key: "month", label: "الشهر" },
-    { key: "total", label: "النتيجة" },
-    { key: "status", label: "الحالة" },
-    { key: "approval_status", label: "الاعتماد" },
+    { key: "name", label: "ط§ظ„ط§ط³ظ…" },
+    { key: "employee_name", label: "ط§ظ„ظ…ظˆط¸ظپ" },
+    { key: "branch", label: "ط§ظ„ظپط±ط¹" },
+    { key: "job", label: "ط§ظ„ظˆط¸ظٹظپط©" },
+    { key: "month", label: "ط§ظ„ط´ظ‡ط±" },
+    { key: "total", label: "ط§ظ„ظ†طھظٹط¬ط©" },
+    { key: "status", label: "ط§ظ„ط­ط§ظ„ط©" },
+    { key: "approval_status", label: "ط§ظ„ط§ط¹طھظ…ط§ط¯" },
   ];
   const printReport = (title, rows) => {
     const filteredRows = filterRows(rows);
-    const body = `<div class="brand"><h1>${title}</h1></div><p class="muted">تاريخ التقرير: ${new Date().toLocaleDateString("ar-SA")}</p><p>الفلاتر: الفرع ${filters.branch} - الشهر ${filters.month || "الكل"}</p>${rowsToReportHtml("", filteredRows, reportColumns)}<div style="margin-top:40px;display:flex;justify-content:space-between"><b>إعداد الموارد البشرية</b><b>اعتماد الإدارة</b></div>`;
+    const body = `<div class="brand"><h1>${title}</h1></div><p class="muted">طھط§ط±ظٹط® ط§ظ„طھظ‚ط±ظٹط±: ${new Date().toLocaleDateString("ar-SA")}</p><p>ط§ظ„ظپظ„ط§طھط±: ط§ظ„ظپط±ط¹ ${filters.branch} - ط§ظ„ط´ظ‡ط± ${filters.month || "ط§ظ„ظƒظ„"}</p>${rowsToReportHtml("", filteredRows, reportColumns)}<div style="margin-top:40px;display:flex;justify-content:space-between"><b>ط¥ط¹ط¯ط§ط¯ ط§ظ„ظ…ظˆط§ط±ط¯ ط§ظ„ط¨ط´ط±ظٹط©</b><b>ط§ط¹طھظ…ط§ط¯ ط§ظ„ط¥ط¯ط§ط±ط©</b></div>`;
     printDocument(title, body);
   };
   return (
     <div className="space-y-5">
-      <PageHead title="مركز التقارير" desc="تقارير إدارية احترافية قابلة للطباعة والتصدير" />
+      <PageHead title="ظ…ط±ظƒط² ط§ظ„طھظ‚ط§ط±ظٹط±" desc="طھظ‚ط§ط±ظٹط± ط¥ط¯ط§ط±ظٹط© ط§ط­طھط±ط§ظپظٹط© ظ‚ط§ط¨ظ„ط© ظ„ظ„ط·ط¨ط§ط¹ط© ظˆط§ظ„طھطµط¯ظٹط±" />
       <div className="panel grid gap-3 p-4 md:grid-cols-4 xl:grid-cols-8">
         <input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} className="field" />
         <input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} className="field" />
         <input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field" />
-        <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select>
-        <input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field" placeholder="الموظف" />
-        <select value={filters.job} onChange={(e) => setFilters({ ...filters, job: e.target.value })} className="field"><option value="all">كل الوظائف</option>{jobs.map((j) => <option key={j}>{j}</option>)}</select>
-        <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field"><option value="all">كل الحالات</option>{["نشط", "سارية", "منتهية", "مكلف", "معتمد", "مرفوض"].map((s) => <option key={s}>{s}</option>)}</select>
-        <select value={filters.approval} onChange={(e) => setFilters({ ...filters, approval: e.target.value })} className="field"><option value="all">كل الاعتمادات</option>{approvalStatuses.map((s) => <option key={s}>{s}</option>)}</select>
+        <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field"><option value="all">ظƒظ„ ط§ظ„ظپط±ظˆط¹</option>{branches.map((b) => <option key={b}>{b}</option>)}</select>
+        <input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field" placeholder="ط§ظ„ظ…ظˆط¸ظپ" />
+        <select value={filters.job} onChange={(e) => setFilters({ ...filters, job: e.target.value })} className="field"><option value="all">ظƒظ„ ط§ظ„ظˆط¸ط§ط¦ظپ</option>{jobs.map((j) => <option key={j}>{j}</option>)}</select>
+        <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field"><option value="all">ظƒظ„ ط§ظ„ط­ط§ظ„ط§طھ</option>{["ظ†ط´ط·", "ط³ط§ط±ظٹط©", "ظ…ظ†طھظ‡ظٹط©", "ظ…ظƒظ„ظپ", "ظ…ط¹طھظ…ط¯", "ظ…ط±ظپظˆط¶"].map((s) => <option key={s}>{s}</option>)}</select>
+        <select value={filters.approval} onChange={(e) => setFilters({ ...filters, approval: e.target.value })} className="field"><option value="all">ظƒظ„ ط§ظ„ط§ط¹طھظ…ط§ط¯ط§طھ</option>{approvalStatuses.map((s) => <option key={s}>{s}</option>)}</select>
       </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{reportTypes.map(([key, title, rows]) => {
         const filteredRows = filterRows(rows);
         const exportRows = reportRowsForExport(filteredRows, reportColumns);
-        return <div key={key} className="panel p-5"><div className="grid h-11 w-11 place-items-center rounded-xl bg-slate-100 text-brand-700"><FileBarChart /></div><h3 className="mt-4 font-extrabold">{title}</h3><p className="mt-1 text-xs text-slate-500">عدد السجلات: {filteredRows.length}</p><div className="mt-5 flex gap-2"><button disabled={can?.("reports_center", "can_export") === false} onClick={() => exportExcel(exportRows, title)} className="btn-secondary flex-1"><FileSpreadsheet size={15} /> Excel</button><button onClick={() => printReport(title, rows)} className="btn-secondary flex-1"><Printer size={15} /> PDF</button><button disabled={can?.("reports_center", "can_export") === false} onClick={() => exportDocx(title, exportRows)} className="btn-secondary flex-1"><Download size={15} /> Word</button></div></div>;
+        return <div key={key} className="panel p-5"><div className="grid h-11 w-11 place-items-center rounded-xl bg-slate-100 text-brand-700"><FileBarChart /></div><h3 className="mt-4 font-extrabold">{title}</h3><p className="mt-1 text-xs text-slate-500">ط¹ط¯ط¯ ط§ظ„ط³ط¬ظ„ط§طھ: {filteredRows.length}</p><div className="mt-5 flex gap-2"><button disabled={can?.("reports_center", "can_export") === false} onClick={() => exportExcel(exportRows, title)} className="btn-secondary flex-1"><FileSpreadsheet size={15} /> Excel</button><button onClick={() => printReport(title, rows)} className="btn-secondary flex-1"><Printer size={15} /> PDF</button><button disabled={can?.("reports_center", "can_export") === false} onClick={() => exportDocx(title, exportRows)} className="btn-secondary flex-1"><Download size={15} /> Word</button></div></div>;
       })}</div>
     </div>
   );
@@ -5844,19 +6058,19 @@ function AuditLogsPage({ role }) {
     load();
     return auditService.subscribe(load);
   }, [role]);
-  if (!isAdminLikeRole(role)) return <div className="panel p-6 text-center font-bold text-red-600">لا تملك صلاحية عرض سجل العمليات</div>;
+  if (!isAdminLikeRole(role)) return <div className="panel p-6 text-center font-bold text-red-600">ظ„ط§ طھظ…ظ„ظƒ طµظ„ط§ط­ظٹط© ط¹ط±ط¶ ط³ط¬ظ„ ط§ظ„ط¹ظ…ظ„ظٹط§طھ</div>;
   return (
     <div className="space-y-5">
-      <PageHead title="سجل العمليات" desc="تتبع العمليات الحساسة داخل النظام" />
+      <PageHead title="ط³ط¬ظ„ ط§ظ„ط¹ظ…ظ„ظٹط§طھ" desc="طھطھط¨ط¹ ط§ظ„ط¹ظ…ظ„ظٹط§طھ ط§ظ„ط­ط³ط§ط³ط© ط¯ط§ط®ظ„ ط§ظ„ظ†ط¸ط§ظ…" />
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
-      <div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>المستخدم</th><th>الإجراء</th><th>الوحدة</th><th>السجل</th></tr></thead><tbody>{rows.map((r) => <tr key={r.id}><td>{r.created_at}</td><td>{r.user_name}</td><td>{r.action}</td><td>{r.module_name}</td><td>{r.record_id}</td></tr>)}</tbody></table></div></div>
+      <div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>ط§ظ„طھط§ط±ظٹط®</th><th>ط§ظ„ظ…ط³طھط®ط¯ظ…</th><th>ط§ظ„ط¥ط¬ط±ط§ط،</th><th>ط§ظ„ظˆط­ط¯ط©</th><th>ط§ظ„ط³ط¬ظ„</th></tr></thead><tbody>{rows.map((r) => <tr key={r.id}><td>{r.created_at}</td><td>{r.user_name}</td><td>{r.action}</td><td>{r.module_name}</td><td>{r.record_id}</td></tr>)}</tbody></table></div></div>
     </div>
   );
 }
 
 const groupCount = (rows, key) =>
   rows.reduce((acc, row) => {
-    const value = row[key] || "غير محدد";
+    const value = row[key] || "ط؛ظٹط± ظ…ط­ط¯ط¯";
     acc[value] = (acc[value] || 0) + 1;
     return acc;
   }, {});
@@ -5864,7 +6078,7 @@ function ReportBox({ title, rows }) {
   return (
     <div className="panel p-4">
       <h3 className="mb-3 font-extrabold">{title}</h3>
-      <div className="space-y-2">{rows.length ? rows.map(([name, value]) => <div key={name} className="flex rounded-xl bg-slate-50 p-3 text-sm"><span>{name}</span><b className="mr-auto">{value}</b></div>) : <p className="text-sm text-slate-400">لا توجد بيانات</p>}</div>
+      <div className="space-y-2">{rows.length ? rows.map(([name, value]) => <div key={name} className="flex rounded-xl bg-slate-50 p-3 text-sm"><span>{name}</span><b className="mr-auto">{value}</b></div>) : <p className="text-sm text-slate-400">ظ„ط§ طھظˆط¬ط¯ ط¨ظٹط§ظ†ط§طھ</p>}</div>
     </div>
   );
 }
@@ -5899,7 +6113,7 @@ function IndicatorManager({ title, indicators, setIndicators }) {
   };
   const remove = () => {
     if (selected === null || indicators.length <= 1) return;
-    if (!confirm("هل تريد حذف المؤشر المحدد؟")) return;
+    if (!confirm("ظ‡ظ„ طھط±ظٹط¯ ط­ط°ظپ ط§ظ„ظ…ط¤ط´ط± ط§ظ„ظ…ط­ط¯ط¯طں")) return;
     setIndicators(indicators.filter((_, i) => i !== selected));
     setSelected(null);
   };
@@ -5908,30 +6122,30 @@ function IndicatorManager({ title, indicators, setIndicators }) {
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <b>{title}</b>
         <div className="mr-auto flex gap-2">
-          <button onClick={() => setDialog({ mode: "add", key: "", label: "", type: "positive", weight: 1 })} className="btn-primary !h-9"><Plus size={15} /> إضافة</button>
-          <button disabled={selected === null} onClick={() => setDialog({ mode: "edit", index: selected, ...indicators[selected] })} className="btn-secondary !h-9 disabled:opacity-40"><Pencil size={15} /> تعديل</button>
-          <button disabled={selected === null} onClick={remove} className="inline-flex h-9 items-center gap-2 rounded-xl border border-red-200 px-3 text-sm font-bold text-red-600 disabled:opacity-40"><Trash2 size={15} /> حذف</button>
+          <button onClick={() => setDialog({ mode: "add", key: "", label: "", type: "positive", weight: 1 })} className="btn-primary !h-9"><Plus size={15} /> ط¥ط¶ط§ظپط©</button>
+          <button disabled={selected === null} onClick={() => setDialog({ mode: "edit", index: selected, ...indicators[selected] })} className="btn-secondary !h-9 disabled:opacity-40"><Pencil size={15} /> طھط¹ط¯ظٹظ„</button>
+          <button disabled={selected === null} onClick={remove} className="inline-flex h-9 items-center gap-2 rounded-xl border border-red-200 px-3 text-sm font-bold text-red-600 disabled:opacity-40"><Trash2 size={15} /> ط­ط°ظپ</button>
         </div>
       </div>
       <div className="grid gap-2 md:grid-cols-2">
         {indicators.map((item, i) => (
           <button key={`${item.key}-${i}`} onClick={() => setSelected(i)} className={`rounded-xl border p-3 text-right text-sm ${selected === i ? "border-brand-700 bg-brand-50" : "border-slate-200"}`}>
             <b>{item.label}</b>
-            <p className="mt-1 text-xs text-slate-500">{item.type === "negative" ? "خصم" : "إضافة"} × {item.weight}</p>
+            <p className="mt-1 text-xs text-slate-500">{item.type === "negative" ? "ط®طµظ…" : "ط¥ط¶ط§ظپط©"} أ— {item.weight}</p>
           </button>
         ))}
       </div>
       {dialog && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
           <div className="panel w-full max-w-md p-6">
-            <div className="mb-5 flex items-center"><h3 className="text-lg font-extrabold">مؤشر</h3><button onClick={() => setDialog(null)} className="mr-auto"><X /></button></div>
+            <div className="mb-5 flex items-center"><h3 className="text-lg font-extrabold">ظ…ط¤ط´ط±</h3><button onClick={() => setDialog(null)} className="mr-auto"><X /></button></div>
             <div className="grid gap-4">
-              <Label t="اسم الحقل البرمجي"><input value={dialog.key} onChange={(e) => setDialog({ ...dialog, key: e.target.value.replace(/\s+/g, "_") })} className="field mt-2" /></Label>
-              <Label t="اسم المؤشر"><input value={dialog.label} onChange={(e) => setDialog({ ...dialog, label: e.target.value })} className="field mt-2" /></Label>
-              <Label t="نوع التأثير"><select value={dialog.type} onChange={(e) => setDialog({ ...dialog, type: e.target.value })} className="field mt-2"><option value="positive">إضافة للنقاط</option><option value="negative">خصم من النقاط</option></select></Label>
-              <Label t="الوزن / معامل الاحتساب"><input type="number" value={dialog.weight} onChange={(e) => setDialog({ ...dialog, weight: e.target.value })} className="field mt-2" /></Label>
+              <Label t="ط§ط³ظ… ط§ظ„ط­ظ‚ظ„ ط§ظ„ط¨ط±ظ…ط¬ظٹ"><input value={dialog.key} onChange={(e) => setDialog({ ...dialog, key: e.target.value.replace(/\s+/g, "_") })} className="field mt-2" /></Label>
+              <Label t="ط§ط³ظ… ط§ظ„ظ…ط¤ط´ط±"><input value={dialog.label} onChange={(e) => setDialog({ ...dialog, label: e.target.value })} className="field mt-2" /></Label>
+              <Label t="ظ†ظˆط¹ ط§ظ„طھط£ط«ظٹط±"><select value={dialog.type} onChange={(e) => setDialog({ ...dialog, type: e.target.value })} className="field mt-2"><option value="positive">ط¥ط¶ط§ظپط© ظ„ظ„ظ†ظ‚ط§ط·</option><option value="negative">ط®طµظ… ظ…ظ† ط§ظ„ظ†ظ‚ط§ط·</option></select></Label>
+              <Label t="ط§ظ„ظˆط²ظ† / ظ…ط¹ط§ظ…ظ„ ط§ظ„ط§ط­طھط³ط§ط¨"><input type="number" value={dialog.weight} onChange={(e) => setDialog({ ...dialog, weight: e.target.value })} className="field mt-2" /></Label>
             </div>
-            <div className="mt-6 flex justify-end gap-2"><button onClick={() => setDialog(null)} className="btn-secondary">إلغاء</button><button onClick={save} className="btn-primary"><Save size={17} /> حفظ</button></div>
+            <div className="mt-6 flex justify-end gap-2"><button onClick={() => setDialog(null)} className="btn-secondary">ط¥ظ„ط؛ط§ط،</button><button onClick={save} className="btn-primary"><Save size={17} /> ط­ظپط¸</button></div>
           </div>
         </div>
       )}
@@ -5942,17 +6156,17 @@ function IndicatorManager({ title, indicators, setIndicators }) {
 function EnhancedProductivity({ employees, settings, setSettings }) {
   const indicators = settings.productivityIndicators || defaultProductivityIndicators;
   const [values, setValues] = useState(() => ({ ...initialIndicatorValues(indicators), receive: 142, pay: 168, sell: 46, buy: 39, errors: 2, complaints: 1, time: 7 }));
-  const list = employees.filter((e) => ["كاشير", "خدمة عملاء وتحويلات واتس", "عمليات مصرفية"].includes(e.job));
+  const list = employees.filter((e) => ["ظƒط§ط´ظٹط±", "ط®ط¯ظ…ط© ط¹ظ…ظ„ط§ط، ظˆطھط­ظˆظٹظ„ط§طھ ظˆط§طھط³", "ط¹ظ…ظ„ظٹط§طھ ظ…طµط±ظپظٹط©"].includes(e.job));
   const setIndicators = (next) => setSettings({ ...settings, productivityIndicators: next });
   const score = scoreIndicators(values, indicators, 0);
   return (
-    <Entry title="مؤشرات الإنتاجية" desc="يمكن إضافة أو تعديل مؤشرات الإنتاجية ومعاملات احتسابها">
-      <Label t="الموظف"><select className="field mt-2 max-w-md">{list.map((e) => <option key={e.id}>{e.name} — {e.job}</option>)}</select></Label>
-      <IndicatorManager title="إدارة مؤشرات الإنتاجية" indicators={indicators} setIndicators={setIndicators} />
+    <Entry title="ظ…ط¤ط´ط±ط§طھ ط§ظ„ط¥ظ†طھط§ط¬ظٹط©" desc="ظٹظ…ظƒظ† ط¥ط¶ط§ظپط© ط£ظˆ طھط¹ط¯ظٹظ„ ظ…ط¤ط´ط±ط§طھ ط§ظ„ط¥ظ†طھط§ط¬ظٹط© ظˆظ…ط¹ط§ظ…ظ„ط§طھ ط§ط­طھط³ط§ط¨ظ‡ط§">
+      <Label t="ط§ظ„ظ…ظˆط¸ظپ"><select className="field mt-2 max-w-md">{list.map((e) => <option key={e.id}>{e.name} â€” {e.job}</option>)}</select></Label>
+      <IndicatorManager title="ط¥ط¯ط§ط±ط© ظ…ط¤ط´ط±ط§طھ ط§ظ„ط¥ظ†طھط§ط¬ظٹط©" indicators={indicators} setIndicators={setIndicators} />
       <ProductivityComparison employees={employees} indicators={indicators} />
       <Fields values={values} set={setValues} items={indicators.map((x) => [x.key, x.label])} />
-      <Score n={score} label="نقاط الإنتاجية" />
-      <button className="btn-primary"><Save size={17} /> حفظ مؤشرات الشهر</button>
+      <Score n={score} label="ظ†ظ‚ط§ط· ط§ظ„ط¥ظ†طھط§ط¬ظٹط©" />
+      <button className="btn-primary"><Save size={17} /> ط­ظپط¸ ظ…ط¤ط´ط±ط§طھ ط§ظ„ط´ظ‡ط±</button>
     </Entry>
   );
 }
@@ -5963,13 +6177,13 @@ function EnhancedDiscipline({ employees, settings, setSettings }) {
   const setIndicators = (next) => setSettings({ ...settings, disciplineIndicators: next });
   const score = scoreIndicators(values, indicators, 100);
   return (
-    <Entry title="الانضباط الوظيفي" desc="يمكن تعديل مؤشرات الانضباط أو إضافة مؤشرات جديدة">
-      <Label t="الموظف"><select className="field mt-2 max-w-md">{employees.map((e) => <option key={e.id}>{e.name}</option>)}</select></Label>
-      <IndicatorManager title="إدارة مؤشرات الانضباط" indicators={indicators} setIndicators={setIndicators} />
+    <Entry title="ط§ظ„ط§ظ†ط¶ط¨ط§ط· ط§ظ„ظˆط¸ظٹظپظٹ" desc="ظٹظ…ظƒظ† طھط¹ط¯ظٹظ„ ظ…ط¤ط´ط±ط§طھ ط§ظ„ط§ظ†ط¶ط¨ط§ط· ط£ظˆ ط¥ط¶ط§ظپط© ظ…ط¤ط´ط±ط§طھ ط¬ط¯ظٹط¯ط©">
+      <Label t="ط§ظ„ظ…ظˆط¸ظپ"><select className="field mt-2 max-w-md">{employees.map((e) => <option key={e.id}>{e.name}</option>)}</select></Label>
+      <IndicatorManager title="ط¥ط¯ط§ط±ط© ظ…ط¤ط´ط±ط§طھ ط§ظ„ط§ظ†ط¶ط¨ط§ط·" indicators={indicators} setIndicators={setIndicators} />
       <Fields values={values} set={setValues} items={indicators.map((x) => [x.key, x.label])} />
-      <Label t="ملاحظات الموارد البشرية"><textarea className="field mt-2 !h-auto py-3" rows="3" /></Label>
-      <Score n={score} label="درجة الانضباط" />
-      <button className="btn-primary"><Save size={17} /> حفظ سجل الانضباط</button>
+      <Label t="ظ…ظ„ط§ط­ط¸ط§طھ ط§ظ„ظ…ظˆط§ط±ط¯ ط§ظ„ط¨ط´ط±ظٹط©"><textarea className="field mt-2 !h-auto py-3" rows="3" /></Label>
+      <Score n={score} label="ط¯ط±ط¬ط© ط§ظ„ط§ظ†ط¶ط¨ط§ط·" />
+      <button className="btn-primary"><Save size={17} /> ط­ظپط¸ ط³ط¬ظ„ ط§ظ„ط§ظ†ط¶ط¨ط§ط·</button>
     </Entry>
   );
 }
@@ -5980,21 +6194,21 @@ function EnhancedIncentives({ employees, evaluations, setEvaluations }) {
     const employee = employees.find((x) => x.id === ev.employeeId) || {};
     const total = effectiveEvaluationTotal(ev);
     const cat = classify(total);
-    const rate = cat === "ممتاز" ? 0.1 : cat === "جيد جدًا" ? 0.07 : cat === "جيد" ? 0.04 : 0;
+    const rate = cat === "ظ…ظ…طھط§ط²" ? 0.1 : cat === "ط¬ظٹط¯ ط¬ط¯ظ‹ط§" ? 0.07 : cat === "ط¬ظٹط¯" ? 0.04 : 0;
     return { ...employee, evaluation: ev, total, rate, amount: (employee.salary || 0) * rate * (total / 100), approval: ev.status };
   });
   return (
     <div className="space-y-5">
-      <PageHead title="الحوافز والمكافآت" desc="احتساب آلي مع عرض تفاصيل أهلية كل موظف" action={<button onClick={() => exportExcel(data, "الحوافز")} className="btn-primary"><Download size={17} /> تصدير الكشف</button>} />
+      <PageHead title="ط§ظ„ط­ظˆط§ظپط² ظˆط§ظ„ظ…ظƒط§ظپط¢طھ" desc="ط§ط­طھط³ط§ط¨ ط¢ظ„ظٹ ظ…ط¹ ط¹ط±ط¶ طھظپط§طµظٹظ„ ط£ظ‡ظ„ظٹط© ظƒظ„ ظ…ظˆط¸ظپ" action={<button onClick={() => exportExcel(data, "ط§ظ„ط­ظˆط§ظپط²")} className="btn-primary"><Download size={17} /> طھطµط¯ظٹط± ط§ظ„ظƒط´ظپ</button>} />
       <div className="grid gap-4 sm:grid-cols-3">
-        <Mini label="إجمالي الحوافز" value={money(data.reduce((s, x) => s + x.amount, 0))} I={CircleDollarSign} />
-        <Mini label="المستحقون" value={data.filter((x) => x.rate > 0).length} I={UserCheck} />
-        <Mini label="بانتظار الاعتماد" value={evaluations.filter((x) => x.status === "قيد المراجعة").length} I={Clock3} />
+        <Mini label="ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ط­ظˆط§ظپط²" value={money(data.reduce((s, x) => s + x.amount, 0))} I={CircleDollarSign} />
+        <Mini label="ط§ظ„ظ…ط³طھط­ظ‚ظˆظ†" value={data.filter((x) => x.rate > 0).length} I={UserCheck} />
+        <Mini label="ط¨ط§ظ†طھط¸ط§ط± ط§ظ„ط§ط¹طھظ…ط§ط¯" value={evaluations.filter((x) => x.status === "ظ‚ظٹط¯ ط§ظ„ظ…ط±ط§ط¬ط¹ط©").length} I={Clock3} />
       </div>
       <div className="panel p-4">
         <div className="table-wrap">
           <table>
-            <thead><tr><th>الموظف</th><th>الفرع</th><th>الوظيفة</th><th>الراتب</th><th>التقييم</th><th>النسبة</th><th>الحافز المقترح</th><th>الاعتماد</th><th>التفاصيل</th></tr></thead>
+            <thead><tr><th>ط§ظ„ظ…ظˆط¸ظپ</th><th>ط§ظ„ظپط±ط¹</th><th>ط§ظ„ظˆط¸ظٹظپط©</th><th>ط§ظ„ط±ط§طھط¨</th><th>ط§ظ„طھظ‚ظٹظٹظ…</th><th>ط§ظ„ظ†ط³ط¨ط©</th><th>ط§ظ„ط­ط§ظپط² ط§ظ„ظ…ظ‚طھط±ط­</th><th>ط§ظ„ط§ط¹طھظ…ط§ط¯</th><th>ط§ظ„طھظپط§طµظٹظ„</th></tr></thead>
             <tbody>
               {data.map((x) => (
                 <tr key={`${x.id}-${x.evaluation?.id}`}>
@@ -6002,10 +6216,10 @@ function EnhancedIncentives({ employees, evaluations, setEvaluations }) {
                   <td><Status>{classify(x.total)}</Status> {x.total}%</td><td>{x.rate * 100}%</td><td className="font-bold text-brand-700">{money(x.amount)}</td>
                   <td>
                     <select value={x.approval} onChange={(e) => setEvaluations((list) => list.map((ev) => ev.id === x.evaluation.id ? { ...ev, status: e.target.value } : ev))} className="field !h-9">
-                      <option>قيد المراجعة</option><option>معتمد</option><option>مرفوض</option>
+                      <option>ظ‚ظٹط¯ ط§ظ„ظ…ط±ط§ط¬ط¹ط©</option><option>ظ…ط¹طھظ…ط¯</option><option>ظ…ط±ظپظˆط¶</option>
                     </select>
                   </td>
-                  <td><button onClick={() => setDetails(x)} className="btn-secondary !h-9"><Eye size={15} /> عرض</button></td>
+                  <td><button onClick={() => setDetails(x)} className="btn-secondary !h-9"><Eye size={15} /> ط¹ط±ط¶</button></td>
                 </tr>
               ))}
             </tbody>
@@ -6015,14 +6229,14 @@ function EnhancedIncentives({ employees, evaluations, setEvaluations }) {
       {details && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
           <div className="panel w-full max-w-2xl p-6">
-            <div className="mb-5 flex items-center"><h3 className="text-lg font-extrabold">تفاصيل استحقاق الحافز</h3><button onClick={() => setDetails(null)} className="mr-auto"><X /></button></div>
+            <div className="mb-5 flex items-center"><h3 className="text-lg font-extrabold">طھظپط§طµظٹظ„ ط§ط³طھط­ظ‚ط§ظ‚ ط§ظ„ط­ط§ظپط²</h3><button onClick={() => setDetails(null)} className="mr-auto"><X /></button></div>
             <div className="grid gap-3 md:grid-cols-2">
-              <Info t="الموظف" v={details.name} /><Info t="الفرع" v={details.branch} /><Info t="الوظيفة" v={details.job} /><Info t="الراتب" v={money(details.salary)} />
-              <Info t="نتيجة التقييم" v={`${details.total}% - ${classify(details.total)}`} /><Info t="نسبة الحافز" v={`${details.rate * 100}%`} />
-              <Info t="معادلة الحافز" v="الراتب × نسبة الحافز × نسبة التقييم" /><Info t="قيمة الحافز" v={money(details.amount)} />
-              <Info t="الشهر" v={details.evaluation?.month || ""} /><Info t="حالة الاعتماد" v={details.approval} />
+              <Info t="ط§ظ„ظ…ظˆط¸ظپ" v={details.name} /><Info t="ط§ظ„ظپط±ط¹" v={details.branch} /><Info t="ط§ظ„ظˆط¸ظٹظپط©" v={details.job} /><Info t="ط§ظ„ط±ط§طھط¨" v={money(details.salary)} />
+              <Info t="ظ†طھظٹط¬ط© ط§ظ„طھظ‚ظٹظٹظ…" v={`${details.total}% - ${classify(details.total)}`} /><Info t="ظ†ط³ط¨ط© ط§ظ„ط­ط§ظپط²" v={`${details.rate * 100}%`} />
+              <Info t="ظ…ط¹ط§ط¯ظ„ط© ط§ظ„ط­ط§ظپط²" v="ط§ظ„ط±ط§طھط¨ أ— ظ†ط³ط¨ط© ط§ظ„ط­ط§ظپط² أ— ظ†ط³ط¨ط© ط§ظ„طھظ‚ظٹظٹظ…" /><Info t="ظ‚ظٹظ…ط© ط§ظ„ط­ط§ظپط²" v={money(details.amount)} />
+              <Info t="ط§ظ„ط´ظ‡ط±" v={details.evaluation?.month || ""} /><Info t="ط­ط§ظ„ط© ط§ظ„ط§ط¹طھظ…ط§ط¯" v={details.approval} />
             </div>
-            <div className="mt-5 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">ملاحظات التقييم: {details.evaluation?.notes || "لا توجد ملاحظات"}</div>
+            <div className="mt-5 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">ظ…ظ„ط§ط­ط¸ط§طھ ط§ظ„طھظ‚ظٹظٹظ…: {details.evaluation?.notes || "ظ„ط§ طھظˆط¬ط¯ ظ…ظ„ط§ط­ط¸ط§طھ"}</div>
           </div>
         </div>
       )}
@@ -6035,10 +6249,10 @@ function PermissionsMatrix({ settings, setSettings }) {
   const roleNames = roles.map((r) => r.name);
   const [role, setRole] = useState(roleNames[0] || "");
   const actions = [
-    ["view", "عرض"],
-    ["add", "إضافة"],
-    ["edit", "تعديل"],
-    ["delete", "حذف"],
+    ["view", "ط¹ط±ط¶"],
+    ["add", "ط¥ط¶ط§ظپط©"],
+    ["edit", "طھط¹ط¯ظٹظ„"],
+    ["delete", "ط­ط°ظپ"],
   ];
   const current = settings.rolePermissions?.[role] || {};
   const setPermission = (pageId, action, checked) =>
@@ -6069,7 +6283,7 @@ function PermissionsMatrix({ settings, setSettings }) {
     <div>
       <div className="mb-5 flex flex-wrap items-end gap-3">
         <div className="min-w-[260px]">
-          <Label t="اختيار الوظيفة / الدور">
+          <Label t="ط§ط®طھظٹط§ط± ط§ظ„ظˆط¸ظٹظپط© / ط§ظ„ط¯ظˆط±">
             <select value={role} onChange={(e) => setRole(e.target.value)} className="field mt-2">
               {roleNames.map((name) => (
                 <option key={name}>{name}</option>
@@ -6078,15 +6292,15 @@ function PermissionsMatrix({ settings, setSettings }) {
           </Label>
         </div>
         <button onClick={() => selectAll(true)} className="btn-primary">
-          <BadgeCheck size={16} /> تحديد الكل
+          <BadgeCheck size={16} /> طھط­ط¯ظٹط¯ ط§ظ„ظƒظ„
         </button>
         <button onClick={() => selectAll(false)} className="btn-secondary">
-          <X size={16} /> إلغاء التحديد
+          <X size={16} /> ط¥ظ„ط؛ط§ط، ط§ظ„طھط­ط¯ظٹط¯
         </button>
       </div>
       <div className="rounded-2xl border border-slate-200">
         <div className="grid grid-cols-[1.4fr_repeat(4,.55fr)] gap-2 border-b bg-slate-50 p-3 text-sm font-extrabold text-slate-600">
-          <span>القائمة / الصفحة</span>
+          <span>ط§ظ„ظ‚ط§ط¦ظ…ط© / ط§ظ„طµظپط­ط©</span>
           {actions.map(([, label]) => (
             <span key={label} className="text-center">{label}</span>
           ))}
@@ -6113,7 +6327,7 @@ function PermissionsMatrix({ settings, setSettings }) {
         </div>
       </div>
       <p className="mt-3 rounded-xl bg-blue-50 p-3 text-xs text-blue-700">
-        تم حفظ الصلاحيات كمصفوفة تفصيلية قابلة للربط لاحقًا بمنع الأزرار والصفحات حسب الدور.
+        طھظ… ط­ظپط¸ ط§ظ„طµظ„ط§ط­ظٹط§طھ ظƒظ…طµظپظˆظپط© طھظپطµظٹظ„ظٹط© ظ‚ط§ط¨ظ„ط© ظ„ظ„ط±ط¨ط· ظ„ط§ط­ظ‚ظ‹ط§ ط¨ظ…ظ†ط¹ ط§ظ„ط£ط²ط±ط§ط± ظˆط§ظ„طµظپط­ط§طھ ط­ط³ط¨ ط§ظ„ط¯ظˆط±.
       </p>
     </div>
   );
@@ -6132,29 +6346,29 @@ function ProductivityComparison({ employees, indicators }) {
     const a = Math.round(55 + ((index * 13) % 38));
     const b = Math.round(50 + ((index * 17 + 9) % 45));
     const change = a ? Math.round(((b - a) / a) * 100) : 0;
-    return { name, الفترة_أ: a, الفترة_ب: b, التغير: change };
+    return { name, period_a: a, period_b: b, change };
   });
   return (
     <div className="rounded-2xl border border-slate-200 p-4">
       <div className="mb-4 flex flex-wrap items-end gap-3">
-        <h3 className="w-full text-lg font-extrabold">مقارنة الإنتاجية بين فترتين</h3>
-        <Label t="الفترة أ من"><input type="date" value={range.aFrom} onChange={(e) => setRange({ ...range, aFrom: e.target.value })} className="field mt-2" /></Label>
-        <Label t="الفترة أ إلى"><input type="date" value={range.aTo} onChange={(e) => setRange({ ...range, aTo: e.target.value })} className="field mt-2" /></Label>
-        <Label t="الفترة ب من"><input type="date" value={range.bFrom} onChange={(e) => setRange({ ...range, bFrom: e.target.value })} className="field mt-2" /></Label>
-        <Label t="الفترة ب إلى"><input type="date" value={range.bTo} onChange={(e) => setRange({ ...range, bTo: e.target.value })} className="field mt-2" /></Label>
-        <Label t="نطاق المقارنة"><select value={range.scope} onChange={(e) => setRange({ ...range, scope: e.target.value })} className="field mt-2"><option value="employee">الموظف</option><option value="branch">الفرع</option></select></Label>
+        <h3 className="w-full text-lg font-extrabold">ظ…ظ‚ط§ط±ظ†ط© ط§ظ„ط¥ظ†طھط§ط¬ظٹط© ط¨ظٹظ† ظپطھط±طھظٹظ†</h3>
+        <Label t="ط§ظ„ظپطھط±ط© ط£ ظ…ظ†"><input type="date" value={range.aFrom} onChange={(e) => setRange({ ...range, aFrom: e.target.value })} className="field mt-2" /></Label>
+        <Label t="ط§ظ„ظپطھط±ط© ط£ ط¥ظ„ظ‰"><input type="date" value={range.aTo} onChange={(e) => setRange({ ...range, aTo: e.target.value })} className="field mt-2" /></Label>
+        <Label t="ط§ظ„ظپطھط±ط© ط¨ ظ…ظ†"><input type="date" value={range.bFrom} onChange={(e) => setRange({ ...range, bFrom: e.target.value })} className="field mt-2" /></Label>
+        <Label t="ط§ظ„ظپطھط±ط© ط¨ ط¥ظ„ظ‰"><input type="date" value={range.bTo} onChange={(e) => setRange({ ...range, bTo: e.target.value })} className="field mt-2" /></Label>
+        <Label t="ظ†ط·ط§ظ‚ ط§ظ„ظ…ظ‚ط§ط±ظ†ط©"><select value={range.scope} onChange={(e) => setRange({ ...range, scope: e.target.value })} className="field mt-2"><option value="employee">ط§ظ„ظ…ظˆط¸ظپ</option><option value="branch">ط§ظ„ظپط±ط¹</option></select></Label>
       </div>
       <div className="grid gap-4 xl:grid-cols-[1fr_1.1fr]">
         <div className="table-wrap">
           <table>
-            <thead><tr><th>{range.scope === "branch" ? "الفرع" : "الموظف"}</th><th>الفترة أ</th><th>الفترة ب</th><th>نسبة التغير</th></tr></thead>
+            <thead><tr><th>{range.scope === "branch" ? "ط§ظ„ظپط±ط¹" : "ط§ظ„ظ…ظˆط¸ظپ"}</th><th>ط§ظ„ظپطھط±ط© ط£</th><th>ط§ظ„ظپطھط±ط© ط¨</th><th>ظ†ط³ط¨ط© ط§ظ„طھط؛ظٹط±</th></tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.name}>
                   <td className="font-bold">{r.name}</td>
-                  <td>{r.الفترة_أ}</td>
-                  <td>{r.الفترة_ب}</td>
-                  <td className={r.التغير >= 0 ? "font-bold text-emerald-600" : "font-bold text-red-600"}>{r.التغير}%</td>
+                  <td>{r.period_a}</td>
+                  <td>{r.period_b}</td>
+                  <td className={r.change >= 0 ? "font-bold text-emerald-600" : "font-bold text-red-600"}>{r.change}%</td>
                 </tr>
               ))}
             </tbody>
@@ -6166,8 +6380,8 @@ function ProductivityComparison({ employees, indicators }) {
             <XAxis dataKey="name" tick={{ fontSize: 10 }} />
             <YAxis />
             <Tooltip />
-            <Bar dataKey="الفترة_أ" fill="#94a3b8" radius={[6, 6, 0, 0]} />
-            <Bar dataKey="الفترة_ب" fill="#7f1d1d" radius={[6, 6, 0, 0]} />
+            <Bar dataKey="period_a" fill="#94a3b8" radius={[6, 6, 0, 0]} />
+            <Bar dataKey="period_b" fill="#7f1d1d" radius={[6, 6, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -6285,31 +6499,31 @@ function Info({ t, v }) {
 function exportExcel(data, name) {
   const ws = XLSX.utils.json_to_sheet(data),
     wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "البيانات");
+  XLSX.utils.book_append_sheet(wb, ws, "ط§ظ„ط¨ظٹط§ظ†ط§طھ");
   XLSX.writeFile(wb, `${name}.xlsx`);
 }
 const employeeImportHeaderMap = {
-  "رقم الموظف": "id",
+  "ط±ظ‚ظ… ط§ظ„ظ…ظˆط¸ظپ": "id",
   employee_id: "id",
   id: "id",
-  "اسم الموظف": "name",
+  "ط§ط³ظ… ط§ظ„ظ…ظˆط¸ظپ": "name",
   employee_name: "name",
   name: "name",
-  "الفرع": "branch",
+  "ط§ظ„ظپط±ط¹": "branch",
   branch: "branch",
-  "الوظيفة": "job",
+  "ط§ظ„ظˆط¸ظٹظپط©": "job",
   job: "job",
-  "تاريخ التعيين": "hire_date",
+  "طھط§ط±ظٹط® ط§ظ„طھط¹ظٹظٹظ†": "hire_date",
   hire_date: "hire_date",
   hiredate: "hire_date",
   hireDate: "hire_date",
-  "الراتب": "salary",
+  "ط§ظ„ط±ط§طھط¨": "salary",
   salary: "salary",
-  "رقم الهاتف": "phone",
+  "ط±ظ‚ظ… ط§ظ„ظ‡ط§طھظپ": "phone",
   phone: "phone",
-  "الحالة": "status",
+  "ط§ظ„ط­ط§ظ„ط©": "status",
   status: "status",
-  "المدير المباشر": "manager",
+  "ط§ظ„ظ…ط¯ظٹط± ط§ظ„ظ…ط¨ط§ط´ط±": "manager",
   manager: "manager",
 };
 const normalizeEmployeeImportKey = (key) => String(key || "").trim().replace(/\s+/g, " ");
@@ -6333,7 +6547,7 @@ function normalizeEmployeeImportRow(row) {
     hire_date: "",
     salary: 0,
     phone: "",
-    status: "نشط",
+    status: "ظ†ط´ط·",
     manager: "",
   };
   Object.entries(row || {}).forEach(([key, value]) => {
@@ -6369,7 +6583,7 @@ function importEmployees(event, setEmployees) {
         })
         .map(({ row }) => row);
       if (invalidRows.length) {
-        alert(`لم يتم استيراد بعض الصفوف لأن رقم الموظف واسم الموظف مطلوبان.\nالصفوف غير الصالحة: ${invalidRows.join(", ")}`);
+        alert(`ظ„ظ… ظٹطھظ… ط§ط³طھظٹط±ط§ط¯ ط¨ط¹ط¶ ط§ظ„طµظپظˆظپ ظ„ط£ظ† ط±ظ‚ظ… ط§ظ„ظ…ظˆط¸ظپ ظˆط§ط³ظ… ط§ظ„ظ…ظˆط¸ظپ ظ…ط·ظ„ظˆط¨ط§ظ†.\nط§ظ„طµظپظˆظپ ط؛ظٹط± ط§ظ„طµط§ظ„ط­ط©: ${invalidRows.join(", ")}`);
       }
       if (!normalizedRows.length) return;
       const dbRows = normalizedRows.map(normalizeEmployeeForDb).filter((row) => row.id && row.name);
@@ -6387,7 +6601,7 @@ function importEmployees(event, setEmployees) {
         hireDate: row.hire_date || "",
         salary: Number(row.salary || 0),
         phone: row.phone || "",
-        status: row.status || "نشط",
+        status: row.status || "ظ†ط´ط·",
         manager: row.manager || "",
       }));
       setEmployees((list) => {
@@ -6395,13 +6609,14 @@ function importEmployees(event, setEmployees) {
         importedEmployees.forEach((employee) => byId.set(employee.id, employee));
         return Array.from(byId.values());
       });
-      alert(`تم استيراد ${importedEmployees.length} موظف/موظفة بنجاح`);
+      alert(`طھظ… ط§ط³طھظٹط±ط§ط¯ ${importedEmployees.length} ظ…ظˆط¸ظپ/ظ…ظˆط¸ظپط© ط¨ظ†ط¬ط§ط­`);
     } catch (error) {
       console.error("Supabase employees load/save error:", error);
-      alert(error.message || "تعذر استيراد ملف الموظفين");
+      alert(error.message || "طھط¹ط°ط± ط§ط³طھظٹط±ط§ط¯ ظ…ظ„ظپ ط§ظ„ظ…ظˆط¸ظپظٹظ†");
     } finally {
       event.target.value = "";
     }
   };
   r.readAsArrayBuffer(f);
 }
+

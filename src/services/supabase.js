@@ -1,3 +1,5 @@
+import { getCurrentCompanyId, isPlatformAdmin, tenantAwareTables, withCompanyId } from "./tenant";
+
 const getConfig = () => ({
   url: import.meta.env.VITE_SUPABASE_URL,
   anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
@@ -21,11 +23,36 @@ const headers = (prefer) => {
   };
 };
 
+const tableFromRestPath = (path = "") => {
+  const match = String(path).match(/^\/rest\/v1\/([^?/]+)/);
+  return match ? decodeURIComponent(match[1]) : "";
+};
+
+const shouldScopeTable = (table) => table && tenantAwareTables.has(table) && getCurrentCompanyId() && !isPlatformAdmin();
+
+const appendTenantFilterToPath = (path = "", method = "GET") => {
+  const table = tableFromRestPath(path);
+  if (!["GET", "DELETE", "PATCH"].includes(String(method || "GET").toUpperCase())) return path;
+  if (!shouldScopeTable(table) || String(path).includes("company_id=")) return path;
+  const joiner = path.includes("?") ? "&" : "?";
+  return `${path}${joiner}company_id=eq.${encodeURIComponent(getCurrentCompanyId())}`;
+};
+
+const addTenantToRows = (table, rows) => {
+  if (!shouldScopeTable(table)) return rows;
+  const list = Array.isArray(rows) ? rows : [rows];
+  return list.map((row) => {
+    if (!row || typeof row !== "object") return row;
+    return row.company_id ? row : withCompanyId(row);
+  });
+};
+
 export const supabase = {
   config: getConfig,
   async request(path, options = {}) {
     const { url } = assertConfig();
-    const res = await fetch(`${url}${path}`, {
+    const scopedPath = appendTenantFilterToPath(path, options.method || "GET");
+    const res = await fetch(`${url}${scopedPath}`, {
       ...options,
       headers: { ...headers(options.prefer), ...(options.headers || {}) },
     });
@@ -41,17 +68,18 @@ export const supabase = {
   },
   upsert(table, rows, options = {}) {
     const query = options.onConflict ? `?on_conflict=${encodeURIComponent(options.onConflict)}` : "";
+    const scopedRows = addTenantToRows(table, rows);
     return this.request(`/rest/v1/${table}${query}`, {
       method: "POST",
       prefer: "resolution=merge-duplicates,return=representation",
-      body: JSON.stringify(Array.isArray(rows) ? rows : [rows]),
+      body: JSON.stringify(Array.isArray(scopedRows) ? scopedRows : [scopedRows]),
     });
   },
   from(table) {
     const client = this;
     return {
       upsert(payload, options = {}) {
-        const rows = Array.isArray(payload) ? payload : [payload];
+        const rows = addTenantToRows(table, payload);
         const query = options.onConflict ? `?on_conflict=${encodeURIComponent(options.onConflict)}` : "";
         const execute = async () => {
           try {
