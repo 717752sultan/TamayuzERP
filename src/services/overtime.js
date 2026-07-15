@@ -1,4 +1,16 @@
+import { getCurrentCompanyId } from "./tenant";
 import { supabase } from "./supabase";
+
+export const calculateOvertimeHours = (startTime, endTime) => {
+  if (!startTime || !endTime) return 0;
+  const [sh, sm] = String(startTime).split(":").map(Number);
+  const [eh, em] = String(endTime).split(":").map(Number);
+  if ([sh, sm, eh, em].some((value) => Number.isNaN(value))) return 0;
+  let start = sh * 60 + sm;
+  let end = eh * 60 + em;
+  if (end <= start) end += 24 * 60;
+  return Number(((end - start) / 60).toFixed(2));
+};
 
 const normalizeAssignmentForDb = (item = {}) => ({
   assignment_id: String(item.assignment_id || item.assignmentId || `OT-${Date.now()}`).trim(),
@@ -40,6 +52,7 @@ const assignmentFromDb = (row = {}) => ({
   location: row.location || "",
   start_time: row.start_time || "",
   end_time: row.end_time || "",
+  total_hours: Number(row.total_hours || calculateOvertimeHours(row.start_time, row.end_time)),
   reason: row.reason || "",
   notes: row.notes || "",
   approval_status: row.approval_status || "مسودة",
@@ -64,29 +77,52 @@ const assignmentEmployeeFromDb = (row = {}) => ({
   whatsapp_message: row.whatsapp_message || "",
   sent_at: row.sent_at || "",
   created_at: row.created_at || "",
+  updated_at: row.updated_at || "",
 });
 
+const requireCurrentCompany = () => {
+  const companyId = getCurrentCompanyId();
+  if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
+  return companyId;
+};
+
 export const overtimeService = {
+  calculateOvertimeHours,
+
+  async loadOvertimeAssignments(_companyId, filters = {}) {
+    const rows = await this.listAssignments();
+    return rows.filter((row) =>
+      (!filters.date || row.assignment_date === filters.date) &&
+      (!filters.month || String(row.assignment_date || "").startsWith(filters.month)) &&
+      (!filters.branch || filters.branch === "all" || row.branch === filters.branch),
+    );
+  },
+
   async listAssignments() {
     try {
+      requireCurrentCompany();
       const rows = await supabase.select("overtime_assignments", "select=*&order=assignment_date.desc");
       return (rows || []).map(assignmentFromDb);
     } catch (error) {
-      console.error("Supabase overtime_assignments load/save error:", error);
-      throw new Error("فشل تحميل تكليفات العمل الإضافي من Supabase: " + error.message);
+      console.error("Overtime assignment error:", error);
+      throw new Error("تعذر تحميل تكليفات العمل الإضافي");
     }
   },
+
   async listAssignmentEmployees() {
     try {
+      requireCurrentCompany();
       const rows = await supabase.select("overtime_assignment_employees", "select=*&order=created_at.desc");
       return (rows || []).map(assignmentEmployeeFromDb);
     } catch (error) {
-      console.error("Supabase overtime_assignment_employees load/save error:", error);
-      throw new Error("فشل تحميل موظفي العمل الإضافي من Supabase: " + error.message);
+      console.error("Overtime assignment error:", error);
+      throw new Error("تعذر تحميل موظفي تكليفات العمل الإضافي");
     }
   },
-  async createAssignment(assignment, employees) {
+
+  async createAssignment(assignment, employees = []) {
     try {
+      requireCurrentCompany();
       const savedAssignmentPayload = normalizeAssignmentForDb(assignment);
       const { data: savedAssignment, error: assignmentError } = await supabase
         .from("overtime_assignments")
@@ -94,6 +130,7 @@ export const overtimeService = {
         .select()
         .single();
       if (assignmentError) throw assignmentError;
+
       const employeeRows = employees.map((employee) =>
         normalizeAssignmentEmployeeForDb({
           ...employee,
@@ -110,12 +147,35 @@ export const overtimeService = {
         employees: (savedEmployees || []).map(assignmentEmployeeFromDb),
       };
     } catch (error) {
-      console.error("Supabase overtime_assignments load/save error:", error);
-      throw new Error("فشل حفظ تكليف العمل الإضافي في Supabase: " + error.message);
+      console.error("Overtime assignment error:", error);
+      throw new Error(error.message || "تعذر حفظ تكليف العمل الإضافي");
     }
   },
+
+  async createOvertimeAssignment(payload) {
+    return this.createAssignment(payload, payload.employees || []);
+  },
+
+  async updateOvertimeAssignment(id, payload) {
+    try {
+      requireCurrentCompany();
+      const row = normalizeAssignmentForDb({ ...payload, assignment_id: id || payload.assignment_id });
+      const { data, error } = await supabase
+        .from("overtime_assignments")
+        .upsert(row, { onConflict: "assignment_id" })
+        .select()
+        .single();
+      if (error) throw error;
+      return assignmentFromDb(data);
+    } catch (error) {
+      console.error("Overtime assignment error:", error);
+      throw new Error(error.message || "تعذر تحديث تكليف العمل الإضافي");
+    }
+  },
+
   async updateAssignmentEmployee(row) {
     try {
+      requireCurrentCompany();
       const payload = normalizeAssignmentEmployeeForDb(row);
       const { data, error } = await supabase
         .from("overtime_assignment_employees")
@@ -125,12 +185,39 @@ export const overtimeService = {
       if (error) throw error;
       return assignmentEmployeeFromDb(data);
     } catch (error) {
-      console.error("Supabase overtime_assignment_employees load/save error:", error);
-      throw new Error("فشل تحديث حالة موظف العمل الإضافي في Supabase: " + error.message);
+      console.error("Overtime assignment error:", error);
+      throw new Error(error.message || "تعذر تحديث بيانات موظف العمل الإضافي");
     }
   },
+
+  async updateOvertimeAssignmentEmployee(row) {
+    return this.updateAssignmentEmployee(row);
+  },
+
+  async cancelOvertimeAssignmentEmployee(id) {
+    return this.updateAssignmentEmployee({ id, status: "ملغي" });
+  },
+
+  async cancelOvertimeAssignment(id) {
+    return this.updateOvertimeAssignment(id, { assignment_id: id, approval_status: "ملغي" });
+  },
+
+  async deleteOvertimeAssignment(id) {
+    try {
+      requireCurrentCompany();
+      return await supabase.request(`/rest/v1/overtime_assignment_employees?id=eq.${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        prefer: "return=minimal",
+      });
+    } catch (error) {
+      console.error("Overtime assignment error:", error);
+      throw new Error(error.message || "تعذر حذف موظف من تكليف العمل الإضافي");
+    }
+  },
+
   async removeAssignment(id) {
     try {
+      requireCurrentCompany();
       await supabase.request(`/rest/v1/overtime_assignment_employees?assignment_id=eq.${encodeURIComponent(id)}`, {
         method: "DELETE",
         prefer: "return=minimal",
@@ -140,13 +227,15 @@ export const overtimeService = {
         prefer: "return=minimal",
       });
     } catch (error) {
-      console.error("Supabase overtime_assignments load/save error:", error);
-      throw new Error("فشل حذف تكليف العمل الإضافي من Supabase: " + error.message);
+      console.error("Overtime assignment error:", error);
+      throw new Error("تعذر حذف تكليف العمل الإضافي");
     }
   },
+
   subscribeAssignments(onChange) {
     return supabase.subscribeToTable("overtime_assignments", onChange);
   },
+
   subscribeAssignmentEmployees(onChange) {
     return supabase.subscribeToTable("overtime_assignment_employees", onChange);
   },

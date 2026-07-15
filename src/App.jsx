@@ -4153,13 +4153,18 @@ const tableColumnsGuarantees = [
   { key: "guarantee_status", label: "الحالة" },
 ];
 const tableColumnsOvertime = [
-  { key: "assignment_date", label: "التاريخ" },
-  { key: "employee_name", label: "الموظف" },
+  { key: "assignment_id", label: "رقم التكليف" },
+  { key: "employee_name", label: "اسم الموظف" },
+  { key: "employee_id", label: "الرقم الوظيفي" },
   { key: "branch", label: "الفرع" },
   { key: "job", label: "الوظيفة" },
-  { key: "start_time", label: "من" },
-  { key: "end_time", label: "إلى" },
+  { key: "assignment_date", label: "تاريخ التكليف" },
+  { key: "start_time", label: "وقت البداية" },
+  { key: "end_time", label: "وقت النهاية" },
+  { key: "total_hours", label: "عدد الساعات" },
+  { key: "reason", label: "سبب التكليف" },
   { key: "status", label: "الحالة" },
+  { key: "approved_by", label: "المعتمد" },
 ];
 
 function EmployeeGuaranteesPage({ employees = [], currentUser, currentCompany, can }) {
@@ -4372,24 +4377,40 @@ function EmployeeGuaranteesPage({ employees = [], currentUser, currentCompany, c
   );
 }
 
-function OvertimePage({ employees, role, currentUser, can }) {
+function OvertimePage({ employees = [], role, currentUser, currentCompany, can }) {
   const [assignments, setAssignments] = useState([]);
   const [assignmentEmployees, setAssignmentEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState(null);
+  const [editRow, setEditRow] = useState(null);
+  const [viewing, setViewing] = useState(null);
   const [filters, setFilters] = useState({ date: "", branch: "all", employee: "", status: "all", month: "" });
+  const safeEmployees = Array.isArray(employees) ? employees : [];
+  const safeAssignments = Array.isArray(assignments) ? assignments : [];
+  const safeAssignmentEmployees = Array.isArray(assignmentEmployees) ? assignmentEmployees : [];
+  const companyId = currentCompany?.company_id || currentUser?.company_id || null;
+  const canView = can?.("overtime", "can_view") !== false;
   const canCreate = can?.("overtime", "can_create") !== false;
   const canEdit = can?.("overtime", "can_edit") !== false;
+  const canDelete = can?.("overtime", "can_delete") !== false;
+  const canApprove = can?.("overtime", "can_approve") !== false;
   const load = async () => {
     setLoading(true);
     setError("");
     try {
+      if (!companyId) {
+        setAssignments([]);
+        setAssignmentEmployees([]);
+        setError("لم يتم تحديد الشركة الحالية");
+        return;
+      }
       const [a, ae] = await Promise.all([overtimeService.listAssignments(), overtimeService.listAssignmentEmployees()]);
       setAssignments(a);
       setAssignmentEmployees(ae);
     } catch (e) {
-      setError(e.message);
+      console.error("Overtime assignment error:", e);
+      setError(e.message || "تعذر تحميل تكليفات العمل الإضافي");
     } finally {
       setLoading(false);
     }
@@ -4399,8 +4420,12 @@ function OvertimePage({ employees, role, currentUser, can }) {
     const u1 = overtimeService.subscribeAssignments(load);
     const u2 = overtimeService.subscribeAssignmentEmployees(load);
     return () => { u1?.(); u2?.(); };
-  }, []);
-  const joinedRows = assignmentEmployees.map((row) => ({ ...assignments.find((a) => a.assignment_id === row.assignment_id), ...row }));
+  }, [companyId]);
+  if (!canView) return <div className="panel p-8 text-center font-bold text-slate-500">لا تملك صلاحية إدارة تكليف العمل الإضافي</div>;
+  const joinedRows = safeAssignmentEmployees.map((row) => {
+    const assignment = safeAssignments.find((a) => a.assignment_id === row.assignment_id) || {};
+    return { ...assignment, ...row, total_hours: assignment.total_hours || overtimeService.calculateOvertimeHours(assignment.start_time, assignment.end_time) };
+  });
   const visibleRows = joinedRows.filter((r) => {
     if (role === "الموظف" && currentUser?.employeeId && r.employee_id !== currentUser.employeeId) return false;
     if (role === "مدير الفرع" && currentUser?.branch && r.branch !== currentUser.branch) return false;
@@ -4409,19 +4434,14 @@ function OvertimePage({ employees, role, currentUser, can }) {
   const filtered = visibleRows.filter((r) =>
     (!filters.date || r.assignment_date === filters.date) &&
     (filters.branch === "all" || r.branch === filters.branch) &&
-    (!filters.employee || r.employee_name.includes(filters.employee) || r.employee_id.includes(filters.employee)) &&
+      (!filters.employee || String(r.employee_name || "").includes(filters.employee) || String(r.employee_id || "").includes(filters.employee)) &&
     (filters.status === "all" || r.status === filters.status) &&
     (!filters.month || String(r.assignment_date || "").startsWith(filters.month))
   );
-  const hours = (row) => {
-    if (!row.start_time || !row.end_time) return 0;
-    const [sh, sm] = row.start_time.split(":").map(Number);
-    const [eh, em] = row.end_time.split(":").map(Number);
-    return Math.max(0, (eh * 60 + em - (sh * 60 + sm)) / 60);
-  };
+  const hours = (row) => overtimeService.calculateOvertimeHours(row.start_time, row.end_time);
   const cards = [
-    ["إجمالي تكليفات العمل الإضافي", assignments.length, Clock3],
-    ["عدد الموظفين المكلفين", assignmentEmployees.length, Users],
+    ["إجمالي تكليفات العمل الإضافي", safeAssignments.length, Clock3],
+    ["عدد الموظفين المكلفين", safeAssignmentEmployees.length, Users],
     ["عدد ساعات العمل الإضافي", filtered.reduce((s, r) => s + hours(r), 0).toFixed(1), Gauge],
     ["تكليفات حسب الفرع", Object.keys(groupCount(filtered, "branch")).length, Building2],
     ["تكليفات حسب الشهر", Object.keys(groupCount(filtered, "assignment_date")).length, CalendarCheck],
@@ -4432,13 +4452,16 @@ function OvertimePage({ employees, role, currentUser, can }) {
   };
   const selectedEmployees = () => {
     if (!dialog) return [];
-    if (dialog.mode === "branch") return employees.filter((e) => e.branch === dialog.branch);
-    if (dialog.mode === "job") return employees.filter((e) => e.job === dialog.job);
-    return employees.filter((e) => dialog.selected.includes(e.id));
+    if (dialog.mode === "branch") return safeEmployees.filter((e) => e.branch === dialog.branch);
+    if (dialog.mode === "job") return safeEmployees.filter((e) => e.job === dialog.job);
+    return safeEmployees.filter((e) => dialog.selected.includes(e.id));
   };
   const create = async (event) => {
     event.preventDefault();
     if (!canCreate) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!dialog.start_time) return alert("يجب إدخال وقت البداية");
+    if (!dialog.end_time) return alert("يجب إدخال وقت النهاية");
+    if (overtimeService.calculateOvertimeHours(dialog.start_time, dialog.end_time) <= 0) return alert("عدد الساعات يجب أن يكون أكبر من صفر");
     const selected = selectedEmployees();
     if (!selected.length) return alert("يرجى اختيار موظف واحد على الأقل.");
     const employeeRows = selected.map((e) => ({
@@ -4488,6 +4511,82 @@ function OvertimePage({ employees, role, currentUser, can }) {
       alert(e.message);
     }
   };
+  const openEditRow = (row) => {
+    if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    setEditRow({
+      ...row,
+      total_hours: row.total_hours || hours(row),
+      notes: row.notes || "",
+    });
+  };
+  const pickEditEmployee = (employeeId) => {
+    const employee = safeEmployees.find((item) => item.id === employeeId);
+    setEditRow((row) => ({
+      ...row,
+      employee_id: employeeId,
+      employee_name: employee?.name || row?.employee_name || "",
+      employee_phone: employee?.phone || row?.employee_phone || "",
+      branch: employee?.branch || row?.branch || "",
+      job: employee?.job || row?.job || "",
+    }));
+  };
+  const updateEditTime = (patch) => {
+    setEditRow((row) => {
+      const next = { ...row, ...patch };
+      return { ...next, total_hours: overtimeService.calculateOvertimeHours(next.start_time, next.end_time) };
+    });
+  };
+  const saveEditRow = async (event) => {
+    event.preventDefault();
+    if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!editRow.employee_id) return alert("يجب تحديد الموظف");
+    if (!editRow.start_time) return alert("يجب إدخال وقت البداية");
+    if (!editRow.end_time) return alert("يجب إدخال وقت النهاية");
+    if (overtimeService.calculateOvertimeHours(editRow.start_time, editRow.end_time) <= 0) return alert("عدد الساعات يجب أن يكون أكبر من صفر");
+    try {
+      const oldRow = joinedRows.find((row) => row.id === editRow.id) || null;
+      const savedAssignment = await overtimeService.updateOvertimeAssignment(editRow.assignment_id, editRow);
+      const savedEmployee = await overtimeService.updateAssignmentEmployee({
+        ...editRow,
+        whatsapp_message: editRow.whatsapp_message || makeOvertimeMessage(editRow, editRow),
+      });
+      auditService.log({
+        company_id: companyId,
+        user_id: currentUser?.user_id || currentUser?.username,
+        user_name: currentUser?.username || currentUser?.name,
+        action: "تعديل موظف تكليف عمل إضافي",
+        module_name: "overtime_assignments",
+        record_id: savedEmployee.id,
+        old_data: oldRow,
+        new_data: { ...savedAssignment, ...savedEmployee },
+      }).catch((error) => console.error("Supabase audit_logs load/save error:", error));
+      setAssignments((list) => upsertLocal(list, savedAssignment, "assignment_id"));
+      setAssignmentEmployees((list) => upsertLocal(list, savedEmployee, "id"));
+      setEditRow(null);
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+  const removeEmployeeFromAssignment = async (row) => {
+    if (!canDelete) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!confirm("هل أنت متأكد من حذف هذا الموظف من تكليف العمل الإضافي؟")) return;
+    try {
+      const canceled = await overtimeService.updateAssignmentEmployee({ ...row, status: "ملغي" });
+      auditService.log({
+        company_id: companyId,
+        user_id: currentUser?.user_id || currentUser?.username,
+        user_name: currentUser?.username || currentUser?.name,
+        action: "حذف/إلغاء موظف من تكليف عمل إضافي",
+        module_name: "overtime_assignments",
+        record_id: row.id,
+        old_data: row,
+        new_data: canceled,
+      }).catch((error) => console.error("Supabase audit_logs load/save error:", error));
+      setAssignmentEmployees((list) => list.map((item) => (item.id === canceled.id ? canceled : item)));
+    } catch (error) {
+      alert(error.message);
+    }
+  };
   const copy = async (text) => {
     await navigator.clipboard?.writeText(text);
     alert("تم نسخ الرسالة");
@@ -4499,7 +4598,7 @@ function OvertimePage({ employees, role, currentUser, can }) {
   const exportRows = reportRowsForExport(filtered, tableColumnsOvertime);
   return (
     <div className="space-y-5">
-      <PageHead title="العمل الإضافي" desc="إنشاء تكليفات العمل الإضافي وتوليد رسائل واتساب للموظفين" action={<button onClick={startCreate} className="btn-primary"><Plus size={18} /> تكليف جديد</button>} />
+      <PageHead title="العمل الإضافي" desc="إنشاء تكليفات العمل الإضافي وتوليد رسائل واتساب للموظفين" action={<button disabled={!canCreate} onClick={startCreate} className="btn-primary"><Plus size={18} /> إضافة موظف للتكليف</button>} />
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">{cards.map(([label, value, I]) => <Mini key={label} label={label} value={value} I={I} />)}</div>
       <div className="panel flex flex-wrap gap-3 p-4">
@@ -4514,7 +4613,7 @@ function OvertimePage({ employees, role, currentUser, can }) {
       </div>
       <div className="panel p-4">
         {loading ? <LoadingScreen message="جاري تحميل تكليفات العمل الإضافي..." /> : (
-          <div className="table-wrap"><table><thead><tr>{tableColumnsOvertime.map((c) => <th key={c.key}>{c.label}</th>)}<th>واتساب</th><th>تحديث</th></tr></thead><tbody>{filtered.map((r) => <tr key={r.id}><td>{r.assignment_date}</td><td>{r.employee_name}</td><td>{r.branch}</td><td>{r.job}</td><td>{r.start_time}</td><td>{r.end_time}</td><td><Status>{r.status}</Status></td><td><button onClick={() => copy(r.whatsapp_message || makeOvertimeMessage(r, r))} className="btn-secondary !h-9 !px-3">نسخ الرسالة</button><button onClick={() => openWhatsApp(r)} className="btn-secondary !h-9 !px-3">فتح واتساب</button></td><td><select value={r.status} onChange={(e) => updateStatus(r, e.target.value)} className="field h-9">{overtimeStatuses.map((s) => <option key={s}>{s}</option>)}</select></td></tr>)}</tbody></table></div>
+          <div className="table-wrap"><table><thead><tr>{tableColumnsOvertime.map((c) => <th key={c.key}>{c.label}</th>)}<th>واتساب</th><th>الإجراءات</th></tr></thead><tbody>{filtered.length ? filtered.map((r) => <tr key={r.id}><td>{r.assignment_id}</td><td>{r.employee_name}</td><td>{r.employee_id}</td><td>{r.branch}</td><td>{r.job}</td><td>{r.assignment_date}</td><td>{r.start_time}</td><td>{r.end_time}</td><td>{hours(r)}</td><td>{r.reason}</td><td><Status>{r.status}</Status></td><td>{r.approved_by || r.approval_status || "—"}</td><td><button onClick={() => copy(r.whatsapp_message || makeOvertimeMessage(r, r))} className="btn-secondary !h-9 !px-3">نسخ</button><button onClick={() => openWhatsApp(r)} className="btn-secondary !h-9 !px-3">واتساب</button></td><td><button onClick={() => setViewing(r)} className="p-2 text-slate-600" title="عرض"><Eye size={16} /></button>{canEdit && <button onClick={() => openEditRow(r)} className="p-2 text-blue-600" title="تعديل"><Pencil size={16} /></button>}{canDelete && <button onClick={() => removeEmployeeFromAssignment(r)} className="p-2 text-red-600" title="حذف"><Trash2 size={16} /></button>}<select disabled={!canEdit && !canApprove} value={r.status} onChange={(e) => updateStatus(r, e.target.value)} className="field mt-1 h-9 min-w-[110px]">{overtimeStatuses.map((s) => <option key={s}>{s}</option>)}</select></td></tr>) : <tr><td colSpan={14} className="py-8 text-center text-slate-400">لا توجد تكليفات عمل إضافي حالياً</td></tr>}</tbody></table></div>
         )}
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -4538,12 +4637,50 @@ function OvertimePage({ employees, role, currentUser, can }) {
               {dialog.mode === "job" && <Label t="الوظيفة"><select value={dialog.job || jobs[0]} onChange={(e) => setDialog({ ...dialog, job: e.target.value })} className="field mt-2">{jobs.map((j) => <option key={j}>{j}</option>)}</select></Label>}
               <Label t="ملاحظات"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" rows="3" /></Label>
             </div>
-            {dialog.mode === "manual" && <div className="mt-5 grid max-h-56 gap-2 overflow-y-auto rounded-2xl border p-3 md:grid-cols-2">{employees.map((e) => <label key={e.id} className="flex items-center gap-2 rounded-xl bg-slate-50 p-2 text-sm"><input type="checkbox" checked={dialog.selected.includes(e.id)} onChange={(ev) => setDialog({ ...dialog, selected: ev.target.checked ? [...dialog.selected, e.id] : dialog.selected.filter((id) => id !== e.id) })} />{e.name} - {e.branch}</label>)}</div>}
+            {dialog.mode === "manual" && <div className="mt-5 grid max-h-56 gap-2 overflow-y-auto rounded-2xl border p-3 md:grid-cols-2">{safeEmployees.map((e) => <label key={e.id} className="flex items-center gap-2 rounded-xl bg-slate-50 p-2 text-sm"><input type="checkbox" checked={dialog.selected.includes(e.id)} onChange={(ev) => setDialog({ ...dialog, selected: ev.target.checked ? [...dialog.selected, e.id] : dialog.selected.filter((id) => id !== e.id) })} />{e.name} - {e.branch}</label>)}</div>}
             <p className="mt-4 rounded-xl bg-blue-50 p-3 text-sm font-bold text-blue-700">عدد الموظفين المختارين: {selectedEmployees().length}</p>
             <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ التكليف</button></div>
           </form>
         </div>
       )}
+      {editRow && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+          <form onSubmit={saveEditRow} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6">
+            <DialogTitle title="تعديل موظف في تكليف العمل الإضافي" close={() => setEditRow(null)} />
+            <div className="grid gap-4 md:grid-cols-3">
+              <Label t="الموظف">
+                {safeEmployees.length ? (
+                  <select required value={editRow.employee_id || ""} onChange={(e) => pickEditEmployee(e.target.value)} className="field mt-2">
+                    <option value="">اختر الموظف</option>
+                    {safeEmployees.map((employee) => (
+                      <option key={employee.id} value={employee.id}>
+                        {employee.name} - {employee.id} - {employee.branch}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input required value={editRow.employee_name || ""} onChange={(e) => setEditRow({ ...editRow, employee_name: e.target.value })} className="field mt-2" />
+                )}
+              </Label>
+              <Label t="الرقم الوظيفي"><input required value={editRow.employee_id || ""} onChange={(e) => setEditRow({ ...editRow, employee_id: e.target.value })} className="field mt-2" /></Label>
+              <Label t="الفرع"><input value={editRow.branch || ""} onChange={(e) => setEditRow({ ...editRow, branch: e.target.value })} className="field mt-2" /></Label>
+              <Label t="الوظيفة"><input value={editRow.job || ""} onChange={(e) => setEditRow({ ...editRow, job: e.target.value })} className="field mt-2" /></Label>
+              <Label t="تاريخ التكليف"><input required type="date" value={editRow.assignment_date || ""} onChange={(e) => setEditRow({ ...editRow, assignment_date: e.target.value })} className="field mt-2" /></Label>
+              <Label t="وقت البداية"><input required type="time" value={editRow.start_time || ""} onChange={(e) => updateEditTime({ start_time: e.target.value })} className="field mt-2" /></Label>
+              <Label t="وقت النهاية"><input required type="time" value={editRow.end_time || ""} onChange={(e) => updateEditTime({ end_time: e.target.value })} className="field mt-2" /></Label>
+              <Label t="عدد الساعات"><input readOnly value={editRow.total_hours || 0} className="field mt-2 bg-slate-50" /></Label>
+              <Label t="سبب التكليف"><input value={editRow.reason || ""} onChange={(e) => setEditRow({ ...editRow, reason: e.target.value })} className="field mt-2" /></Label>
+              <Label t="الحالة"><select value={editRow.status || "مكلف"} onChange={(e) => setEditRow({ ...editRow, status: e.target.value })} className="field mt-2">{overtimeStatuses.map((status) => <option key={status}>{status}</option>)}</select></Label>
+              <Label t="ملاحظات"><textarea value={editRow.notes || ""} onChange={(e) => setEditRow({ ...editRow, notes: e.target.value })} className="field mt-2 !h-auto py-3" rows="3" /></Label>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button type="button" onClick={() => setEditRow(null)} className="btn-secondary">إلغاء</button>
+              <button className="btn-primary"><Save size={17} /> حفظ التعديل</button>
+            </div>
+          </form>
+        </div>
+      )}
+      {viewing && <DetailsDialog title="تفاصيل تكليف العمل الإضافي" row={viewing} close={() => setViewing(null)} />}
     </div>
   );
 }

@@ -141,6 +141,7 @@ export const tenantAwareTables = new Set([
   "guarantees",
   "employee_guarantees",
   "overtime_assignments",
+  "overtime_assignment_employees",
   "shift_types",
   "shift_type_periods",
   "used_shifts",
