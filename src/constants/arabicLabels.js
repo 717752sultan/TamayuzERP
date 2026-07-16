@@ -1,6 +1,6 @@
 export const ArabicLabels = {
-  appName: "نظام تقييم وتحفيز الموظفين",
-  companyFallback: "شركة بيور موني للصرافة والتحويلات",
+  appName: "Tamyuz ERP",
+  companyFallback: "التميز للأنظمة الذكية",
   searchPlaceholder: "البحث في النظام",
   notifications: "الإشعارات",
   logout: "تسجيل الخروج",

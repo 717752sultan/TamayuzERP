@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 import { employeesService } from "./employees";
+import { APP_BRAND_NAME } from "../constants/branding";
 
 const now = () => new Date().toISOString();
 const id = (prefix) => `${prefix}-${Date.now()}`;
@@ -100,10 +101,10 @@ export const generateOfferLetter = (template = {}, application = {}) =>
     .replaceAll("{{salary}}", template.salary || application.expected_salary || "")
     .replaceAll("{{start_date}}", template.start_date || "")
     .replaceAll("{{probation_period}}", template.probation_period || "")
-    .replaceAll("{{company_name}}", "Pure Money");
+    .replaceAll("{{company_name}}", APP_BRAND_NAME);
 
 export const generateWelcomeMessage = (employee = {}) =>
-  `الأخ/ ${employee.employee_name || employee.name || ""}\n\nنرحب بك ضمن فريق Pure Money، ونتمنى لك بداية موفقة في وظيفة ${employee.job || ""} بفرع ${employee.branch || ""} اعتبارًا من تاريخ ${employee.start_date || employee.hire_date || ""}.\n\nإدارة الموارد البشرية`;
+  `الأخ/ ${employee.employee_name || employee.name || ""}\n\nنرحب بك ضمن فريق ${APP_BRAND_NAME}، ونتمنى لك بداية موفقة في وظيفة ${employee.job || ""} بفرع ${employee.branch || ""} اعتبارًا من تاريخ ${employee.start_date || employee.hire_date || ""}.\n\nإدارة الموارد البشرية`;
 
 export const recruitmentService = {
   list,
@@ -166,4 +167,3 @@ export const recruitmentService = {
   saveWelcomeMessage: (row) => save("welcome_messages", row),
   generateWelcomeMessage,
 };
-

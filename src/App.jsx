@@ -101,6 +101,7 @@ import { companyPermissionActions, companyPermissionModules, companyPermissionsS
 import { applyCompanyTheme, applyThemeForCurrentCompany, getDefaultTheme, normalizeThemePayload, themePresets, themeService } from "./services/theme";
 import { clearTenantSession, getCurrentCompany, getCurrentUser, loadTenantSession, platformSuperAdminRole, setTenantSession } from "./services/tenant";
 import { assistantModes } from "./constants/pageRegistry";
+import { APP_BRAND_NAME, APP_DESCRIPTION, APP_OFFICIAL_NAME, APP_REPORT_SUBTITLE, APP_REPORT_TITLE, APP_SHORT_NAME, APP_SYSTEM_NAME, APP_TAGLINE } from "./constants/branding";
 const icons = {
   dashboard: LayoutDashboard,
   employees: Users,
@@ -446,6 +447,7 @@ const printDocument = (title, body) => {
     title = activeEvaluationReport.title;
     body = activeEvaluationReport.body;
   }
+  const printCompanyName = getCurrentCompany()?.company_name || "";
   const w = window.open("", "_blank", "width=950,height=700");
   if (!w) return window.print();
   w.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8" />
@@ -461,7 +463,7 @@ const printDocument = (title, body) => {
       .cert{min-height:520px;border:10px double #8a1538;border-radius:28px;padding:42px;text-align:center}
       .brand{color:#8a1538}.muted{color:#64748b}.big{font-size:34px;font-weight:900}
       @media print{button{display:none}}
-    </style></head><body>${body}<script>window.onload=()=>{window.print();}</script></body></html>`);
+    </style></head><body><div style="margin-bottom:24px;border-bottom:2px solid #e5e7eb;padding-bottom:14px"><h2 class="brand">${APP_REPORT_TITLE}</h2><p class="muted" style="margin:0">${APP_REPORT_SUBTITLE}</p>${printCompanyName ? `<p class="muted" style="margin:6px 0 0">الشركة: ${printCompanyName}</p>` : ""}</div>${body}<script>window.onload=()=>{window.print();}</script></body></html>`);
   w.document.close();
 };
 function syncSettings(s) {
@@ -874,7 +876,7 @@ export default function App() {
 	    activePage = (requestedPageBlockedByCompany || requestedPageBlockedByRole) ? page : (visibleNavItems.some(([id]) => id === page) ? page : firstAllowedPage),
     title = navItems.find((x) => x[0] === activePage)?.[1],
     company = currentCompany || getCurrentCompany() || {},
-    companyName = company.company_name || currentUser.company_name || (isPlatformAdminUser ? "إدارة المنصة" : "الشركة الحالية"),
+    companyName = company.company_name || currentUser.company_name || (isPlatformAdminUser ? "إدارة المنصة" : APP_BRAND_NAME),
     companyLogo = company.logo_url || currentUser.logo_url || "",
     userCardName = currentUser?.name || currentUser?.username || "مستخدم",
     userCardUsername = currentUser?.username || "مستخدم",
@@ -959,7 +961,7 @@ export default function App() {
             {companyLogo ? <img src={companyLogo} alt={companyName} className="h-full w-full object-cover" /> : <span className="px-1 text-center text-xs font-extrabold leading-4">{companyName?.slice(0, 2) || <Banknote />}</span>}
           </div>
           <div>
-            <b>نظام تقييم وتحفيز الموظفين</b>
+            <b>{APP_SHORT_NAME}</b>
             <p className="mt-1 text-[11px] text-slate-400">
               {companyName}
             </p>
@@ -1200,14 +1202,14 @@ function Login({ onLogin }) {
       <div className="absolute -right-40 -top-40 h-[520px] w-[520px] rounded-full bg-brand-700/20 blur-3xl" />
       <div className="relative grid w-full max-w-5xl overflow-hidden rounded-[28px] bg-white shadow-2xl md:grid-cols-2">
         <div className="hidden flex-col justify-between bg-gradient-to-br from-brand-800 to-[#3b1115] p-12 text-white md:flex">
-          <div className="flex items-center gap-3"><div className="grid h-12 w-12 place-items-center rounded-xl bg-white/10"><Banknote /></div><b>شركة بيور موني للصرافة والتحويلات</b></div>
-          <div><div className="mb-5 h-1 w-12 bg-white/30" /><h2 className="text-4xl font-extrabold leading-[1.35]">نحو ثقافة أداء<br />تكافئ التميز</h2><p className="mt-5 leading-7 text-red-100/75">منصة موحدة لقياس الأداء وربط الإنجاز بالحوافز بشفافية.</p></div>
+          <div className="flex items-center gap-3"><div className="grid h-12 w-12 place-items-center rounded-xl bg-white/10"><Banknote /></div><div><b>{APP_SHORT_NAME}</b><p className="text-xs text-red-100/70">{APP_OFFICIAL_NAME}</p></div></div>
+          <div><div className="mb-5 h-1 w-12 bg-white/30" /><h2 className="text-4xl font-extrabold leading-[1.35]">نحو ثقافة أداء<br />تكافئ التميز</h2><p className="mt-5 leading-7 text-red-100/75">{APP_DESCRIPTION}</p></div>
           <div className="flex gap-2 text-xs text-red-100/60"><ShieldCheck size={17} /> بياناتك محفوظة وآمنة داخل المتصفح</div>
         </div>
         <form onSubmit={handleSubmit} className="p-8 sm:p-14">
-          <span className="text-sm font-bold text-brand-700">مرحبًا بعودتك</span>
+          <span className="text-sm font-bold text-brand-700">{APP_SHORT_NAME}</span>
           <h1 className="mt-2 text-3xl font-extrabold">تسجيل الدخول</h1>
-          <p className="mt-2 text-sm text-slate-500">أدخل بياناتك للوصول إلى لوحة التحكم</p>
+          <p className="mt-2 text-sm text-slate-500">{APP_SYSTEM_NAME} - {APP_TAGLINE}</p>
           <div className="mt-8 space-y-5">
             <Label t="كود الشركة"><input value={companyCode} onChange={(e) => setCompanyCode(e.target.value.toUpperCase())} autoComplete="organization" placeholder="PUREMONEY" className="field mt-2" /></Label>
             <Label t="اسم المستخدم"><input value={u} onChange={(e) => setU(e.target.value)} autoComplete="username" placeholder="أدخل اسم المستخدم" className="field mt-2" /></Label>
@@ -1260,7 +1262,7 @@ function HRModulePage({ pageKey, currentCompany }) {
   const rows = tabs.map((name, index) => ({
     id: `${pageKey}-${index + 1}`,
     name,
-    company: currentCompany?.company_name || "Pure Money",
+    company: currentCompany?.company_name || APP_BRAND_NAME,
     status: index % 3 === 0 ? "قيد المراجعة" : "نشط",
     owner: index % 2 === 0 ? "الموارد البشرية" : "مدير الفرع",
     date: new Date(Date.now() - index * 86400000).toISOString().slice(0, 10),
@@ -1269,7 +1271,7 @@ function HRModulePage({ pageKey, currentCompany }) {
     ["إجمالي السجلات", rows.length],
     ["النشطة", rows.filter((r) => r.status === "نشط").length],
     ["قيد المراجعة", rows.filter((r) => r.status === "قيد المراجعة").length],
-    ["الشركة", currentCompany?.company_name || "Pure Money"],
+    ["الشركة", currentCompany?.company_name || APP_BRAND_NAME],
   ];
   const action = () => {
     console.error("HRMS UI placeholder error:", { pageKey, tab });
@@ -1277,7 +1279,7 @@ function HRModulePage({ pageKey, currentCompany }) {
   };
   return (
     <div className="space-y-5">
-      <PageHead title={title} desc={`واجهة موارد بشرية متعددة الشركات - ${currentCompany?.company_name || "Pure Money"}`} action={<button onClick={() => setDialog({ name: "", status: "نشط" })} className="btn-primary"><Plus size={18} /> إضافة</button>} />
+      <PageHead title={title} desc={`واجهة موارد بشرية متعددة الشركات - ${currentCompany?.company_name || APP_BRAND_NAME}`} action={<button onClick={() => setDialog({ name: "", status: "نشط" })} className="btn-primary"><Plus size={18} /> إضافة</button>} />
       <div className="grid gap-4 md:grid-cols-4">
         {stats.map(([label, value]) => <Mini key={label} label={label} value={value} I={BadgeCheck} />)}
       </div>
@@ -4133,7 +4135,7 @@ function EnhancedTopEmployees({ employees, evaluations }) {
   const printCertificate = (employee) =>
     printDocument(
       "شهادة موظف الشهر",
-      `<div class="cert"><h1 class="brand">شهادة تقدير</h1><p class="muted">تمنح هذه الشهادة إلى</p><p class="big">${employee.name || ""}</p><p>وذلك لتميزه في الأداء وتحقيقه نتيجة ${employee.total || 0}% خلال الشهر.</p><h3>${employee.job || ""} - ${employee.branch || ""}</h3><p class="muted">نظام تقييم وتحفيز الموظفين</p></div>`,
+      `<div class="cert"><h1 class="brand">شهادة تقدير</h1><p class="muted">تمنح هذه الشهادة إلى</p><p class="big">${employee.name || ""}</p><p>وذلك لتميزه في الأداء وتحقيقه نتيجة ${employee.total || 0}% خلال الشهر.</p><h3>${employee.job || ""} - ${employee.branch || ""}</h3><p class="muted">${APP_OFFICIAL_NAME}</p></div>`,
     );
   return (
     <div className="space-y-5">
