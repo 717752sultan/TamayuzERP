@@ -73,6 +73,7 @@ import { loginWithSupabase as cloudLoginWithSupabase } from "./services/auth";
 import { supabase } from "./services/supabase";
 import { guaranteesService } from "./services/guarantees";
 import { overtimeService } from "./services/overtime";
+import { buildMessageTitle, copyTextToClipboard, generateOvertimeWhatsAppMessage, loadOvertimeEmployeesByDate } from "./services/overtimeMessage";
 import { reportRowsForExport, rowsToReportHtml } from "./services/reports";
 import { adminService, defaultInventoryPermissions, permissionPages, systemRoles } from "./services/admin";
 import { approvalService, approvalStatuses } from "./services/workflow";
@@ -4802,6 +4803,120 @@ function EmployeeGuaranteesPage({ employees = [], currentUser, currentCompany, c
   );
 }
 
+function OvertimeWhatsAppMessageGenerator({ companyId, companyName, canGenerate }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [assignmentDate, setAssignmentDate] = useState(today);
+  const [messageType, setMessageType] = useState("tomorrow");
+  const [customTitle, setCustomTitle] = useState("✨ جدول الدوام الإضافي {dayName} ({date}) ✨");
+  const [approvedOnly, setApprovedOnly] = useState(false);
+  const [showCanceled, setShowCanceled] = useState(false);
+  const [showTimes, setShowTimes] = useState(false);
+  const [rows, setRows] = useState([]);
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState("");
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const generatedTitle = buildMessageTitle(assignmentDate, messageType, customTitle);
+  const printSafeMessage = String(message || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+  const loadRows = async () => {
+    if (!canGenerate) return setStatus("لا تملك صلاحية توليد رسالة الدوام الإضافي");
+    if (!companyId) return setStatus("لم يتم تحديد الشركة الحالية");
+    setLoading(true);
+    setStatus("جاري تحميل موظفي الدوام الإضافي...");
+    try {
+      const loaded = await loadOvertimeEmployeesByDate(companyId, assignmentDate, { approvedOnly, showCanceled });
+      setRows(loaded);
+      setStatus(loaded.length ? `تم تحميل ${loaded.length} موظف` : "لا يوجد موظفون مكلفون بدوام إضافي في هذا التاريخ");
+    } catch (error) {
+      console.error("Overtime message generator error:", error);
+      setRows([]);
+      setStatus("تعذر تحميل موظفي الدوام الإضافي");
+    } finally {
+      setLoading(false);
+    }
+  };
+  const generate = () => {
+    if (!canGenerate) return setStatus("لا تملك صلاحية توليد رسالة الدوام الإضافي");
+    try {
+      const text = generateOvertimeWhatsAppMessage({ assignmentDate, rows: safeRows, messageType, customTitle, companyName, showTimes });
+      setMessage(text);
+      setStatus(safeRows.length ? "تم توليد الرسالة" : "لا توجد بيانات لهذا التاريخ");
+    } catch (error) {
+      console.error("Overtime message generator error:", error);
+      setStatus("تعذر توليد الرسالة");
+    }
+  };
+  const copyMessage = async () => {
+    try {
+      await copyTextToClipboard(message);
+      setStatus("تم نسخ الرسالة بنجاح");
+    } catch {
+      setStatus("تعذر النسخ التلقائي، يمكنك نسخ الرسالة يدوياً");
+    }
+  };
+  const exportText = () => {
+    const blob = new Blob([message || ""], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `overtime-message-${assignmentDate}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  useEffect(() => {
+    setMessage("");
+    setStatus("");
+  }, [assignmentDate, messageType, customTitle, approvedOnly, showCanceled, showTimes]);
+  if (!canGenerate) {
+    return <div className="panel p-5 text-center text-sm font-bold text-slate-500">لا تملك صلاحية توليد رسالة الدوام الإضافي</div>;
+  }
+  return (
+    <div className="panel space-y-4 p-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <div>
+          <h3 className="text-lg font-extrabold">توليد رسالة دوام إضافي</h3>
+          <p className="mt-1 text-xs text-slate-500">اليوم والتاريخ يتغيران تلقائيًا حسب تاريخ التكليف المختار.</p>
+        </div>
+        <span className="mr-auto rounded-xl bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600">{generatedTitle}</span>
+      </div>
+      <div className="grid gap-4 md:grid-cols-3">
+        <Label t="تاريخ التكليف"><input type="date" value={assignmentDate} onChange={(e) => setAssignmentDate(e.target.value)} className="field mt-2" /></Label>
+        <Label t="نوع الرسالة"><select value={messageType} onChange={(e) => setMessageType(e.target.value)} className="field mt-2"><option value="tomorrow">جدول العمل ليوم غد</option><option value="today">جدول العمل لهذا اليوم</option><option value="custom">رسالة مخصصة</option></select></Label>
+        <Label t="عنوان الرسالة المخصص"><input disabled={messageType !== "custom"} value={customTitle} onChange={(e) => setCustomTitle(e.target.value)} className="field mt-2 disabled:bg-slate-50" /></Label>
+      </div>
+      <div className="flex flex-wrap gap-4 rounded-2xl bg-slate-50 p-3 text-sm font-bold text-slate-600">
+        <label className="flex items-center gap-2"><input type="checkbox" checked={approvedOnly} onChange={(e) => setApprovedOnly(e.target.checked)} /> إظهار فقط المعتمدين</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={showCanceled} onChange={(e) => setShowCanceled(e.target.checked)} /> إظهار الملغيين</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={showTimes} onChange={(e) => setShowTimes(e.target.checked)} /> إظهار وقت الدوام</label>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button onClick={loadRows} disabled={loading} className="btn-secondary">تحميل موظفي الدوام الإضافي</button>
+        <button onClick={generate} className="btn-primary">توليد الرسالة</button>
+        <button onClick={copyMessage} disabled={!message} className="btn-secondary disabled:opacity-50">نسخ الرسالة</button>
+        <button onClick={() => printDocument("رسالة الدوام الإضافي", `<pre style="white-space:pre-wrap;line-height:1.9">${printSafeMessage}</pre>`)} disabled={!message} className="btn-secondary disabled:opacity-50">طباعة</button>
+        <button onClick={exportText} disabled={!message} className="btn-secondary disabled:opacity-50">تصدير نص</button>
+      </div>
+      {status && <div className="rounded-xl bg-blue-50 p-3 text-sm font-bold text-blue-700">{status}</div>}
+      <div className="table-wrap">
+        <table>
+          <thead><tr><th>اسم الموظف</th><th>الرقم الوظيفي</th><th>الفرع</th><th>الوظيفة</th><th>تاريخ التكليف</th><th>وقت البداية</th><th>وقت النهاية</th><th>عدد الساعات</th><th>الحالة</th></tr></thead>
+          <tbody>
+            {loading ? <tr><td colSpan={9}>جاري تحميل موظفي الدوام الإضافي...</td></tr> : safeRows.length ? safeRows.map((row) => <tr key={`${row.id}-${row.employee_id}`}><td>{row.employee_name}</td><td>{row.employee_id}</td><td>{row.branch}</td><td>{row.job}</td><td>{row.assignment_date}</td><td>{row.start_time || "—"}</td><td>{row.end_time || "—"}</td><td>{row.total_hours || "—"}</td><td><Status>{row.status || "مكلف"}</Status></td></tr>) : <tr><td colSpan={9} className="py-6 text-center text-slate-400">لا يوجد موظفون مكلفون بدوام إضافي في هذا التاريخ</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <Label t="معاينة الرسالة">
+        <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={10} className="field mt-2 !h-auto whitespace-pre-wrap py-3" placeholder="اضغط توليد الرسالة بعد تحميل الموظفين..." />
+      </Label>
+    </div>
+  );
+}
+
 function OvertimePage({ employees = [], role, currentUser, currentCompany, can }) {
   const [assignments, setAssignments] = useState([]);
   const [assignmentEmployees, setAssignmentEmployees] = useState([]);
@@ -4820,6 +4935,7 @@ function OvertimePage({ employees = [], role, currentUser, currentCompany, can }
   const canEdit = can?.("overtime", "can_edit") !== false;
   const canDelete = can?.("overtime", "can_delete") !== false;
   const canApprove = can?.("overtime", "can_approve") !== false;
+  const canGenerateMessage = canView && (canCreate || canEdit || can?.("overtime", "can_export") !== false || can?.("overtime", "generate_message") !== false);
   const load = async () => {
     setLoading(true);
     setError("");
@@ -5036,6 +5152,7 @@ function OvertimePage({ employees = [], role, currentUser, currentCompany, can }
         <button onClick={() => printDocument("تقرير العمل الإضافي", rowsToReportHtml("تقرير العمل الإضافي", filtered, tableColumnsOvertime))} className="btn-secondary"><Printer size={17} /> PDF</button>
         <button onClick={() => exportDocx("تقرير العمل الإضافي", exportRows)} className="btn-secondary"><Download size={17} /> Word</button>
       </div>
+      <OvertimeWhatsAppMessageGenerator companyId={companyId} companyName={currentCompany?.company_name || currentUser?.company_name || ""} canGenerate={canGenerateMessage} />
       <div className="panel p-4">
         {loading ? <LoadingScreen message="جاري تحميل تكليفات العمل الإضافي..." /> : (
           <div className="table-wrap"><table><thead><tr>{tableColumnsOvertime.map((c) => <th key={c.key}>{c.label}</th>)}<th>واتساب</th><th>الإجراءات</th></tr></thead><tbody>{filtered.length ? filtered.map((r) => <tr key={r.id}><td>{r.assignment_id}</td><td>{r.employee_name}</td><td>{r.employee_id}</td><td>{r.branch}</td><td>{r.job}</td><td>{r.assignment_date}</td><td>{r.start_time}</td><td>{r.end_time}</td><td>{hours(r)}</td><td>{r.reason}</td><td><Status>{r.status}</Status></td><td>{r.approved_by || r.approval_status || "—"}</td><td><button onClick={() => copy(r.whatsapp_message || makeOvertimeMessage(r, r))} className="btn-secondary !h-9 !px-3">نسخ</button><button onClick={() => openWhatsApp(r)} className="btn-secondary !h-9 !px-3">واتساب</button></td><td><button onClick={() => setViewing(r)} className="p-2 text-slate-600" title="عرض"><Eye size={16} /></button>{canEdit && <button onClick={() => openEditRow(r)} className="p-2 text-blue-600" title="تعديل"><Pencil size={16} /></button>}{canDelete && <button onClick={() => removeEmployeeFromAssignment(r)} className="p-2 text-red-600" title="حذف"><Trash2 size={16} /></button>}<select disabled={!canEdit && !canApprove} value={r.status} onChange={(e) => updateStatus(r, e.target.value)} className="field mt-1 h-9 min-w-[110px]">{overtimeStatuses.map((s) => <option key={s}>{s}</option>)}</select></td></tr>) : <tr><td colSpan={14} className="py-8 text-center text-slate-400">لا توجد تكليفات عمل إضافي حالياً</td></tr>}</tbody></table></div>
