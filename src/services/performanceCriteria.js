@@ -30,6 +30,7 @@ const criterionFromDb = (row = {}) => ({
   job_name: row.job_name || "",
   criterion_name: row.criterion_name || "",
   criterion_description: row.criterion_description || "",
+  criterion_type: row.criterion_type || "",
   weight: Number(row.weight || 0),
   max_score: Number(row.max_score || 100),
   scoring_type: row.scoring_type || "يدوي",
@@ -94,6 +95,7 @@ export const performanceCriteriaService = {
         job_name: String(criterion.job_name || ""),
         criterion_name: String(criterion.criterion_name || ""),
         criterion_description: String(criterion.criterion_description || ""),
+        criterion_type: String(criterion.criterion_type || ""),
         weight: Number(criterion.weight || 0),
         max_score: Number(criterion.max_score || 100),
         scoring_type: String(criterion.scoring_type || "يدوي"),
@@ -109,7 +111,14 @@ export const performanceCriteriaService = {
         updated_at: new Date().toISOString(),
       };
       if (!payload.job_name || !payload.criterion_name) throw new Error("يجب تحديد الوظيفة والمعيار");
-      const { data, error } = await supabase.from("performance_kpi_criteria").upsert(payload, { onConflict: "criterion_id" }).select().single();
+      let { data, error } = await supabase.from("performance_kpi_criteria").upsert(payload, { onConflict: "criterion_id" }).select().single();
+      if (error && String(error.message || "").includes("criterion_type")) {
+        const fallbackPayload = { ...payload };
+        delete fallbackPayload.criterion_type;
+        const fallback = await supabase.from("performance_kpi_criteria").upsert(fallbackPayload, { onConflict: "criterion_id" }).select().single();
+        data = fallback.data;
+        error = fallback.error;
+      }
       if (error) throw error;
       return criterionFromDb(data);
     } catch (error) {

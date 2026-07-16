@@ -89,6 +89,7 @@ import { generateBranchForecast } from "./services/inventoryForecast";
 import { canInventory } from "./services/inventoryPermissions";
 import { inventorySettingsService, defaultInventorySettings, defaultDocumentNumbering } from "./services/inventorySettings";
 import { dailyOperationsService, operationTypes, serviceChannels, operationStatuses } from "./services/dailyOperations";
+import { downloadDailyOperationsTemplate, exportDailyOperationsToExcel, importDailyOperationsRows, parseDailyOperationsExcel, validateDailyOperationsRows } from "./services/dailyOperationsImportExport";
 import { performanceCriteriaService, scoringTypes, defaultJobKpis } from "./services/performanceCriteria";
 import { kpiCalculationService } from "./services/kpiCalculation";
 import { aiAssistantService } from "./services/aiAssistant";
@@ -102,6 +103,7 @@ import { applyCompanyTheme, applyThemeForCurrentCompany, getDefaultTheme, normal
 import { clearTenantSession, getCurrentCompany, getCurrentUser, loadTenantSession, platformSuperAdminRole, setTenantSession } from "./services/tenant";
 import { assistantModes } from "./constants/pageRegistry";
 import { APP_BRAND_NAME, APP_DESCRIPTION, APP_OFFICIAL_NAME, APP_REPORT_SUBTITLE, APP_REPORT_TITLE, APP_SHORT_NAME, APP_SYSTEM_NAME, APP_TAGLINE } from "./constants/branding";
+import { buildReportBrandingHtml } from "./services/reportBranding";
 const icons = {
   dashboard: LayoutDashboard,
   employees: Users,
@@ -447,7 +449,8 @@ const printDocument = (title, body) => {
     title = activeEvaluationReport.title;
     body = activeEvaluationReport.body;
   }
-  const printCompanyName = getCurrentCompany()?.company_name || "";
+  const currentPrintCompany = getCurrentCompany() || {};
+  const reportBranding = buildReportBrandingHtml({ title, currentCompany: currentPrintCompany });
   const w = window.open("", "_blank", "width=950,height=700");
   if (!w) return window.print();
   w.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8" />
@@ -460,10 +463,21 @@ const printDocument = (title, body) => {
       table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px}
       th,td{border:1px solid #d7dce3;padding:9px;text-align:right}
       th{background:#f3f4f6}
+      .report-branding-header{display:grid;grid-template-columns:1fr 1.15fr 1fr;gap:18px;align-items:center;margin-bottom:24px;border-bottom:2px solid #e5e7eb;padding-bottom:16px}
+      .report-branding-side{display:flex;align-items:center;gap:12px}
+      .report-branding-company{justify-content:flex-end;text-align:left}
+      .report-branding-title{text-align:center}
+      .report-branding-title h1{border:0;background:transparent;padding:0;color:#111827;font-size:24px}
+      .report-branding-title p,.report-branding-side p{margin:3px 0;color:#64748b;font-size:12px}
+      .report-branding-side h2{margin:0;color:var(--accent,#8b1e3f);font-size:15px}
+      .report-logo{width:58px;height:58px;object-fit:contain;border:1px solid #e5e7eb;border-radius:16px;background:#fff}
+      .report-logo-fallback{display:grid;place-items:center;padding:6px;text-align:center;font-size:10px;font-weight:800;color:#64748b;background:#f8fafc}
+      .report-warning{max-width:230px;color:#b45309!important}
+      .report-footer{margin-top:34px;border-top:1px solid #e5e7eb;padding-top:10px;display:flex;flex-wrap:wrap;gap:10px;justify-content:center;color:#64748b;font-size:11px}
       .cert{min-height:520px;border:10px double #8a1538;border-radius:28px;padding:42px;text-align:center}
       .brand{color:#8a1538}.muted{color:#64748b}.big{font-size:34px;font-weight:900}
-      @media print{button{display:none}}
-    </style></head><body><div style="margin-bottom:24px;border-bottom:2px solid #e5e7eb;padding-bottom:14px"><h2 class="brand">${APP_REPORT_TITLE}</h2><p class="muted" style="margin:0">${APP_REPORT_SUBTITLE}</p>${printCompanyName ? `<p class="muted" style="margin:6px 0 0">الشركة: ${printCompanyName}</p>` : ""}</div>${body}<script>window.onload=()=>{window.print();}</script></body></html>`);
+      @media print{button{display:none}.report-footer{position:fixed;bottom:0;left:32px;right:32px;background:#fff}.report-branding-header{break-inside:avoid}body{padding-bottom:72px}}
+    </style></head><body>${reportBranding.header}${body}${reportBranding.footer}<script>window.onload=()=>{window.print();}</script></body></html>`);
   w.document.close();
 };
 function syncSettings(s) {
@@ -1122,8 +1136,8 @@ export default function App() {
 	          {activePage === "overtime" && <OvertimePage {...p} />}{" "}
 	          {activePage === "shifts" && <EmployeeShiftsPage {...p} />}{" "}
 	          {activePage === "inventory" && <InventoryManagementPage {...p} />}{" "}
-	          {activePage === "daily_operations" && <DailyOperationsPage {...p} />}{" "}
-	          {activePage === "performance_criteria" && <PerformanceCriteriaPage {...p} />}{" "}
+	          {activePage === "daily_operations" && <DailyOperationsPageEnhanced {...p} />}{" "}
+	          {activePage === "performance_criteria" && <PerformanceCriteriaPageEnhanced {...p} />}{" "}
 	          {activePage === "performance_kpi_scores" && <KpiScoresPage {...p} />}{" "}
 	          {activePage === "users_permissions" && <UsersPermissionsPage {...p} />}{" "}
 	          {activePage === "recruitment" && <RecruitmentPage {...p} />}{" "}
@@ -5959,6 +5973,155 @@ function DialogTitle({ title, close }) {
 }
 function DialogActions({ close }) {
   return <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={close} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ البيانات</button></div>;
+}
+
+const kpiCriterionTypeOptions = [
+  ["behavioral", "إداري / سلوكي"],
+  ["operational", "إنتاجي / تشغيلي"],
+  ["cash_counting", "عدّ نقدي / عداد"],
+  ["financial", "مالي"],
+  ["service_quality", "جودة وخدمة عملاء"],
+];
+const inferCriterionType = (item = {}) => {
+  if (item.criterion_type) return item.criterion_type;
+  const name = String(item.criterion_name || item.name || "");
+  if (/عداد|عد نقدي|فئة|200|500|1000|خزينة|فرز/.test(name)) return "cash_counting";
+  if (/الانضباط|الالتزام|السلوك|التعاون|الحضور|الدوام/.test(name)) return "behavioral";
+  if (/مالي|مبلغ|قيمة|إيراد|تحصيل/.test(name)) return "financial";
+  if (/رضا|شكاوى|خدمة|عميل|سرعة/.test(name)) return "service_quality";
+  return "operational";
+};
+const kpiFieldNumber = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+
+function PerformanceCriteriaPageEnhanced({ can }) {
+  const [templates, setTemplates] = useState([]);
+  const [criteriaRows, setCriteriaRows] = useState([]);
+  const [selectedJob, setSelectedJob] = useState("");
+  const [dialog, setDialog] = useState(null);
+  const [triedSave, setTriedSave] = useState(false);
+  const load = async () => {
+    const [t, c] = await Promise.all([performanceCriteriaService.loadJobTemplates(), performanceCriteriaService.loadKpiCriteria()]);
+    setTemplates(t);
+    setCriteriaRows(c);
+    setSelectedJob((j) => j || t[0]?.job_name || Object.keys(defaultJobKpis)[0] || "");
+  };
+  useEffect(() => { load().catch((e) => alert(e.message)); }, []);
+  const rows = criteriaRows.filter((r) => r.job_name === selectedJob);
+  const totalWeight = performanceCriteriaService.validateCriteriaWeights(rows);
+  const openCriterion = (item = {}) => {
+    setTriedSave(false);
+    setDialog({
+      job_name: selectedJob,
+      criterion_name: "",
+      criterion_type: inferCriterionType(item),
+      weight: 10,
+      max_score: 100,
+      scoring_type: scoringTypes[0],
+      target_value: 100,
+      excellent_threshold: 100,
+      good_threshold: 80,
+      acceptable_threshold: 60,
+      cash200: item.cash200 || item.subWeights?.cash200 || 0,
+      cash500: item.cash500 || item.subWeights?.cash500 || 0,
+      cash1000: item.cash1000 || item.subWeights?.cash1000 || 0,
+      affects_incentive: true,
+      is_active: true,
+      ...item,
+      criterion_type: inferCriterionType(item),
+    });
+  };
+  const validationErrors = (() => {
+    if (!dialog) return [];
+    const errors = [];
+    if (!String(dialog.criterion_name || "").trim()) errors.push("اسم المعيار مطلوب");
+    if (Number(dialog.weight) < 0 || Number(dialog.weight) > 100 || Number.isNaN(Number(dialog.weight))) errors.push("الوزن النسبي يجب أن يكون بين 0 و 100");
+    if (dialog.criterion_type === "cash_counting" && [dialog.cash200, dialog.cash500, dialog.cash1000].some((v) => Number(v) < 0 || Number.isNaN(Number(v)))) errors.push("أوزان الفئات النقدية يجب أن تكون أرقامًا صحيحة");
+    return errors;
+  })();
+  const saveCriterion = async (e) => {
+    e.preventDefault();
+    setTriedSave(true);
+    if (validationErrors.length) return;
+    try {
+      await performanceCriteriaService.saveKpiCriterion({
+        ...dialog,
+        weight: kpiFieldNumber(dialog.weight),
+        max_score: kpiFieldNumber(dialog.max_score || 100),
+        target_value: kpiFieldNumber(dialog.target_value),
+        excellent_threshold: kpiFieldNumber(dialog.excellent_threshold),
+        good_threshold: kpiFieldNumber(dialog.good_threshold),
+        acceptable_threshold: kpiFieldNumber(dialog.acceptable_threshold),
+        notes: dialog.criterion_type === "cash_counting"
+          ? `${dialog.notes || ""}\nأوزان الفئات النقدية: 200=${dialog.cash200 || 0}, 500=${dialog.cash500 || 0}, 1000=${dialog.cash1000 || 0}`.trim()
+          : dialog.notes || "",
+      });
+      setDialog(null);
+      load();
+    } catch (err) {
+      console.error("KPI criterion modal error:", err);
+      alert(err.message || "تعذر حفظ البيانات");
+    }
+  };
+  return <div className="space-y-5"><PageHead title="معايير الأداء" desc="معايير KPI عادلة ومنفصلة حسب الوظيفة" action={<div className="flex gap-2"><button onClick={() => performanceCriteriaService.seedDefaults().then(load).catch((e) => alert(e.message))} className="btn-secondary">توليد المعايير الافتراضية</button><button disabled={can?.("performance_criteria", "can_create") === false} onClick={() => openCriterion()} className="btn-primary"><Plus size={18} /> إضافة معيار</button></div>} /><div className="panel flex flex-wrap gap-3 p-4"><select value={selectedJob} onChange={(e) => setSelectedJob(e.target.value)} className="field max-w-md">{[...new Set([...templates.map((t) => t.job_name), ...Object.keys(defaultJobKpis)])].map((j) => <option key={j}>{j}</option>)}</select><span className={`rounded-xl px-4 py-2 text-sm font-bold ${totalWeight === 100 ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>إجمالي الأوزان: {totalWeight}%</span></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>المعيار</th><th>النوع</th><th>الوزن</th><th>طريقة الاحتساب</th><th>المستهدف</th><th>الحافز</th><th>الحالة</th><th></th></tr></thead><tbody>{rows.map((r) => <tr key={r.criterion_id}><td>{r.criterion_name}</td><td>{kpiCriterionTypeOptions.find(([id]) => id === inferCriterionType(r))?.[1]}</td><td>{r.weight}%</td><td>{r.scoring_type}</td><td>{r.target_value}</td><td>{r.affects_incentive ? "نعم" : "لا"}</td><td><Status>{r.is_active ? "نشط" : "معطل"}</Status></td><td><button onClick={() => openCriterion(r)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => performanceCriteriaService.deleteKpiCriterion(r.criterion_id).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div>{dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={saveCriterion} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6"><DialogTitle title="تعديل معيار" close={() => setDialog(null)} />{triedSave && validationErrors.length > 0 && <div className="mb-4 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">{validationErrors.map((e) => <p key={e}>{e}</p>)}</div>}<div className="grid gap-4 md:grid-cols-3"><Label t="الوظيفة"><input value={dialog.job_name} onChange={(e) => setDialog({ ...dialog, job_name: e.target.value })} className="field mt-2" /></Label><Label t="اسم المعيار"><input value={dialog.criterion_name} onChange={(e) => setDialog({ ...dialog, criterion_name: e.target.value })} className={`field mt-2 ${triedSave && !String(dialog.criterion_name || "").trim() ? "border-red-300" : ""}`} /></Label><Label t="نوع المعيار"><select value={dialog.criterion_type} onChange={(e) => setDialog({ ...dialog, criterion_type: e.target.value })} className="field mt-2">{kpiCriterionTypeOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></Label><Label t="الوزن النسبي %"><input type="number" value={dialog.weight} onChange={(e) => setDialog({ ...dialog, weight: e.target.value })} className="field mt-2" /></Label><Label t="طريقة التقييم"><select value={dialog.scoring_type} onChange={(e) => setDialog({ ...dialog, scoring_type: e.target.value })} className="field mt-2">{scoringTypes.map((s) => <option key={s}>{s}</option>)}</select></Label><Label t="الدرجة القصوى"><input type="number" value={dialog.max_score || 100} onChange={(e) => setDialog({ ...dialog, max_score: e.target.value })} className="field mt-2" /></Label>{dialog.criterion_type === "operational" && <><Label t="الحد الأدنى"><input type="number" value={dialog.acceptable_threshold || 0} onChange={(e) => setDialog({ ...dialog, acceptable_threshold: e.target.value })} className="field mt-2" /></Label><Label t="الهدف"><input type="number" value={dialog.target_value || 0} onChange={(e) => setDialog({ ...dialog, target_value: e.target.value })} className="field mt-2" /></Label><Label t="الحد الممتاز"><input type="number" value={dialog.excellent_threshold || 0} onChange={(e) => setDialog({ ...dialog, excellent_threshold: e.target.value })} className="field mt-2" /></Label></>}{dialog.criterion_type === "financial" && <><Label t="مبلغ مستهدف"><input type="number" value={dialog.target_value || 0} onChange={(e) => setDialog({ ...dialog, target_value: e.target.value })} className="field mt-2" /></Label><Label t="عملة"><input value={dialog.currency || "SAR"} onChange={(e) => setDialog({ ...dialog, currency: e.target.value })} className="field mt-2" /></Label></>}{dialog.criterion_type === "service_quality" && <><Label t="درجة الرضا"><input type="number" value={dialog.satisfaction_score || 0} onChange={(e) => setDialog({ ...dialog, satisfaction_score: e.target.value })} className="field mt-2" /></Label><Label t="عدد الشكاوى"><input type="number" value={dialog.complaints_count || 0} onChange={(e) => setDialog({ ...dialog, complaints_count: e.target.value })} className="field mt-2" /></Label><Label t="سرعة الخدمة"><input value={dialog.service_speed || ""} onChange={(e) => setDialog({ ...dialog, service_speed: e.target.value })} className="field mt-2" /></Label></>}{dialog.criterion_type === "cash_counting" && <div className="md:col-span-3 rounded-2xl border border-amber-200 bg-amber-50 p-4"><h4 className="font-extrabold text-amber-800">أوزان الفئات النقدية للعداد</h4><div className="mt-3 grid gap-3 md:grid-cols-3">{[["cash200","فئة 200"],["cash500","فئة 500"],["cash1000","فئة 1000"]].map(([key,label]) => <Label key={key} t={label}><input type="number" min="0" value={dialog[key] || 0} onChange={(e) => setDialog({ ...dialog, [key]: e.target.value })} className="field mt-2 bg-white" /></Label>)}</div></div>}<Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label><Label t="ملاحظات"><textarea value={dialog.notes || ""} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}</div>;
+}
+
+function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompany, can }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [rows, setRows] = useState([]);
+  const [dialog, setDialog] = useState(null);
+  const [importDialog, setImportDialog] = useState(null);
+  const [filters, setFilters] = useState({ month: today.slice(0, 7), date: "", branch: "all", employee: "", status: "all" });
+  const [loading, setLoading] = useState(true);
+  const safeEmployees = Array.isArray(employees) ? employees : [];
+  const companyId = currentCompany?.company_id || currentUser?.company_id || "";
+  const canCreate = can?.("daily_operations", "can_create") !== false;
+  const canImport = canCreate && can?.("daily_operations", "can_import") !== false;
+  const canExport = can?.("daily_operations", "can_export") !== false;
+  const statusOptions = [...new Set([...operationStatuses, "مسودة", "قيد المراجعة", "معتمدة", "مرفوضة"].filter(Boolean))];
+  const load = async () => {
+    setLoading(true);
+    try {
+      if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
+      setRows(await dailyOperationsService.loadDailyOperations({ month: filters.month }));
+    } catch (e) {
+      alert(e.message || "تعذر تحميل البيانات");
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { load(); return dailyOperationsService.subscribe(load); }, [filters.month, companyId]);
+  const filtered = rows.filter((r) => (!filters.date || r.operation_date === filters.date) && (filters.branch === "all" || r.branch === filters.branch) && (!filters.employee || `${r.employee_name || ""} ${r.employee_id || ""}`.includes(filters.employee)) && (filters.status === "all" || r.status === filters.status));
+  const totalOps = filtered.reduce((s, x) => s + Number(x.operation_count || 0), 0), totalErrors = filtered.reduce((s, x) => s + Number(x.error_count || 0), 0);
+  const byBranch = Object.entries(groupCount(filtered, "branch")).map(([name, value]) => ({ name, value }));
+  const pickEmployee = (id) => { const emp = safeEmployees.find((x) => x.id === id) || {}; setDialog({ ...dialog, employee_id: id, employee_name: emp.name || "", branch: emp.branch || "", job_name: emp.job || "" }); };
+  const openAdd = () => setDialog({ operation_id: `OP-${Date.now()}`, operation_date: today, month: today.slice(0, 7), employee_id: "", employee_name: "", branch: "", job_name: "", operation_type: operationTypes[0], service_channel: serviceChannels[0], currency: "SAR", operation_count: 0, completed_count: 0, error_count: 0, returned_count: 0, pending_count: 0, customer_complaints: 0, amount: 0, status: "مسودة", notes: "" });
+  const save = async (e) => { e.preventDefault(); try { const saved = await dailyOperationsService.saveDailyOperation({ ...dialog, company_id: companyId, entered_by: currentUser?.username || "" }); setRows((list) => list.some((x) => x.operation_id === saved.operation_id) ? list.map((x) => x.operation_id === saved.operation_id ? saved : x) : [saved, ...list]); setDialog(null); } catch (err) { alert(err.message); } };
+  const approve = (row) => dailyOperationsService.approveDailyOperation(row, currentUser?.username || "").then(load).catch((e) => alert(e.message));
+  const readImportFile = async () => {
+    if (!importDialog?.file) return setImportDialog((d) => ({ ...d, message: "لم يتم اختيار ملف" }));
+    try {
+      setImportDialog((d) => ({ ...d, loading: true, message: "جاري قراءة الملف..." }));
+      const parsed = await parseDailyOperationsExcel(importDialog.file);
+      setImportDialog((d) => ({ ...d, rows: validateDailyOperationsRows(parsed, safeEmployees, companyId), loading: false, message: "تم قراءة الملف بنجاح" }));
+    } catch (error) {
+      console.error("Daily operations import/export error:", error);
+      setImportDialog((d) => ({ ...d, loading: false, message: "تعذر قراءة ملف Excel" }));
+    }
+  };
+  const saveImportRows = async () => {
+    try {
+      const invalid = (importDialog?.rows || []).filter((row) => !row.valid);
+      if (invalid.length) return setImportDialog((d) => ({ ...d, message: "توجد أخطاء يجب تصحيحها قبل الحفظ" }));
+      const result = await importDailyOperationsRows(importDialog?.rows || [], companyId, { duplicateMode: importDialog?.duplicateMode || "add" });
+      setImportDialog(null);
+      await load();
+      alert(`تم استيراد العمليات اليومية بنجاح. المحفوظ: ${result.saved.length}${result.skipped ? `، تم تجاهل المكرر: ${result.skipped}` : ""}`);
+    } catch (error) {
+      console.error("Daily operations import/export error:", error);
+      setImportDialog((d) => ({ ...d, message: error.message || "تعذر استيراد العمليات اليومية" }));
+    }
+  };
+  return <div className="space-y-5"><PageHead title="العمليات اليومية" desc="تسجيل الإنتاجية اليومية وربطها بالـ KPI والحوافز" action={<button disabled={!canCreate} onClick={openAdd} className="btn-primary"><Plus size={18} /> إضافة عملية</button>} /><div className="grid gap-4 md:grid-cols-4"><Mini label="إجمالي العمليات" value={totalOps} I={Gauge} /><Mini label="الأخطاء" value={totalErrors} I={AlertTriangle} /><Mini label="نسبة الأخطاء" value={`${totalOps ? ((totalErrors / totalOps) * 100).toFixed(1) : 0}%`} I={TrendingUp} /><Mini label="المعتمدة" value={filtered.filter((x) => x.status === "معتمدة").length} I={BadgeCheck} /></div><div className="panel flex flex-wrap gap-3 p-4"><input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field max-w-[160px]" /><input type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value, month: e.target.value ? e.target.value.slice(0, 7) : filters.month })} className="field max-w-[170px]" /><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field min-w-[180px]" placeholder="بحث بالموظف..." /><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option>{statusOptions.map((s) => <option key={s}>{s}</option>)}</select><button onClick={() => { if (!filters.date) setFilters({ ...filters, date: today, month: today.slice(0, 7) }); load(); }} className="btn-secondary"><Download size={17} /> جلب عمليات الموظفين</button><button disabled={!canImport} onClick={() => setImportDialog({ file: null, rows: [], duplicateMode: "add", message: "" })} className="btn-secondary disabled:opacity-50"><Upload size={17} /> استيراد Excel</button><button onClick={downloadDailyOperationsTemplate} className="btn-secondary"><FileSpreadsheet size={17} /> تحميل نموذج</button><button disabled={!canExport} onClick={() => exportDailyOperationsToExcel(filtered, `daily-operations-filtered-${today}.xlsx`)} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير Excel</button><button disabled={!canExport} onClick={() => exportDailyOperationsToExcel(rows, "daily-operations-all.xlsx")} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير الكل</button></div><div className="grid gap-5 xl:grid-cols-2"><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الموظف</th><th>الفرع</th><th>العملية</th><th>العدد</th><th>الأخطاء</th><th>الحالة</th><th></th></tr></thead><tbody>{loading ? <tr><td colSpan="8">جاري التحميل...</td></tr> : filtered.length ? filtered.map((r) => <tr key={r.operation_id}><td>{r.operation_date}</td><td>{r.employee_name}<p className="text-xs text-slate-400">{r.job_name}</p></td><td>{r.branch}</td><td>{r.operation_type}</td><td>{r.operation_count}</td><td>{r.error_count}</td><td><Status>{r.status}</Status></td><td><button onClick={() => setDialog(r)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => approve(r)} className="p-2 text-green-700"><BadgeCheck size={16} /></button><button disabled={r.status !== "مسودة"} onClick={() => dailyOperationsService.deleteDailyOperation(r.operation_id).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>) : <tr><td colSpan="8" className="py-8 text-center text-slate-400">لا توجد عمليات يومية في الفترة المحددة</td></tr>}</tbody></table></div></div><Chart title="العمليات حسب الفروع" sub="توزيع سجلات العمليات"><ResponsiveContainer width="100%" height={260}><BarChart data={byBranch}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8,8,0,0]} /></BarChart></ResponsiveContainer></Chart></div>{dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="عملية يومية" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="التاريخ"><input type="date" value={dialog.operation_date} onChange={(e) => setDialog({ ...dialog, operation_date: e.target.value, month: e.target.value.slice(0, 7) })} className="field mt-2" /></Label><Label t="الموظف"><select value={dialog.employee_id} onChange={(e) => pickEmployee(e.target.value)} className="field mt-2"><option value="">اختر الموظف</option>{safeEmployees.map((emp) => <option key={emp.id} value={emp.id}>{emp.name} - {emp.id} - {emp.branch}</option>)}</select></Label><Label t="الوظيفة"><input readOnly value={dialog.job_name} className="field mt-2 bg-slate-50" /></Label><Label t="نوع العملية"><select value={dialog.operation_type} onChange={(e) => setDialog({ ...dialog, operation_type: e.target.value })} className="field mt-2">{operationTypes.map((t) => <option key={t}>{t}</option>)}</select></Label><Label t="القناة"><select value={dialog.service_channel} onChange={(e) => setDialog({ ...dialog, service_channel: e.target.value })} className="field mt-2">{serviceChannels.map((t) => <option key={t}>{t}</option>)}</select></Label>{["operation_count","completed_count","pending_count","error_count","returned_count","customer_complaints","amount"].map((k) => <Label key={k} t={k}><input type="number" value={dialog[k] || 0} onChange={(e) => setDialog({ ...dialog, [k]: e.target.value })} className="field mt-2" /></Label>)}<Label t="ملاحظات"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}{importDialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><div className="panel max-h-[90vh] w-full max-w-6xl overflow-y-auto p-6"><DialogTitle title="استيراد العمليات اليومية من Excel" close={() => setImportDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="اختيار ملف Excel"><input type="file" accept=".xlsx,.xls" onChange={(e) => setImportDialog({ ...importDialog, file: e.target.files?.[0] || null })} className="field mt-2 py-2" /></Label><Label t="طريقة التعامل مع العمليات المكررة"><select value={importDialog.duplicateMode} onChange={(e) => setImportDialog({ ...importDialog, duplicateMode: e.target.value })} className="field mt-2"><option value="add">إضافة كسجلات جديدة</option><option value="update">تحديث الموجود</option><option value="ignore">تجاهل المكرر</option></select></Label><div className="flex items-end gap-2"><button onClick={readImportFile} disabled={importDialog.loading} className="btn-primary">قراءة الملف</button><button onClick={saveImportRows} disabled={!importDialog.rows?.length || importDialog.loading} className="btn-secondary disabled:opacity-50">حفظ العمليات</button></div></div><div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm leading-7 text-slate-600"><b>الأعمدة المطلوبة:</b> التاريخ، الرقم الوظيفي أو اسم الموظف، نوع العملية، عدد العمليات. يمكن إضافة: الفرع، الوظيفة، عدد الأخطاء، الحالة، ملاحظات.</div>{importDialog.message && <div className="mt-4 rounded-xl bg-blue-50 p-3 text-sm font-bold text-blue-700">{importDialog.message}</div>}<div className="mt-4 grid gap-3 md:grid-cols-4"><Mini label="إجمالي الصفوف" value={importDialog.rows?.length || 0} I={FileSpreadsheet} /><Mini label="الصحيحة" value={(importDialog.rows || []).filter((r) => r.valid && !r.warning).length} I={BadgeCheck} /><Mini label="الخاطئة" value={(importDialog.rows || []).filter((r) => !r.valid).length} I={AlertTriangle} /><Mini label="المحذرة" value={(importDialog.rows || []).filter((r) => r.valid && r.warning).length} I={MessageSquareWarning} /></div><div className="table-wrap mt-4"><table><thead><tr><th>رقم الصف</th><th>التاريخ</th><th>اسم الموظف</th><th>الرقم الوظيفي</th><th>الفرع</th><th>الوظيفة</th><th>نوع العملية</th><th>عدد العمليات</th><th>عدد الأخطاء</th><th>نسبة الأخطاء</th><th>الحالة</th><th>نتيجة التحقق</th></tr></thead><tbody>{(importDialog.rows || []).map((row) => <tr key={row.rowNumber} className={!row.valid ? "bg-red-50" : row.warning ? "bg-amber-50" : ""}><td>{row.rowNumber}</td><td>{row.operation_date}</td><td>{row.employee_name}</td><td>{row.employee_id}</td><td>{row.branch}</td><td>{row.job_name}</td><td>{row.operation_type}</td><td>{row.operation_count}</td><td>{row.error_count}</td><td>{row.error_rate}%</td><td>{row.status}</td><td>{row.validationMessage}</td></tr>)}</tbody></table></div></div></div>}</div>;
 }
 
 function DailyOperationsPage({ employees, currentUser, can }) {
