@@ -96,6 +96,7 @@ import { recruitmentService, recruitmentTabs, generateWelcomeMessage } from "./s
 import { generateRecruitmentReports } from "./services/recruitmentReports";
 import { backupService } from "./services/backup";
 import { companiesService } from "./services/companies";
+import { companyPermissionActions, companyPermissionModules, companyPermissionsService, companyCanAccessFromRows, mergeWithDefaultCompanyPermissions } from "./services/companyPermissions";
 import { clearTenantSession, getCurrentCompany, getCurrentUser, loadTenantSession, platformSuperAdminRole, setTenantSession } from "./services/tenant";
 import { assistantModes } from "./constants/pageRegistry";
 const icons = {
@@ -596,6 +597,8 @@ export default function App() {
 	    [notifications, setNotifications] = useState([]),
 	    [notificationsOpen, setNotificationsOpen] = useState(false),
       [companies, setCompanies] = useState([]),
+      [companyPermissions, setCompanyPermissions] = useState([]),
+      [companyPermissionsLoading, setCompanyPermissionsLoading] = useState(false),
       [currentCompany, setCurrentCompany] = useState(restoredTenant.currentCompany || null),
       [currentUserState, setCurrentUserState] = useState(restoredTenant.currentUser || null);
   const setEmployees = (updater) =>
@@ -651,6 +654,32 @@ export default function App() {
       unsubscribe?.();
     };
   }, [logged, role, currentUserState?.user_id]);
+  useEffect(() => {
+    if (!logged || !currentCompany?.company_id) {
+      setCompanyPermissions([]);
+      setCompanyPermissionsLoading(false);
+      return;
+    }
+    let alive = true;
+    const loadCompanyPermissions = async () => {
+      try {
+        setCompanyPermissionsLoading(true);
+        const rows = await companyPermissionsService.loadCompanyPermissions(currentCompany.company_id);
+        if (alive) setCompanyPermissions(rows);
+      } catch (error) {
+        console.error("Supabase company_permissions load/save error:", error);
+        if (alive) setDataError(error.message);
+      } finally {
+        if (alive) setCompanyPermissionsLoading(false);
+      }
+    };
+    loadCompanyPermissions();
+    const unsubscribe = companyPermissionsService.subscribe(loadCompanyPermissions);
+    return () => {
+      alive = false;
+      unsubscribe?.();
+    };
+  }, [logged, currentCompany?.company_id]);
 	  useEffect(() => {
 	    if (!logged) return;
       if (!currentCompany?.company_id) return;
@@ -800,20 +829,28 @@ export default function App() {
 	    roleMatrix = settings.rolePermissions?.[role] || {},
 	    hasRoleMatrix = Object.keys(roleMatrix).length > 0,
 	    canNode = (nodeKey, action = "can_view") => hasTreePermission(treeRolePermissions, role, nodeKey, action),
+      companyCanPage = (pageKey, action = "can_view") => {
+        if (pageKey === "companies_admin") return isPlatformAdminUser;
+        if (!hasSelectedCompany) return false;
+        return companyCanAccessFromRows(companyPermissions, pageKey, action);
+      },
 	    canPage = (pageKey, action = "can_view") => {
-        if (isPlatformAdminUser) return hasSelectedCompany || pageKey === "companies_admin";
+        if (isPlatformAdminUser) return pageKey === "companies_admin" ? true : companyCanPage(pageKey, action);
+        if (!companyCanPage(pageKey, action)) return false;
         return pageAllowedByTree(treeRolePermissions, role, pageKey, action) || canByPermission(appPermissions, role, pageKey, action);
       },
 	    visibleNavItems = navItems.filter(([id]) => {
-        if (isPlatformAdminUser) return hasSelectedCompany ? true : id === "companies_admin";
+        if (isPlatformAdminUser) return hasSelectedCompany ? id === "companies_admin" || companyCanPage(id, "can_view") : id === "companies_admin";
         if (id === "companies_admin") return false;
+        if (!companyCanPage(id, "can_view")) return false;
 	      if (id === "dashboard") return hasAnyPermission(treeRolePermissions, role, dashboardPermissionNodes, "can_view");
 	      if (treeRolePermissions.length) return pageAllowedByTree(treeRolePermissions, role, id, "can_view");
 	      if (appPermissions.length) return canByPermission(appPermissions, role, id === "reports" ? "reports" : id, "can_view");
 	      return hasRoleMatrix ? roleMatrix[id]?.view : isAdminLikeRole(role);
 	    }),
+      requestedPageBlockedByCompany = page !== "companies_admin" && hasSelectedCompany && !companyCanPage(page, "can_view"),
 	    firstAllowedPage = isPlatformAdminUser && !hasSelectedCompany ? "companies_admin" : getFirstAllowedPageForUser({ ...currentUser, role }, treeRolePermissions, appPermissions, visibleNavItems),
-	    activePage = visibleNavItems.some(([id]) => id === page) ? page : firstAllowedPage,
+	    activePage = requestedPageBlockedByCompany ? page : (visibleNavItems.some(([id]) => id === page) ? page : firstAllowedPage),
     title = navItems.find((x) => x[0] === activePage)?.[1],
     company = currentCompany || getCurrentCompany() || {},
     companyName = company.company_name || currentUser.company_name || "Pure Money",
@@ -837,6 +874,8 @@ export default function App() {
 	      role,
 	      currentUser,
         currentCompany: company,
+        companyPermissions,
+        companyCanPage,
 	      can: (pageKey, action = "can_view") => canPage(pageKey, action),
 	      canNode,
 	    };
@@ -872,13 +911,14 @@ export default function App() {
     setDataLoading(false);
     setAppPermissions([]);
     setTreeRolePermissions([]);
+    setCompanyPermissions([]);
     setNotifications([]);
     setPage(selected ? "dashboard" : "companies_admin");
   };
-  if (visibleNavItems.length && activePage && activePage !== page) {
+  if (!requestedPageBlockedByCompany && visibleNavItems.length && activePage && activePage !== page) {
     setTimeout(() => setPage(activePage), 0);
   }
-  if (permissionsLoading) return <LoadingScreen message="جاري تحميل الصلاحيات..." />;
+  if (permissionsLoading || companyPermissionsLoading) return <LoadingScreen message="جاري تحميل الصلاحيات..." />;
   if (!visibleNavItems.length) {
     return <div className="grid min-h-screen place-items-center bg-slate-50 p-5" dir="rtl"><div className="panel max-w-xl p-6 text-center"><ShieldCheck className="mx-auto mb-3 text-brand-700" /><h2 className="text-xl font-extrabold">لا توجد صلاحيات مفعلة لهذا المستخدم</h2><button onClick={() => { localStorage.removeItem("ep_logged"); localStorage.removeItem("ep_role"); clearTenantSession(); setCurrentCompany(null); setCurrentUserState(null); setLogged(false); }} className="btn-primary mt-5">تسجيل الخروج</button></div></div>;
   }
@@ -1041,6 +1081,9 @@ export default function App() {
         </header>
         <main className="p-4 md:p-7">
           <PageErrorBoundary resetKey={activePage} onBack={() => setPage("dashboard")}>
+          {requestedPageBlockedByCompany && <CompanyModuleDisabled onBack={() => setPage(firstAllowedPage || "dashboard")} />}
+          {!requestedPageBlockedByCompany && (
+          <>
           {activePage === "companies_admin" && <CompaniesAdminPage {...p} />}{" "}
           {activePage === "dashboard" && <Dashboard {...p} />}{" "}
           {activePage === "employees" && <EnhancedEmployees {...p} />}{" "}
@@ -1065,9 +1108,28 @@ export default function App() {
 	          {activePage === "reports" && <EnhancedReports {...p} />}{" "}
 	          {activePage === "settings" && <SettingsPage {...p} />}
           {fullHrNavItems.some(([id]) => id === activePage) && <HRModulePage pageKey={activePage} currentCompany={company} can={p.can} />}
+          </>
+          )}
           </PageErrorBoundary>
         </main>
         <AIAssistantWidget currentUser={p.currentUser} currentCompany={company} page={activePage} setPage={setPage} can={p.can} employees={employees} evaluations={evaluations} settings={settings} />
+      </div>
+    </div>
+  );
+}
+
+function CompanyModuleDisabled({ onBack }) {
+  return (
+    <div className="grid min-h-[55vh] place-items-center">
+      <div className="panel max-w-xl p-8 text-center">
+        <ShieldCheck className="mx-auto mb-4 text-brand-700" size={42} />
+        <h2 className="text-xl font-extrabold">هذه الصلاحية غير مفعلة لهذه الشركة</h2>
+        <p className="mt-3 text-sm leading-7 text-slate-500">
+          يمكن لمشرف المنصة تفعيل هذه الوحدة من إدارة الشركات ← صلاحيات الشركات.
+        </p>
+        <button type="button" onClick={onBack} className="btn-primary mt-5">
+          العودة إلى صفحة مسموحة
+        </button>
       </div>
     </div>
   );
@@ -1199,6 +1261,7 @@ function HRModulePage({ pageKey, currentCompany }) {
 function CompaniesAdminPage({ currentUser }) {
   const [rows, setRows] = useState([]);
   const [tab, setTab] = useState("الشركات");
+  const [permissionsCompanyId, setPermissionsCompanyId] = useState("");
   const [loading, setLoading] = useState(true);
   const [dialog, setDialog] = useState(null);
   const canManage = currentUser?.is_platform_admin === true || currentUser?.role === platformSuperAdminRole;
@@ -1256,16 +1319,180 @@ function CompaniesAdminPage({ currentUser }) {
       alert(error.message);
     }
   };
-  const tabs = ["الشركات", "اشتراكات الشركات", "مستخدمو الشركات", "نسخ احتياطية الشركات", "إعدادات المنصة"];
+  const managePermissions = (companyId) => {
+    setPermissionsCompanyId(companyId);
+    setTab("صلاحيات الشركات");
+  };
+  const enableAllPermissions = async (companyId) => {
+    if (!confirm("هل تريد تفعيل جميع الوحدات والصلاحيات لهذه الشركة؟")) return;
+    try {
+      await companyPermissionsService.enableAll(companyId);
+      alert("تم تفعيل جميع صلاحيات الشركة");
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+  const disableAllPermissions = async (companyId) => {
+    if (!confirm("هل تريد تعطيل جميع وحدات هذه الشركة؟")) return;
+    try {
+      await companyPermissionsService.disableAll(companyId);
+      alert("تم تعطيل صلاحيات الشركة");
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+  const tabs = ["الشركات", "صلاحيات الشركات", "اشتراكات الشركات", "مستخدمو الشركات", "نسخ احتياطية الشركات", "إعدادات المنصة"];
   return (
     <div className="space-y-5">
       <PageHead title="إدارة الشركات" desc="إدارة منصة SaaS متعددة الشركات والاشتراكات والمستخدمين" action={<button onClick={openAddCompany} className="btn-primary"><Plus size={18} /> إضافة شركة</button>} />
       <div className="panel flex flex-wrap gap-2 p-3">{tabs.map((item) => <button key={item} onClick={() => setTab(item)} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === item ? "bg-brand-700 text-white" : "bg-slate-100 text-slate-600"}`}>{item}</button>)}</div>
       <div className="grid gap-4 md:grid-cols-4"><Mini label="عدد الشركات" value={rows.length} I={Building2} /><Mini label="النشطة" value={rows.filter((r) => r.is_active).length} I={BadgeCheck} /><Mini label="اشتراكات فعالة" value={rows.filter((r) => ["active", "trial"].includes(r.subscription_status)).length} I={Wallet} /><Mini label="المشرف" value={currentUser?.username || "مستخدم"} I={UserRoundCog} /></div>
-      <div className="panel p-4">
-        {loading ? <p className="text-sm text-slate-400">جاري التحميل...</p> : <div className="table-wrap"><table><thead><tr><th>اسم الشركة</th><th>كود الشركة</th><th>حالة الاشتراك</th><th>الحالة</th><th>اسم مستخدم مدير الشركة</th><th>اسم مدير الشركة</th><th>عدد المستخدمين</th><th>الحد الأقصى للمستخدمين</th><th></th></tr></thead><tbody>{rows.map((row) => <tr key={row.company_id}><td>{row.company_name}</td><td>{row.company_code}</td><td><Status>{row.subscription_status}</Status></td><td><Status>{row.is_active ? "نشط" : "معطل"}</Status></td><td>{row.admin_username || "غير محدد"}</td><td>{row.admin_name || "غير محدد"}</td><td>{row.users_count ?? "—"}</td><td>{row.max_users}</td><td><button onClick={() => openEditCompany(row)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => companiesService.deleteOrDeactivateCompany(row).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>}
-      </div>
+      {tab === "صلاحيات الشركات" ? (
+        <CompanyPermissionsAdminPanel companies={rows} selectedCompanyId={permissionsCompanyId || rows[0]?.company_id || ""} onSelectCompany={setPermissionsCompanyId} />
+      ) : (
+        <div className="panel p-4">
+          {loading ? <p className="text-sm text-slate-400">جاري التحميل...</p> : <div className="table-wrap"><table><thead><tr><th>اسم الشركة</th><th>كود الشركة</th><th>حالة الاشتراك</th><th>الحالة</th><th>اسم مستخدم مدير الشركة</th><th>اسم مدير الشركة</th><th>عدد المستخدمين</th><th>الحد الأقصى للمستخدمين</th><th>الصلاحيات</th><th></th></tr></thead><tbody>{rows.map((row) => <tr key={row.company_id}><td>{row.company_name}</td><td>{row.company_code}</td><td><Status>{row.subscription_status}</Status></td><td><Status>{row.is_active ? "نشط" : "معطل"}</Status></td><td>{row.admin_username || "غير محدد"}</td><td>{row.admin_name || "غير محدد"}</td><td>{row.users_count ?? "—"}</td><td>{row.max_users}</td><td><div className="flex flex-wrap gap-1"><button onClick={() => managePermissions(row.company_id)} className="btn-secondary !h-9">إدارة</button><button onClick={() => enableAllPermissions(row.company_id)} className="btn-secondary !h-9">تفعيل الكل</button><button onClick={() => disableAllPermissions(row.company_id)} className="btn-secondary !h-9">تعطيل الكل</button></div></td><td><button onClick={() => openEditCompany(row)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => companiesService.deleteOrDeactivateCompany(row).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>}
+        </div>
+      )}
       {dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6"><DialogTitle title="بيانات الشركة" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="اسم الشركة"><input required value={dialog.company_name || ""} onChange={(e) => setDialog({ ...dialog, company_name: e.target.value })} className="field mt-2" /></Label><Label t="كود الشركة"><input required value={dialog.company_code || ""} onChange={(e) => setDialog({ ...dialog, company_code: e.target.value.toUpperCase() })} className="field mt-2" /></Label><Label t="البريد"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label><Label t="الهاتف"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label><Label t="الباقة"><input value={dialog.subscription_plan || ""} onChange={(e) => setDialog({ ...dialog, subscription_plan: e.target.value })} className="field mt-2" /></Label><Label t="حالة الاشتراك"><select value={dialog.subscription_status || "active"} onChange={(e) => setDialog({ ...dialog, subscription_status: e.target.value })} className="field mt-2"><option value="active">active</option><option value="trial">trial</option><option value="inactive">inactive</option></select></Label><Label t="الحد الأقصى للمستخدمين"><input type="number" value={dialog.max_users || 0} onChange={(e) => setDialog({ ...dialog, max_users: e.target.value })} className="field mt-2" /></Label><Label t="الحد الأقصى للفروع"><input type="number" value={dialog.max_branches || 0} onChange={(e) => setDialog({ ...dialog, max_branches: e.target.value })} className="field mt-2" /></Label><Label t="رابط الشعار"><input value={dialog.logo_url || ""} onChange={(e) => setDialog({ ...dialog, logo_url: e.target.value })} className="field mt-2" /></Label><Label t="اللون الأساسي"><input type="color" value={dialog.primary_color || "#7f1d1d"} onChange={(e) => setDialog({ ...dialog, primary_color: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label><Label t="اسم مستخدم مدير الشركة"><input required value={dialog.admin_username || ""} onChange={(e) => setDialog({ ...dialog, admin_username: e.target.value })} onBlur={(e) => setDialog((d) => ({ ...d, admin_username: e.target.value.trim() }))} className="field mt-2" /></Label><Label t="اسم مدير الشركة"><input value={dialog.admin_name || ""} onChange={(e) => setDialog({ ...dialog, admin_name: e.target.value })} className="field mt-2" /></Label><Label t="كلمة مرور مدير الشركة"><input type="password" value={dialog.admin_password || ""} placeholder={dialog.company_id ? "اتركها فارغة للإبقاء على كلمة المرور الحالية" : "123456"} onChange={(e) => setDialog({ ...dialog, admin_password: e.target.value })} className="field mt-2" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}
+    </div>
+  );
+}
+
+function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCompany }) {
+  const [rows, setRows] = useState([]);
+  const [copySource, setCopySource] = useState("");
+  const [loading, setLoading] = useState(false);
+  const selectedCompany = companies.find((company) => company.company_id === selectedCompanyId);
+  const load = async () => {
+    if (!selectedCompanyId) return setRows([]);
+    setLoading(true);
+    try {
+      setRows(await companyPermissionsService.loadCompanyPermissions(selectedCompanyId));
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { load(); }, [selectedCompanyId]);
+  const updateRow = (permissionKey, key, value) => {
+    setRows((list) => {
+      const merged = mergeWithDefaultCompanyPermissions(list, selectedCompanyId);
+      return merged.map((row) => row.permission_key === permissionKey ? { ...row, [key]: value, is_enabled: key === "can_access" ? value : row.is_enabled, can_view: key === "can_access" && !value ? false : row.can_view } : row);
+    });
+  };
+  const setAll = (value) => {
+    setRows(companyPermissionModules.map(([key, label]) => ({
+      company_id: selectedCompanyId,
+      permission_key: key,
+      permission_label: label,
+      module_key: key,
+      module_label: label,
+      can_access: value,
+      can_view: value,
+      can_create: value,
+      can_edit: value,
+      can_delete: value,
+      can_approve: value,
+      can_export: value,
+      can_print: value,
+      can_manage: value,
+      is_enabled: value,
+    })));
+  };
+  const save = async () => {
+    try {
+      setLoading(true);
+      const saved = await companyPermissionsService.bulkSaveCompanyPermissions(selectedCompanyId, rows);
+      setRows(saved);
+      alert("تم حفظ صلاحيات الشركة");
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  const reset = async () => {
+    if (!confirm("هل تريد إعادة صلاحيات الشركة إلى الإعدادات الافتراضية؟")) return;
+    try {
+      setLoading(true);
+      const saved = await companyPermissionsService.seedDefaultCompanyPermissions(selectedCompanyId);
+      setRows(saved);
+      alert("تمت إعادة ضبط صلاحيات الشركة");
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  const copy = async () => {
+    if (!copySource) return alert("اختر الشركة المصدر أولاً");
+    if (!confirm("سيتم نسخ صلاحيات الشركة المصدر إلى الشركة الحالية. هل تريد المتابعة؟")) return;
+    try {
+      setLoading(true);
+      const saved = await companyPermissionsService.copyCompanyPermissions(copySource, selectedCompanyId);
+      setRows(saved);
+      alert("تم نسخ صلاحيات الشركة");
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  const visibleRows = mergeWithDefaultCompanyPermissions(rows, selectedCompanyId);
+  return (
+    <div className="panel p-4">
+      <div className="mb-4 flex flex-wrap items-end gap-3">
+        <Label t="اختر الشركة">
+          <select value={selectedCompanyId || ""} onChange={(e) => onSelectCompany(e.target.value)} className="field mt-2 min-w-[260px]">
+            {companies.map((company) => <option key={company.company_id} value={company.company_id}>{company.company_code} - {company.company_name}</option>)}
+          </select>
+        </Label>
+        <Label t="نسخ الصلاحيات من شركة">
+          <select value={copySource} onChange={(e) => setCopySource(e.target.value)} className="field mt-2 min-w-[240px]">
+            <option value="">اختر المصدر...</option>
+            {companies.filter((company) => company.company_id !== selectedCompanyId).map((company) => <option key={company.company_id} value={company.company_id}>{company.company_code} - {company.company_name}</option>)}
+          </select>
+        </Label>
+        <button onClick={copy} disabled={!selectedCompanyId || !copySource || loading} className="btn-secondary">نسخ الصلاحيات</button>
+        <button onClick={() => setAll(true)} disabled={!selectedCompanyId || loading} className="btn-secondary">تحديد الكل</button>
+        <button onClick={() => setAll(false)} disabled={!selectedCompanyId || loading} className="btn-secondary">مسح الكل</button>
+        <button onClick={reset} disabled={!selectedCompanyId || loading} className="btn-secondary">إعادة الافتراضي</button>
+        <button onClick={save} disabled={!selectedCompanyId || loading} className="btn-primary"><Save size={17} /> حفظ الصلاحيات</button>
+      </div>
+      <div className="mb-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+        الشركة الحالية: <b>{selectedCompany?.company_name || "غير محدد"}</b>. تعطيل أي وحدة هنا يمنع ظهورها في القائمة حتى لو كان الدور يملك صلاحيتها.
+      </div>
+      {loading ? <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">جاري تحميل صلاحيات الشركة...</p> : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>الوحدة</th>
+                {companyPermissionActions.map(([, label]) => <th key={label}>{label}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.map((row) => (
+                <tr key={row.permission_key}>
+                  <td><b>{row.module_label || row.permission_label}</b><p className="text-xs text-slate-400">{row.permission_key}</p></td>
+                  {companyPermissionActions.map(([key]) => (
+                    <td key={key} className="text-center">
+                      <input
+                        type="checkbox"
+                        checked={key === "can_access" ? row.can_access && row.is_enabled : Boolean(row[key])}
+                        onChange={(e) => updateRow(row.permission_key, key, e.target.checked)}
+                        className="h-4 w-4 accent-red-800"
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -5849,7 +6076,7 @@ function RoleManagementPanel({ roles, users, canEdit, onSaveRole, onDeleteRole, 
   );
 }
 
-function UsersPermissionsPage({ employees, can }) {
+function UsersPermissionsPage({ employees, can, companyPermissions }) {
   const [users, setUsers] = useState([]);
   const [roleRows, setRoleRows] = useState([]);
   const [employeeOptions, setEmployeeOptions] = useState([]);
@@ -5908,6 +6135,15 @@ function UsersPermissionsPage({ employees, can }) {
   }, [selectedRole]);
   const branchOptions = [...new Set([...(employeeOptions || []).map((e) => e.branch), ...users.map((u) => u.branch), ...branches].filter(Boolean))];
   const roleOptions = [...new Set([...(roleRows || []).filter((r) => r.is_active !== false).map((r) => r.role_name), ...systemRoles])];
+  const filterNodesByCompanyPermissions = (nodes = []) =>
+    nodes
+      .map((node) => {
+        const children = filterNodesByCompanyPermissions(node.children || []);
+        const pageAllowed = !node.page_key || companyCanAccessFromRows(companyPermissions || [], node.page_key, "can_view");
+        return pageAllowed || children.length ? { ...node, children } : null;
+      })
+      .filter(Boolean);
+  const companyFilteredTreeNodes = filterNodesByCompanyPermissions(treeNodes);
   const filtered = users.filter((u) =>
     (!filters.q || (u.name || u.employee_name || u.username || "").includes(filters.q) || u.username.includes(filters.q) || u.employee_id.includes(filters.q) || u.branch.includes(filters.q) || u.role.includes(filters.q)) &&
     (filters.role === "all" || u.role === filters.role) &&
@@ -5990,7 +6226,7 @@ function UsersPermissionsPage({ employees, can }) {
     }
   };
   const syncLegacyPermissions = async (roleRows) => {
-    const flat = flattenPermissionTree(treeNodes);
+    const flat = flattenPermissionTree(companyFilteredTreeNodes);
     const byPage = new Map();
     flat.forEach((node) => {
       const pageKey = node.page_key;
@@ -6008,7 +6244,7 @@ function UsersPermissionsPage({ employees, can }) {
     if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
     try {
       setTreeLoading(true);
-      const flat = flattenPermissionTree(treeNodes);
+      const flat = flattenPermissionTree(companyFilteredTreeNodes);
       const roleRows = flat.map((node) => treePermissionsService.getNodePermission(treePermissions, selectedRole, node.node_key));
       const saved = await treePermissionsService.saveBulkNodePermissions(selectedRole, roleRows);
       setTreePermissions(saved);
@@ -6069,7 +6305,7 @@ function UsersPermissionsPage({ employees, can }) {
         <TreePermissionsPanel
           selectedRole={selectedRole}
           setSelectedRole={setSelectedRole}
-          treeNodes={treeNodes}
+          treeNodes={companyFilteredTreeNodes}
           treePermissions={treePermissions}
           setTreePermissions={setTreePermissions}
           roles={roleOptions}
@@ -6082,6 +6318,7 @@ function UsersPermissionsPage({ employees, can }) {
           onCopy={copyTreePermissions}
         />
       </div>
+      {flattenPermissionTree(treeNodes).length > flattenPermissionTree(companyFilteredTreeNodes).length && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-700">بعض الصلاحيات مخفية لأن هذه الوحدات غير مفعلة لهذه الشركة.</div>}
       <RoleManagementPanel roles={roleRows.length ? roleRows : roleOptions.map((role_name) => ({ role_id: `ROLE-${role_name}`, role_name, role_description: "", is_system_role: systemRoles.includes(role_name), is_active: true }))} users={users} canEdit={canEdit} onSaveRole={async (roleRow) => { const saved = await adminService.saveRole(roleRow); setRoleRows((list) => list.some((r) => r.role_id === saved.role_id) ? list.map((r) => r.role_id === saved.role_id ? saved : r) : [...list, saved]); }} onDeleteRole={async (roleRow) => { const saved = await adminService.deleteRole(roleRow, users); setRoleRows((list) => saved ? list.map((r) => r.role_id === saved.role_id ? saved : r) : list.filter((r) => r.role_id !== roleRow.role_id)); }} onCopyPermissions={async (source, target) => { await treePermissionsService.copyRolePermissions(source, target); alert("تم نسخ صلاحيات الدور"); }} />
       {dialog && <UserEditorModal dialog={dialog} setDialog={setDialog} saveUser={saveUser} employeeOptions={employeeOptions} selectEmployee={selectEmployee} roles={roleOptions} />}
       {false && dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={saveUser} className="panel w-full max-w-3xl p-6"><div className="mb-5 flex"><h3 className="text-xl font-extrabold">بيانات المستخدم</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div><div className="grid gap-4 md:grid-cols-2"><Label t="ربط الموظف"><select value={dialog.employee_id} onChange={(e) => selectEmployee(e.target.value)} className="field mt-2"><option value="">بدون ربط</option>{employeeOptions.map((e) => <option key={e.id} value={e.id}>{e.name} - {e.id} - {e.branch} - {e.job}</option>)}</select></Label><Label t="اسم الموظف"><input readOnly value={dialog.employee_name || dialog.name || ""} className="field mt-2 bg-slate-50" /></Label><Label t="اسم المستخدم"><input required value={dialog.username} onChange={(e) => setDialog({ ...dialog, username: e.target.value })} className="field mt-2" /></Label><Label t="كلمة المرور"><input required type="password" value={dialog.password || ""} onChange={(e) => setDialog({ ...dialog, password: e.target.value })} className="field mt-2" /></Label><Label t="الدور"><select value={dialog.role} onChange={(e) => setDialog({ ...dialog, role: e.target.value })} className="field mt-2">{systemRoles.map((r) => <option key={r}>{r}</option>)}</select></Label><Label t="الفرع"><input readOnly value={dialog.branch || ""} className="field mt-2 bg-slate-50" /></Label><Label t="الوظيفة"><input readOnly value={dialog.job || ""} className="field mt-2 bg-slate-50" /></Label><Label t="البريد الإلكتروني"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label><Label t="الهاتف"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label></div><div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ البيانات</button></div></form></div>}

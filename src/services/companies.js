@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 import { normalizeCompany, requireCompanyId } from "./tenant";
+import { companyPermissionsService } from "./companyPermissions";
 
 const COMPANY_ADMIN_ROLE = "مدير النظام";
 
@@ -194,6 +195,9 @@ export const companiesService = {
   async createCompanyWithDefaults(company, admin) {
     const savedCompany = await this.saveCompany(company);
     await this.seedCompanyDefaults(savedCompany);
+    await companyPermissionsService.seedDefaultCompanyPermissions(savedCompany.company_id).catch((error) => {
+      console.error("Tenant/company permissions seed error:", error);
+    });
     const savedAdmin = await this.createCompanyAdminUser(savedCompany, admin);
     return adminUserToCompanyFields(savedCompany, savedAdmin);
   },

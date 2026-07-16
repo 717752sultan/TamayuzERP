@@ -132,6 +132,7 @@ export const tenantAwareTables = new Set([
   "app_permissions",
   "app_permission_nodes",
   "app_role_node_permissions",
+  "company_permissions",
   "branches",
   "performance_job_templates",
   "performance_kpi_criteria",
