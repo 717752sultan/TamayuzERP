@@ -57,6 +57,23 @@ export const pageRegistry = [
 export const pageRegistryByKey = Object.fromEntries(pageRegistry.map((page) => [page.key, page]));
 export const permissionKeyForPage = (pageKey = "") => pageRegistryByKey[pageKey]?.permissionKey || pageKey;
 
+export const validateUniquePermissionKeys = (pages = pageRegistry) => {
+  const seen = new Map();
+  const duplicates = [];
+  for (const page of pages || []) {
+    if (!page?.permissionKey) continue;
+    if (seen.has(page.permissionKey)) {
+      duplicates.push({ permissionKey: page.permissionKey, firstPage: seen.get(page.permissionKey), duplicatePage: page.key });
+    } else {
+      seen.set(page.permissionKey, page.key);
+    }
+  }
+  if (duplicates.length) console.warn("Duplicate permissionKey in pageRegistry:", duplicates);
+  return duplicates;
+};
+
+validateUniquePermissionKeys(pageRegistry);
+
 export const findPageByArabicName = (value = "") => {
   const text = String(value).trim().toLowerCase();
   if (!text) return null;

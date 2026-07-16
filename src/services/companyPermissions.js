@@ -1,4 +1,4 @@
-import { pageRegistry, permissionKeyForPage } from "../constants/pageRegistry";
+import { pageRegistry, permissionKeyForPage, validateUniquePermissionKeys } from "../constants/pageRegistry";
 import { supabase } from "./supabase";
 
 export const companyPermissionActions = [
@@ -13,6 +13,8 @@ export const companyPermissionActions = [
   ["can_manage", "إدارة"],
 ];
 
+validateUniquePermissionKeys(pageRegistry);
+
 export const companyPermissionModules = pageRegistry.map((page) => [
   page.permissionKey,
   page.label,
@@ -25,19 +27,22 @@ const sensitiveKeys = new Set(companyPermissionModules.filter(([, , group]) => s
 
 export const pageToCompanyPermissionKey = permissionKeyForPage;
 
+const legacyMeta = (permissionKey) => ({
+  key: permissionKey,
+  routeKey: permissionKey,
+  label: permissionKey,
+  group: "legacy",
+  groupLabel: "صلاحيات قديمة / غير مستخدمة",
+  permissionKey,
+  moduleKey: permissionKey,
+  order: 9999,
+  isOfficialPage: false,
+  isDuplicateAllowed: false,
+  defaultEnabled: true,
+});
+
 const pageMetaByPermissionKey = (permissionKey) =>
-  pageRegistry.find((page) => page.permissionKey === permissionKey || page.key === permissionKey) || {
-    key: permissionKey,
-    label: permissionKey,
-    group: "legacy",
-    groupLabel: "صلاحيات قديمة / غير مستخدمة",
-    permissionKey,
-    moduleKey: permissionKey,
-    order: 9999,
-    isOfficialPage: false,
-    isDuplicateAllowed: false,
-    defaultEnabled: true,
-  };
+  pageRegistry.find((page) => page.permissionKey === permissionKey || page.key === permissionKey) || legacyMeta(permissionKey);
 
 const moduleMeta = (permissionKey) => {
   const page = pageMetaByPermissionKey(permissionKey);
@@ -141,6 +146,20 @@ const toDb = (row, companyId) => {
   };
 };
 
+export function dedupePermissionRows(rows = []) {
+  const map = new Map();
+  for (const row of rows || []) {
+    if (!row?.company_id || !row?.permission_key) continue;
+    const key = `${row.company_id}::${row.permission_key}`;
+    map.set(key, {
+      ...(map.get(key) || {}),
+      ...row,
+      updated_at: new Date().toISOString(),
+    });
+  }
+  return Array.from(map.values());
+}
+
 let currentCompanyPermissionCache = [];
 
 export const mergeWithDefaultCompanyPermissions = (rows = [], companyId = "", options = {}) => {
@@ -175,11 +194,11 @@ export const companyPermissionsService = {
   },
 
   async saveCompanyPermission(companyId, permissionKey, payload = {}) {
-    const row = toDb({ ...payload, permission_key: permissionKey }, companyId);
+    const row = dedupePermissionRows([toDb({ ...payload, permission_key: permissionKey }, companyId)])[0];
     const { data, error } = await supabase.from("company_permissions").upsert(row, { onConflict: "company_id,permission_key" }).select().single();
     if (error) {
-      console.error("Company permissions error:", error);
-      throw new Error("فشل حفظ صلاحيات الشركة: " + error.message);
+      console.error("Company permissions save error:", error);
+      throw new Error("فشل حفظ صلاحيات الشركة");
     }
     return normalizeCompanyPermission(data, companyId);
   },
@@ -187,12 +206,14 @@ export const companyPermissionsService = {
   async bulkSaveCompanyPermissions(companyId, permissions = []) {
     if (!companyId) throw new Error("يجب اختيار الشركة أولاً");
     const rows = mergeWithDefaultCompanyPermissions(permissions, companyId).map((row) => toDb(row, companyId));
-    const { data, error } = await supabase.from("company_permissions").upsert(rows, { onConflict: "company_id,permission_key" }).select();
+    const safeRows = dedupePermissionRows(rows);
+    const { data, error } = await supabase.from("company_permissions").upsert(safeRows, { onConflict: "company_id,permission_key" }).select();
     if (error) {
-      console.error("Company permissions error:", error);
-      throw new Error("فشل حفظ صلاحيات الشركة: " + error.message);
+      console.error("Company permissions save error:", error);
+      throw new Error("فشل حفظ صلاحيات الشركة");
     }
-    const normalized = mergeWithDefaultCompanyPermissions(data || rows, companyId);
+    const normalized = mergeWithDefaultCompanyPermissions(data || safeRows, companyId);
+    normalized.duplicateCount = rows.length - safeRows.length;
     currentCompanyPermissionCache = normalized;
     return normalized;
   },
@@ -216,14 +237,15 @@ export const companyPermissionsService = {
       const missing = companyPermissionModules
         .filter(([permissionKey]) => !existingKeys.has(permissionKey))
         .map((item) => defaultRow(companyId, item, false, { enableSensitive: true }));
-      if (!missing.length) return { insertedCount: 0, existingCount: existing.length, totalCount: existing.length, rows: existing };
-      const { data, error } = await supabase.from("company_permissions").upsert(missing.map((row) => toDb(row, companyId)), { onConflict: "company_id,permission_key" }).select();
+      if (!missing.length) return { insertedCount: 0, existingCount: existing.length, totalCount: existing.length, duplicateCount: 0, rows: existing };
+      const safeMissingRows = dedupePermissionRows(missing.map((row) => toDb(row, companyId)));
+      const { data, error } = await supabase.from("company_permissions").upsert(safeMissingRows, { onConflict: "company_id,permission_key" }).select();
       if (error) throw error;
-      const rows = mergeWithDefaultCompanyPermissions([...(existing || []), ...(data || missing)], companyId, { enableSensitive: true });
-      return { insertedCount: missing.length, existingCount: existing.length, totalCount: rows.length, rows };
+      const rows = mergeWithDefaultCompanyPermissions([...(existing || []), ...(data || safeMissingRows)], companyId, { enableSensitive: true });
+      return { insertedCount: safeMissingRows.length, existingCount: existing.length, totalCount: rows.length, duplicateCount: missing.length - safeMissingRows.length, rows };
     } catch (error) {
       console.error("Company permissions error:", error);
-      throw new Error("فشل مزامنة الصلاحيات مع الصفحات: " + error.message);
+      throw new Error("فشل مزامنة الصلاحيات مع الصفحات");
     }
   },
 
@@ -266,7 +288,7 @@ export const companyPermissionsService = {
       module_label: page.label,
       group_key: page.group,
       group_label: page.groupLabel,
-      route_key: page.key,
+      route_key: page.routeKey || page.key,
       can_access: false,
       can_view: false,
       is_enabled: false,

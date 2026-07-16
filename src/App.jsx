@@ -1457,9 +1457,10 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
       setLoading(true);
       const saved = await companyPermissionsService.bulkSaveCompanyPermissions(selectedCompanyId, rows);
       setRows(saved);
-      alert("تم حفظ صلاحيات الشركة");
+      alert(saved.duplicateCount > 0 ? "تم حفظ صلاحيات الشركة بنجاح. تم تجاهل الصلاحيات المكررة أثناء الحفظ" : "تم حفظ صلاحيات الشركة بنجاح");
     } catch (error) {
-      alert(error.message);
+      console.error("Company permissions save error:", error);
+      alert("فشل حفظ صلاحيات الشركة");
     } finally {
       setLoading(false);
     }
