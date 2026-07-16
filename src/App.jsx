@@ -270,7 +270,55 @@ const makeCriteriaTemplate = (names = criteria) => {
   return names.map((name, i) => ({ name, weight: ws[i] || 0 }));
 };
 const includesAny = (value = "", words = []) =>
-  words.some((word) => String(value).includes(word));
+  words.some((word) => String(value || "").includes(word));
+const isCashDenominationCriterion = (name = "") =>
+  includesAny(name, [
+    "فئة 200",
+    "فئة 500",
+    "فئة 1000",
+    "200",
+    "500",
+    "1000",
+  ]);
+const isBehavioralCriterion = (name = "") =>
+  includesAny(name, [
+    "الانضباط",
+    "الالتزام",
+    "السلوك",
+    "التعاون",
+    "الحضور",
+    "الدوام",
+    "تحمل ضغط العمل",
+  ]);
+const detectCriterionTypeByName = (name = "") => {
+  const value = String(name || "").trim();
+  if (isCashDenominationCriterion(value)) return "cash_counting";
+  if (isBehavioralCriterion(value)) return "behavioral";
+  if (includesAny(value, ["رضا العملاء", "الشكاوى", "جودة خدمة", "جودة الرد", "جودة التواصل"])) return "service_quality";
+  if (includesAny(value, ["مبلغ", "مبالغ", "مالي", "إجمالي المبالغ"])) return "financial";
+  return "operational";
+};
+const applyCriterionTypeAndCashWeights = (item = {}) => {
+  const name = String(item?.name || item?.criterion_name || item?.title || "");
+  const criterionType = item?.criterion_type || detectCriterionTypeByName(name);
+  const next = { ...item, criterion_type: criterionType };
+  if (criterionType === "cash_counting" && isCashDenominationCriterion(name)) {
+    next.subWeights = {
+      cash200: name.includes("200") ? Number(item.weight || 0) : 0,
+      cash500: name.includes("500") ? Number(item.weight || 0) : 0,
+      cash1000: name.includes("1000") ? Number(item.weight || 0) : 0,
+    };
+  } else {
+    delete next.subWeights;
+  }
+  return next;
+};
+const cashSubWeightsHtml = (criterion = {}) =>
+  detectCriterionTypeByName(criterion.name || criterion.criterion_name) === "cash_counting" &&
+  isCashDenominationCriterion(criterion.name || criterion.criterion_name) &&
+  criterion.subWeights
+    ? ` <small>200: ${criterion.subWeights.cash200 || 0}% - 500: ${criterion.subWeights.cash500 || 0}% - 1000: ${criterion.subWeights.cash1000 || 0}%</small>`
+    : "";
 const defaultCriteriaForJob = (job = "") => {
   const isCounter = includesAny(job, ["عداد", "عداد ومراسلات"]);
   const isTech = includesAny(job, ["دعم فني"]);
@@ -343,11 +391,7 @@ const defaultCriteriaForJob = (job = "") => {
                 "الانضباط الوظيفي",
               ]
             : criteria;
-  return makeCriteriaTemplate(names).map((item) =>
-    isCounter
-      ? { ...item, subWeights: { cash200: item.name.includes("200") ? item.weight : 0, cash500: item.name.includes("500") ? item.weight : 0, cash1000: item.name.includes("1000") ? item.weight : 0 } }
-      : item,
-  );
+  return makeCriteriaTemplate(names).map(applyCriterionTypeAndCashWeights);
 };
 const buildDefaultJobCriteria = () =>
   Object.fromEntries(
@@ -359,7 +403,7 @@ const buildDefaultJobCriteria = () =>
           : job.includes("خدمة عملاء")
             ? ["جودة الرد على العملاء", "سرعة تنفيذ الحوالات", "دقة بيانات العميل", "معالجة طلبات الواتس", "نسبة رضا العملاء", "الالتزام بإجراءات الامتثال", "خفض الشكاوى", "التعاون مع الفريق", "تحمل ضغط العمل", "الانضباط الوظيفي"]
             : criteria;
-      return [job, makeCriteriaTemplate(custom)];
+      return [job, makeCriteriaTemplate(custom).map(applyCriterionTypeAndCashWeights)];
     }),
   );
 const getJobCriteria = (settings, job) => {
@@ -3666,15 +3710,22 @@ function EnhancedTemplates({ settings, setSettings }) {
   const saveCriterion = () => {
     if (!dialog?.name?.trim()) return;
     const next = [...model];
-    const item = {
+    const criterionName = dialog.name.trim();
+    const criterionType = dialog.criterion_type || detectCriterionTypeByName(criterionName);
+    const item = applyCriterionTypeAndCashWeights({
       name: dialog.name.trim(),
       weight: Number(dialog.weight || 0),
-      subWeights: {
-        cash200: Number(dialog.subWeights?.cash200 || 0),
-        cash500: Number(dialog.subWeights?.cash500 || 0),
-        cash1000: Number(dialog.subWeights?.cash1000 || 0),
-      },
-    };
+      criterion_type: criterionType,
+      ...(criterionType === "cash_counting" && isCashDenominationCriterion(criterionName)
+        ? {
+            subWeights: {
+              cash200: Number(dialog.subWeights?.cash200 || 0),
+              cash500: Number(dialog.subWeights?.cash500 || 0),
+              cash1000: Number(dialog.subWeights?.cash1000 || 0),
+            },
+          }
+        : {}),
+    });
     if (dialog.mode === "add") next.push(item);
     else next[dialog.index] = item;
     updateJobCriteria(settings, setSettings, job, next);
@@ -3784,7 +3835,7 @@ function EnhancedTemplates({ settings, setSettings }) {
                   <td>{i + 1}</td>
 	                    <td className="font-bold">
                         {c.name}
-                        {c.subWeights && (
+                        {detectCriterionTypeByName(c.name) === "cash_counting" && isCashDenominationCriterion(c.name) && c.subWeights && (
                           <p className="mt-1 text-[11px] font-normal text-slate-500">
                             فئات النقد: 200 = {c.subWeights.cash200 || 0}% • 500 = {c.subWeights.cash500 || 0}% • 1000 = {c.subWeights.cash1000 || 0}%
                           </p>
@@ -3809,6 +3860,9 @@ function EnhancedTemplates({ settings, setSettings }) {
 }
 
 function CriteriaDialog({ dialog, setDialog, onSave }) {
+  const criterionName = String(dialog?.name || dialog?.criterion_name || dialog?.title || "");
+  const criterionType = dialog?.criterion_type || detectCriterionTypeByName(criterionName);
+  const showCashDenominationFields = criterionType === "cash_counting" && isCashDenominationCriterion(criterionName);
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
       <div className="panel w-full max-w-md p-6">
@@ -3823,11 +3877,35 @@ function CriteriaDialog({ dialog, setDialog, onSave }) {
             <input
               autoFocus
               value={dialog.name}
-              onChange={(e) => setDialog({ ...dialog, name: e.target.value })}
+              onChange={(e) => {
+                const nextName = e.target.value;
+                const nextType = detectCriterionTypeByName(nextName);
+                const next = { ...dialog, name: nextName, criterion_type: nextType };
+                if (nextType !== "cash_counting") delete next.subWeights;
+                setDialog(next);
+              }}
               className="field mt-2"
             />
           </Label>
-          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
+          <Label t="نوع المعيار">
+            <select
+              value={criterionType}
+              onChange={(e) => {
+                const nextType = e.target.value;
+                const next = { ...dialog, criterion_type: nextType };
+                if (nextType !== "cash_counting") delete next.subWeights;
+                setDialog(next);
+              }}
+              className="field mt-2"
+            >
+              <option value="behavioral">إداري / سلوكي</option>
+              <option value="operational">إنتاجي / تشغيلي</option>
+              <option value="cash_counting">عدّ نقدي / عداد</option>
+              <option value="financial">مالي</option>
+              <option value="service_quality">جودة وخدمة عملاء</option>
+            </select>
+          </Label>
+          {showCashDenominationFields && <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
             <b className="text-sm">أوزان الفئات النقدية للعداد</b>
             <div className="mt-3 grid grid-cols-3 gap-3">
               {[
@@ -3855,7 +3933,7 @@ function CriteriaDialog({ dialog, setDialog, onSave }) {
                 </Label>
               ))}
             </div>
-          </div>
+          </div>}
           <Label t="الوزن النسبي %">
             <input
               type="number"
@@ -3917,9 +3995,7 @@ function EnhancedEvaluations({ employees, evaluations, setEvaluations, settings,
   const printSelectedEvaluation = () => {
     const rows = model
       .map((c, i) => {
-        const sub = c.subWeights
-          ? ` <small>200: ${c.subWeights.cash200 || 0}% - 500: ${c.subWeights.cash500 || 0}% - 1000: ${c.subWeights.cash1000 || 0}%</small>`
-          : "";
+        const sub = cashSubWeightsHtml(c);
         return `<tr><td>${c.name}${sub}</td><td>${c.weight}%</td><td>${safeScores[i]}</td><td>${((safeScores[i] * c.weight) / 5).toFixed(1)}</td></tr>`;
       })
       .join("");
@@ -3941,9 +4017,7 @@ function EnhancedEvaluations({ employees, evaluations, setEvaluations, settings,
     if (typeof window === "undefined") return;
     const rows = model
       .map((c, i) => {
-        const sub = c.subWeights
-          ? ` <small>200: ${c.subWeights.cash200 || 0}% - 500: ${c.subWeights.cash500 || 0}% - 1000: ${c.subWeights.cash1000 || 0}%</small>`
-          : "";
+        const sub = cashSubWeightsHtml(c);
         return `<tr><td>${c.name}${sub}</td><td>${c.weight}%</td><td>${safeScores[i]}</td><td>${((safeScores[i] * c.weight) / 5).toFixed(1)}</td></tr>`;
       })
       .join("");
@@ -3983,15 +4057,22 @@ function EnhancedEvaluations({ employees, evaluations, setEvaluations, settings,
   const saveCriterion = () => {
     if (!dialog?.name?.trim() || !emp?.job) return;
     const next = [...model];
-    const item = {
-      name: dialog.name.trim(),
+    const criterionName = dialog.name.trim();
+    const criterionType = dialog.criterion_type || detectCriterionTypeByName(criterionName);
+    const item = applyCriterionTypeAndCashWeights({
+      name: criterionName,
       weight: Number(dialog.weight || 0),
-      subWeights: {
-        cash200: Number(dialog.subWeights?.cash200 || 0),
-        cash500: Number(dialog.subWeights?.cash500 || 0),
-        cash1000: Number(dialog.subWeights?.cash1000 || 0),
-      },
-    };
+      criterion_type: criterionType,
+      ...(criterionType === "cash_counting" && isCashDenominationCriterion(criterionName)
+        ? {
+            subWeights: {
+              cash200: Number(dialog.subWeights?.cash200 || 0),
+              cash500: Number(dialog.subWeights?.cash500 || 0),
+              cash1000: Number(dialog.subWeights?.cash1000 || 0),
+            },
+          }
+        : {}),
+    });
     if (dialog.mode === "add") {
       next.push(item);
       setScores([...safeScores, 4]);
@@ -6033,9 +6114,11 @@ function PerformanceCriteriaPageEnhanced({ can }) {
   const validationErrors = (() => {
     if (!dialog) return [];
     const errors = [];
+    const criterionName = String(dialog.criterion_name || dialog.name || "");
+    const showCashDenominationFields = dialog.criterion_type === "cash_counting" && isCashDenominationCriterion(criterionName);
     if (!String(dialog.criterion_name || "").trim()) errors.push("اسم المعيار مطلوب");
     if (Number(dialog.weight) < 0 || Number(dialog.weight) > 100 || Number.isNaN(Number(dialog.weight))) errors.push("الوزن النسبي يجب أن يكون بين 0 و 100");
-    if (dialog.criterion_type === "cash_counting" && [dialog.cash200, dialog.cash500, dialog.cash1000].some((v) => Number(v) < 0 || Number.isNaN(Number(v)))) errors.push("أوزان الفئات النقدية يجب أن تكون أرقامًا صحيحة");
+    if (showCashDenominationFields && [dialog.cash200, dialog.cash500, dialog.cash1000].some((v) => Number(v) < 0 || Number.isNaN(Number(v)))) errors.push("أوزان الفئات النقدية يجب أن تكون أرقامًا صحيحة");
     return errors;
   })();
   const saveCriterion = async (e) => {
@@ -6051,7 +6134,7 @@ function PerformanceCriteriaPageEnhanced({ can }) {
         excellent_threshold: kpiFieldNumber(dialog.excellent_threshold),
         good_threshold: kpiFieldNumber(dialog.good_threshold),
         acceptable_threshold: kpiFieldNumber(dialog.acceptable_threshold),
-        notes: dialog.criterion_type === "cash_counting"
+        notes: showEnhancedCashDenominationFields
           ? `${dialog.notes || ""}\nأوزان الفئات النقدية: 200=${dialog.cash200 || 0}, 500=${dialog.cash500 || 0}, 1000=${dialog.cash1000 || 0}`.trim()
           : dialog.notes || "",
       });
@@ -6062,7 +6145,9 @@ function PerformanceCriteriaPageEnhanced({ can }) {
       alert(err.message || "تعذر حفظ البيانات");
     }
   };
-  return <div className="space-y-5"><PageHead title="معايير الأداء" desc="معايير KPI عادلة ومنفصلة حسب الوظيفة" action={<div className="flex gap-2"><button onClick={() => performanceCriteriaService.seedDefaults().then(load).catch((e) => alert(e.message))} className="btn-secondary">توليد المعايير الافتراضية</button><button disabled={can?.("performance_criteria", "can_create") === false} onClick={() => openCriterion()} className="btn-primary"><Plus size={18} /> إضافة معيار</button></div>} /><div className="panel flex flex-wrap gap-3 p-4"><select value={selectedJob} onChange={(e) => setSelectedJob(e.target.value)} className="field max-w-md">{[...new Set([...templates.map((t) => t.job_name), ...Object.keys(defaultJobKpis)])].map((j) => <option key={j}>{j}</option>)}</select><span className={`rounded-xl px-4 py-2 text-sm font-bold ${totalWeight === 100 ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>إجمالي الأوزان: {totalWeight}%</span></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>المعيار</th><th>النوع</th><th>الوزن</th><th>طريقة الاحتساب</th><th>المستهدف</th><th>الحافز</th><th>الحالة</th><th></th></tr></thead><tbody>{rows.map((r) => <tr key={r.criterion_id}><td>{r.criterion_name}</td><td>{kpiCriterionTypeOptions.find(([id]) => id === inferCriterionType(r))?.[1]}</td><td>{r.weight}%</td><td>{r.scoring_type}</td><td>{r.target_value}</td><td>{r.affects_incentive ? "نعم" : "لا"}</td><td><Status>{r.is_active ? "نشط" : "معطل"}</Status></td><td><button onClick={() => openCriterion(r)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => performanceCriteriaService.deleteKpiCriterion(r.criterion_id).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div>{dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={saveCriterion} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6"><DialogTitle title="تعديل معيار" close={() => setDialog(null)} />{triedSave && validationErrors.length > 0 && <div className="mb-4 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">{validationErrors.map((e) => <p key={e}>{e}</p>)}</div>}<div className="grid gap-4 md:grid-cols-3"><Label t="الوظيفة"><input value={dialog.job_name} onChange={(e) => setDialog({ ...dialog, job_name: e.target.value })} className="field mt-2" /></Label><Label t="اسم المعيار"><input value={dialog.criterion_name} onChange={(e) => setDialog({ ...dialog, criterion_name: e.target.value })} className={`field mt-2 ${triedSave && !String(dialog.criterion_name || "").trim() ? "border-red-300" : ""}`} /></Label><Label t="نوع المعيار"><select value={dialog.criterion_type} onChange={(e) => setDialog({ ...dialog, criterion_type: e.target.value })} className="field mt-2">{kpiCriterionTypeOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></Label><Label t="الوزن النسبي %"><input type="number" value={dialog.weight} onChange={(e) => setDialog({ ...dialog, weight: e.target.value })} className="field mt-2" /></Label><Label t="طريقة التقييم"><select value={dialog.scoring_type} onChange={(e) => setDialog({ ...dialog, scoring_type: e.target.value })} className="field mt-2">{scoringTypes.map((s) => <option key={s}>{s}</option>)}</select></Label><Label t="الدرجة القصوى"><input type="number" value={dialog.max_score || 100} onChange={(e) => setDialog({ ...dialog, max_score: e.target.value })} className="field mt-2" /></Label>{dialog.criterion_type === "operational" && <><Label t="الحد الأدنى"><input type="number" value={dialog.acceptable_threshold || 0} onChange={(e) => setDialog({ ...dialog, acceptable_threshold: e.target.value })} className="field mt-2" /></Label><Label t="الهدف"><input type="number" value={dialog.target_value || 0} onChange={(e) => setDialog({ ...dialog, target_value: e.target.value })} className="field mt-2" /></Label><Label t="الحد الممتاز"><input type="number" value={dialog.excellent_threshold || 0} onChange={(e) => setDialog({ ...dialog, excellent_threshold: e.target.value })} className="field mt-2" /></Label></>}{dialog.criterion_type === "financial" && <><Label t="مبلغ مستهدف"><input type="number" value={dialog.target_value || 0} onChange={(e) => setDialog({ ...dialog, target_value: e.target.value })} className="field mt-2" /></Label><Label t="عملة"><input value={dialog.currency || "SAR"} onChange={(e) => setDialog({ ...dialog, currency: e.target.value })} className="field mt-2" /></Label></>}{dialog.criterion_type === "service_quality" && <><Label t="درجة الرضا"><input type="number" value={dialog.satisfaction_score || 0} onChange={(e) => setDialog({ ...dialog, satisfaction_score: e.target.value })} className="field mt-2" /></Label><Label t="عدد الشكاوى"><input type="number" value={dialog.complaints_count || 0} onChange={(e) => setDialog({ ...dialog, complaints_count: e.target.value })} className="field mt-2" /></Label><Label t="سرعة الخدمة"><input value={dialog.service_speed || ""} onChange={(e) => setDialog({ ...dialog, service_speed: e.target.value })} className="field mt-2" /></Label></>}{dialog.criterion_type === "cash_counting" && <div className="md:col-span-3 rounded-2xl border border-amber-200 bg-amber-50 p-4"><h4 className="font-extrabold text-amber-800">أوزان الفئات النقدية للعداد</h4><div className="mt-3 grid gap-3 md:grid-cols-3">{[["cash200","فئة 200"],["cash500","فئة 500"],["cash1000","فئة 1000"]].map(([key,label]) => <Label key={key} t={label}><input type="number" min="0" value={dialog[key] || 0} onChange={(e) => setDialog({ ...dialog, [key]: e.target.value })} className="field mt-2 bg-white" /></Label>)}</div></div>}<Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label><Label t="ملاحظات"><textarea value={dialog.notes || ""} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}</div>;
+  const dialogCriterionName = String(dialog?.criterion_name || dialog?.name || "");
+  const showEnhancedCashDenominationFields = dialog?.criterion_type === "cash_counting" && isCashDenominationCriterion(dialogCriterionName);
+  return <div className="space-y-5"><PageHead title="معايير الأداء" desc="معايير KPI عادلة ومنفصلة حسب الوظيفة" action={<div className="flex gap-2"><button onClick={() => performanceCriteriaService.seedDefaults().then(load).catch((e) => alert(e.message))} className="btn-secondary">توليد المعايير الافتراضية</button><button disabled={can?.("performance_criteria", "can_create") === false} onClick={() => openCriterion()} className="btn-primary"><Plus size={18} /> إضافة معيار</button></div>} /><div className="panel flex flex-wrap gap-3 p-4"><select value={selectedJob} onChange={(e) => setSelectedJob(e.target.value)} className="field max-w-md">{[...new Set([...templates.map((t) => t.job_name), ...Object.keys(defaultJobKpis)])].map((j) => <option key={j}>{j}</option>)}</select><span className={`rounded-xl px-4 py-2 text-sm font-bold ${totalWeight === 100 ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>إجمالي الأوزان: {totalWeight}%</span></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>المعيار</th><th>النوع</th><th>الوزن</th><th>طريقة الاحتساب</th><th>المستهدف</th><th>الحافز</th><th>الحالة</th><th></th></tr></thead><tbody>{rows.map((r) => <tr key={r.criterion_id}><td>{r.criterion_name}</td><td>{kpiCriterionTypeOptions.find(([id]) => id === inferCriterionType(r))?.[1]}</td><td>{r.weight}%</td><td>{r.scoring_type}</td><td>{r.target_value}</td><td>{r.affects_incentive ? "نعم" : "لا"}</td><td><Status>{r.is_active ? "نشط" : "معطل"}</Status></td><td><button onClick={() => openCriterion(r)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => performanceCriteriaService.deleteKpiCriterion(r.criterion_id).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div>{dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={saveCriterion} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6"><DialogTitle title="تعديل معيار" close={() => setDialog(null)} />{triedSave && validationErrors.length > 0 && <div className="mb-4 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">{validationErrors.map((e) => <p key={e}>{e}</p>)}</div>}<div className="grid gap-4 md:grid-cols-3"><Label t="الوظيفة"><input value={dialog.job_name} onChange={(e) => setDialog({ ...dialog, job_name: e.target.value })} className="field mt-2" /></Label><Label t="اسم المعيار"><input value={dialog.criterion_name} onChange={(e) => setDialog({ ...dialog, criterion_name: e.target.value })} className={`field mt-2 ${triedSave && !String(dialog.criterion_name || "").trim() ? "border-red-300" : ""}`} /></Label><Label t="نوع المعيار"><select value={dialog.criterion_type} onChange={(e) => setDialog({ ...dialog, criterion_type: e.target.value })} className="field mt-2">{kpiCriterionTypeOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></Label><Label t="الوزن النسبي %"><input type="number" value={dialog.weight} onChange={(e) => setDialog({ ...dialog, weight: e.target.value })} className="field mt-2" /></Label><Label t="طريقة التقييم"><select value={dialog.scoring_type} onChange={(e) => setDialog({ ...dialog, scoring_type: e.target.value })} className="field mt-2">{scoringTypes.map((s) => <option key={s}>{s}</option>)}</select></Label><Label t="الدرجة القصوى"><input type="number" value={dialog.max_score || 100} onChange={(e) => setDialog({ ...dialog, max_score: e.target.value })} className="field mt-2" /></Label>{dialog.criterion_type === "operational" && <><Label t="الحد الأدنى"><input type="number" value={dialog.acceptable_threshold || 0} onChange={(e) => setDialog({ ...dialog, acceptable_threshold: e.target.value })} className="field mt-2" /></Label><Label t="الهدف"><input type="number" value={dialog.target_value || 0} onChange={(e) => setDialog({ ...dialog, target_value: e.target.value })} className="field mt-2" /></Label><Label t="الحد الممتاز"><input type="number" value={dialog.excellent_threshold || 0} onChange={(e) => setDialog({ ...dialog, excellent_threshold: e.target.value })} className="field mt-2" /></Label></>}{dialog.criterion_type === "financial" && <><Label t="مبلغ مستهدف"><input type="number" value={dialog.target_value || 0} onChange={(e) => setDialog({ ...dialog, target_value: e.target.value })} className="field mt-2" /></Label><Label t="عملة"><input value={dialog.currency || "SAR"} onChange={(e) => setDialog({ ...dialog, currency: e.target.value })} className="field mt-2" /></Label></>}{dialog.criterion_type === "service_quality" && <><Label t="درجة الرضا"><input type="number" value={dialog.satisfaction_score || 0} onChange={(e) => setDialog({ ...dialog, satisfaction_score: e.target.value })} className="field mt-2" /></Label><Label t="عدد الشكاوى"><input type="number" value={dialog.complaints_count || 0} onChange={(e) => setDialog({ ...dialog, complaints_count: e.target.value })} className="field mt-2" /></Label><Label t="سرعة الخدمة"><input value={dialog.service_speed || ""} onChange={(e) => setDialog({ ...dialog, service_speed: e.target.value })} className="field mt-2" /></Label></>}{showEnhancedCashDenominationFields && <div className="md:col-span-3 rounded-2xl border border-amber-200 bg-amber-50 p-4"><h4 className="font-extrabold text-amber-800">أوزان الفئات النقدية للعداد</h4><div className="mt-3 grid gap-3 md:grid-cols-3">{[["cash200","فئة 200"],["cash500","فئة 500"],["cash1000","فئة 1000"]].map(([key,label]) => <Label key={key} t={label}><input type="number" min="0" value={dialog[key] || 0} onChange={(e) => setDialog({ ...dialog, [key]: e.target.value })} className="field mt-2 bg-white" /></Label>)}</div></div>}<Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label><Label t="ملاحظات"><textarea value={dialog.notes || ""} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}</div>;
 }
 
 function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompany, can }) {
@@ -7455,4 +7540,5 @@ function importEmployees(event, setEmployees) {
   };
   r.readAsArrayBuffer(f);
 }
+
 
