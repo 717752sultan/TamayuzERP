@@ -97,7 +97,7 @@ import { generateRecruitmentReports } from "./services/recruitmentReports";
 import { backupService } from "./services/backup";
 import { companiesService } from "./services/companies";
 import { companyPermissionActions, companyPermissionModules, companyPermissionsService, companyCanAccessFromRows, mergeWithDefaultCompanyPermissions } from "./services/companyPermissions";
-import { applyCompanyTheme, getDefaultTheme, normalizeThemePayload, themePresets, themeService } from "./services/theme";
+import { applyCompanyTheme, applyThemeForCurrentCompany, getDefaultTheme, normalizeThemePayload, themePresets, themeService } from "./services/theme";
 import { clearTenantSession, getCurrentCompany, getCurrentUser, loadTenantSession, platformSuperAdminRole, setTenantSession } from "./services/tenant";
 import { assistantModes } from "./constants/pageRegistry";
 const icons = {
@@ -635,10 +635,10 @@ export default function App() {
   useEffect(() => {
     let alive = true;
     if (!currentCompany?.company_id) {
-      applyCompanyTheme(getDefaultTheme());
+      applyThemeForCurrentCompany(null);
       return;
     }
-    applyCompanyTheme(currentCompany);
+    applyThemeForCurrentCompany(currentCompany);
     themeService.loadCompanyTheme(currentCompany.company_id)
       .then((theme) => {
         if (alive) applyCompanyTheme(theme);
@@ -1494,9 +1494,9 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
   const sync = async () => {
     try {
       setLoading(true);
-      const saved = await companyPermissionsService.syncCompanyPermissionsWithPageRegistry(selectedCompanyId);
-      setRows(saved);
-      alert("تمت مزامنة الصلاحيات مع الصفحات بنجاح");
+      const result = await companyPermissionsService.syncCompanyPermissionsWithPageRegistry(selectedCompanyId);
+      setRows(result.rows || []);
+      alert(`تمت مزامنة الصلاحيات مع الصفحات بنجاح. تمت إضافة ${result.insertedCount || 0} صلاحية، الإجمالي ${result.totalCount || 0}.`);
     } catch (error) {
       alert(error.message || "فشل مزامنة الصلاحيات مع الصفحات");
     } finally {

@@ -68,12 +68,19 @@ export const applyCompanyTheme = (theme = {}) => {
   root.dataset.companyThemeMode = normalizeThemePayload(theme).theme_mode;
 };
 
+export const applyThemeForCurrentCompany = (currentCompany = null) => {
+  const theme = currentCompany?.company_id ? normalizeThemePayload(currentCompany) : getDefaultTheme();
+  applyCompanyTheme(theme);
+  return theme;
+};
+
 export const themeService = {
   getDefaultTheme,
   getThemeCssVariables,
   validateThemeColor,
   normalizeThemePayload,
   applyCompanyTheme,
+  applyThemeForCurrentCompany,
 
   async loadCompanyTheme(companyId) {
     if (!companyId) return getDefaultTheme();

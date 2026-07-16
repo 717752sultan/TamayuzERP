@@ -1,3 +1,30 @@
+create table if not exists public.company_permissions (
+  id uuid primary key default gen_random_uuid(),
+  company_id text not null,
+  permission_key text not null,
+  permission_label text not null,
+  module_key text,
+  module_label text,
+  group_key text,
+  group_label text,
+  route_key text,
+  can_access boolean default true,
+  can_view boolean default true,
+  can_create boolean default false,
+  can_edit boolean default false,
+  can_delete boolean default false,
+  can_approve boolean default false,
+  can_export boolean default false,
+  can_print boolean default false,
+  can_manage boolean default false,
+  is_enabled boolean default true,
+  is_official_page boolean default true,
+  is_duplicate_allowed boolean default false,
+  sort_order integer default 0,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
 alter table public.company_permissions add column if not exists group_key text;
 alter table public.company_permissions add column if not exists group_label text;
 alter table public.company_permissions add column if not exists route_key text;
@@ -20,18 +47,18 @@ alter table public.companies add column if not exists theme_mode text default 'l
 alter table public.companies add column if not exists theme_name text default 'default';
 
 update public.companies set
-  primary_color = coalesce(primary_color, '#8b1e1e'),
-  secondary_color = coalesce(secondary_color, '#374151'),
-  accent_color = coalesce(accent_color, '#991b1b'),
-  sidebar_bg_color = coalesce(sidebar_bg_color, '#111827'),
-  sidebar_text_color = coalesce(sidebar_text_color, '#ffffff'),
-  button_color = coalesce(button_color, '#991b1b'),
-  button_text_color = coalesce(button_text_color, '#ffffff'),
-  card_accent_color = coalesce(card_accent_color, '#fee2e2'),
-  table_header_color = coalesce(table_header_color, '#f8fafc'),
-  report_header_color = coalesce(report_header_color, '#8b1e1e'),
-  theme_mode = coalesce(theme_mode, 'light'),
-  theme_name = coalesce(theme_name, 'default');
+  primary_color = coalesce(nullif(primary_color, ''), '#8b1e1e'),
+  secondary_color = coalesce(nullif(secondary_color, ''), '#374151'),
+  accent_color = coalesce(nullif(accent_color, ''), '#991b1b'),
+  sidebar_bg_color = coalesce(nullif(sidebar_bg_color, ''), '#111827'),
+  sidebar_text_color = coalesce(nullif(sidebar_text_color, ''), '#ffffff'),
+  button_color = coalesce(nullif(button_color, ''), '#991b1b'),
+  button_text_color = coalesce(nullif(button_text_color, ''), '#ffffff'),
+  card_accent_color = coalesce(nullif(card_accent_color, ''), '#fee2e2'),
+  table_header_color = coalesce(nullif(table_header_color, ''), '#f8fafc'),
+  report_header_color = coalesce(nullif(report_header_color, ''), '#8b1e1e'),
+  theme_mode = coalesce(nullif(theme_mode, ''), 'light'),
+  theme_name = coalesce(nullif(theme_name, ''), 'default');
 
 with registry(permission_key, permission_label, module_key, module_label, group_key, group_label, route_key, is_official_page, is_duplicate_allowed, sort_order) as (
   values

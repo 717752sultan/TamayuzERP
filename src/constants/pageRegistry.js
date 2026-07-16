@@ -48,7 +48,11 @@ export const pageRegistry = [
   { key: "hr_templates_full", label: "القوالب", aliases: ["قوالب الموارد البشرية"], icon: "ClipboardList", group: "settings", groupLabel: "إعدادات", permissionKey: "hr_templates_full", moduleKey: "hr_templates_full", order: 124, isOfficialPage: true, isDuplicateAllowed: true },
   { key: "ai_assistant", label: "المساعد الذكي", aliases: ["AI"], icon: "UserRoundCog", group: "core", groupLabel: "أساسية", permissionKey: "ai_assistant", moduleKey: "ai_assistant", order: 125, isOfficialPage: true, isDuplicateAllowed: false },
   { key: "theme_settings", label: "الثيم والألوان", aliases: ["ألوان الشركة"], icon: "Settings", group: "settings", groupLabel: "إعدادات", permissionKey: "theme_settings", moduleKey: "theme_settings", order: 126, isOfficialPage: true, isDuplicateAllowed: false },
-];
+].map((page) => ({
+  ...page,
+  routeKey: page.routeKey || page.key,
+  defaultEnabled: page.defaultEnabled ?? !["salaries", "financial_setup", "incentives", "inventory", "ai_assistant", "companies_management"].includes(page.permissionKey),
+}));
 
 export const pageRegistryByKey = Object.fromEntries(pageRegistry.map((page) => [page.key, page]));
 export const permissionKeyForPage = (pageKey = "") => pageRegistryByKey[pageKey]?.permissionKey || pageKey;

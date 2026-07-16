@@ -36,6 +36,7 @@ const pageMetaByPermissionKey = (permissionKey) =>
     order: 9999,
     isOfficialPage: false,
     isDuplicateAllowed: false,
+    defaultEnabled: true,
   };
 
 const moduleMeta = (permissionKey) => {
@@ -47,7 +48,7 @@ const moduleMeta = (permissionKey) => {
     module_label: page.label,
     group_key: page.group || "legacy",
     group_label: page.groupLabel || "صلاحيات قديمة / غير مستخدمة",
-    route_key: page.key,
+    route_key: page.routeKey || page.key,
     is_official_page: page.isOfficialPage !== false,
     is_duplicate_allowed: page.isDuplicateAllowed === true,
     sort_order: Number(page.order || 9999),
@@ -84,8 +85,9 @@ export const normalizeCompanyPermission = (row = {}, companyId = "") => {
   };
 };
 
-const defaultRow = (companyId, [, , group, page], enableAll = false) => {
-  const enabled = enableAll || !sensitiveGroups.has(group);
+const defaultRow = (companyId, [, , group, page], enableAll = false, options = {}) => {
+  const enableSensitiveByDefault = options.enableSensitive === true;
+  const enabled = enableAll || page.defaultEnabled === true || enableSensitiveByDefault || !sensitiveGroups.has(group);
   return normalizeCompanyPermission({
     company_id: companyId,
     permission_key: page.permissionKey,
@@ -94,7 +96,7 @@ const defaultRow = (companyId, [, , group, page], enableAll = false) => {
     module_label: page.label,
     group_key: page.group,
     group_label: page.groupLabel,
-    route_key: page.key,
+    route_key: page.routeKey || page.key,
     can_access: enabled,
     can_view: enabled,
     can_create: enabled,
@@ -142,7 +144,7 @@ const toDb = (row, companyId) => {
 let currentCompanyPermissionCache = [];
 
 export const mergeWithDefaultCompanyPermissions = (rows = [], companyId = "", options = {}) => {
-  const map = new Map(companyPermissionModules.map((item) => [item[0], defaultRow(companyId, item, options.enableAll === true)]));
+  const map = new Map(companyPermissionModules.map((item) => [item[0], defaultRow(companyId, item, options.enableAll === true, options)]));
   (rows || []).forEach((row) => {
     const normalized = normalizeCompanyPermission(row, companyId);
     if (normalized.permission_key) map.set(normalized.permission_key, normalized);
@@ -163,7 +165,7 @@ export const companyPermissionsService = {
     if (!companyId) return [];
     try {
       const rows = await supabase.select("company_permissions", `company_id=eq.${encodeURIComponent(companyId)}&select=*&order=sort_order.asc`);
-      const merged = mergeWithDefaultCompanyPermissions(rows || [], companyId);
+      const merged = mergeWithDefaultCompanyPermissions(rows || [], companyId, { enableSensitive: companyId === "COMP-PUREMONEY" });
       currentCompanyPermissionCache = merged;
       return merged;
     } catch (error) {
@@ -208,15 +210,17 @@ export const companyPermissionsService = {
   async syncCompanyPermissionsWithPageRegistry(companyId) {
     if (!companyId) throw new Error("يجب اختيار الشركة أولاً");
     try {
-      const existing = await this.loadCompanyPermissions(companyId).catch(() => []);
+      const existingRaw = await supabase.select("company_permissions", `company_id=eq.${encodeURIComponent(companyId)}&select=*&order=sort_order.asc`).catch(() => []);
+      const existing = (existingRaw || []).map((row) => normalizeCompanyPermission(row, companyId));
       const existingKeys = new Set(existing.map((row) => row.permission_key));
       const missing = companyPermissionModules
         .filter(([permissionKey]) => !existingKeys.has(permissionKey))
-        .map((item) => defaultRow(companyId, item, false));
-      if (!missing.length) return existing;
+        .map((item) => defaultRow(companyId, item, false, { enableSensitive: true }));
+      if (!missing.length) return { insertedCount: 0, existingCount: existing.length, totalCount: existing.length, rows: existing };
       const { data, error } = await supabase.from("company_permissions").upsert(missing.map((row) => toDb(row, companyId)), { onConflict: "company_id,permission_key" }).select();
       if (error) throw error;
-      return mergeWithDefaultCompanyPermissions([...(existing || []), ...(data || missing)], companyId);
+      const rows = mergeWithDefaultCompanyPermissions([...(existing || []), ...(data || missing)], companyId, { enableSensitive: true });
+      return { insertedCount: missing.length, existingCount: existing.length, totalCount: rows.length, rows };
     } catch (error) {
       console.error("Company permissions error:", error);
       throw new Error("فشل مزامنة الصلاحيات مع الصفحات: " + error.message);
@@ -245,7 +249,7 @@ export const companyPermissionsService = {
   },
 
   async seedDefaultCompanyPermissions(companyId, options = {}) {
-    const rows = companyPermissionModules.map((item) => defaultRow(companyId, item, options.enableAll === true));
+    const rows = companyPermissionModules.map((item) => defaultRow(companyId, item, options.enableAll === true, options));
     return this.bulkSaveCompanyPermissions(companyId, rows);
   },
 
