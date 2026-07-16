@@ -97,6 +97,7 @@ import { generateRecruitmentReports } from "./services/recruitmentReports";
 import { backupService } from "./services/backup";
 import { companiesService } from "./services/companies";
 import { companyPermissionActions, companyPermissionModules, companyPermissionsService, companyCanAccessFromRows, mergeWithDefaultCompanyPermissions } from "./services/companyPermissions";
+import { applyCompanyTheme, getDefaultTheme, normalizeThemePayload, themePresets, themeService } from "./services/theme";
 import { clearTenantSession, getCurrentCompany, getCurrentUser, loadTenantSession, platformSuperAdminRole, setTenantSession } from "./services/tenant";
 import { assistantModes } from "./constants/pageRegistry";
 const icons = {
@@ -449,8 +450,10 @@ const printDocument = (title, body) => {
   w.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8" />
     <title>${title}</title>
     <style>
+      :root{--company-report-header:${getComputedStyle(document.documentElement).getPropertyValue("--company-report-header") || "#8b1e1e"}}
       body{font-family:Tahoma,Arial,sans-serif;margin:32px;color:#172033;direction:rtl}
       h1,h2,h3{margin:0 0 12px}
+      h1{border-right:8px solid var(--company-report-header);padding:10px 14px;background:#f8fafc}
       table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px}
       th,td{border:1px solid #d7dce3;padding:9px;text-align:right}
       th{background:#f3f4f6}
@@ -629,6 +632,22 @@ export default function App() {
   useEffect(() => {
     syncSettings(settings);
   }, [settings]);
+  useEffect(() => {
+    let alive = true;
+    if (!currentCompany?.company_id) {
+      applyCompanyTheme(getDefaultTheme());
+      return;
+    }
+    applyCompanyTheme(currentCompany);
+    themeService.loadCompanyTheme(currentCompany.company_id)
+      .then((theme) => {
+        if (alive) applyCompanyTheme(theme);
+      })
+      .catch((error) => console.error("Theme colors error:", error));
+    return () => {
+      alive = false;
+    };
+  }, [currentCompany?.company_id, currentCompany?.primary_color, currentCompany?.secondary_color, currentCompany?.accent_color, currentCompany?.sidebar_bg_color, currentCompany?.button_color]);
   useEffect(() => {
     if (!logged) return;
     const user = currentUserState || getCurrentUser() || {};
@@ -849,11 +868,12 @@ export default function App() {
 	      return hasRoleMatrix ? roleMatrix[id]?.view : isAdminLikeRole(role);
 	    }),
       requestedPageBlockedByCompany = page !== "companies_admin" && hasSelectedCompany && !companyCanPage(page, "can_view"),
+      requestedPageBlockedByRole = page !== "companies_admin" && hasSelectedCompany && companyCanPage(page, "can_view") && !canPage(page, "can_view"),
 	    firstAllowedPage = isPlatformAdminUser && !hasSelectedCompany ? "companies_admin" : getFirstAllowedPageForUser({ ...currentUser, role }, treeRolePermissions, appPermissions, visibleNavItems),
-	    activePage = requestedPageBlockedByCompany ? page : (visibleNavItems.some(([id]) => id === page) ? page : firstAllowedPage),
+	    activePage = (requestedPageBlockedByCompany || requestedPageBlockedByRole) ? page : (visibleNavItems.some(([id]) => id === page) ? page : firstAllowedPage),
     title = navItems.find((x) => x[0] === activePage)?.[1],
     company = currentCompany || getCurrentCompany() || {},
-    companyName = company.company_name || currentUser.company_name || "Pure Money",
+    companyName = company.company_name || currentUser.company_name || (isPlatformAdminUser ? "إدارة المنصة" : "الشركة الحالية"),
     companyLogo = company.logo_url || currentUser.logo_url || "",
     userCardName = currentUser?.name || currentUser?.username || "مستخدم",
     userCardUsername = currentUser?.username || "مستخدم",
@@ -915,7 +935,7 @@ export default function App() {
     setNotifications([]);
     setPage(selected ? "dashboard" : "companies_admin");
   };
-  if (!requestedPageBlockedByCompany && visibleNavItems.length && activePage && activePage !== page) {
+  if (!requestedPageBlockedByCompany && !requestedPageBlockedByRole && visibleNavItems.length && activePage && activePage !== page) {
     setTimeout(() => setPage(activePage), 0);
   }
   if (permissionsLoading || companyPermissionsLoading) return <LoadingScreen message="جاري تحميل الصلاحيات..." />;
@@ -931,11 +951,11 @@ export default function App() {
         />
       )}
       <aside
-        className={`no-print fixed inset-y-0 right-0 z-40 flex w-[270px] flex-col bg-[#171a21] text-white transition-transform lg:translate-x-0 ${sidebar ? "translate-x-0" : "translate-x-full"}`}
+        className={`company-sidebar no-print fixed inset-y-0 right-0 z-40 flex w-[270px] flex-col bg-[#171a21] text-white transition-transform lg:translate-x-0 ${sidebar ? "translate-x-0" : "translate-x-full"}`}
       >
         <div className="flex h-[86px] items-center gap-3 border-b border-white/10 px-6">
-          <div className="grid h-11 w-11 place-items-center overflow-hidden rounded-xl bg-brand-700">
-            {companyLogo ? <img src={companyLogo} alt={companyName} className="h-full w-full object-cover" /> : <Banknote />}
+          <div className="company-primary-bg grid h-11 w-11 place-items-center overflow-hidden rounded-xl bg-brand-700">
+            {companyLogo ? <img src={companyLogo} alt={companyName} className="h-full w-full object-cover" /> : <span className="px-1 text-center text-xs font-extrabold leading-4">{companyName?.slice(0, 2) || <Banknote />}</span>}
           </div>
           <div>
             <b>نظام تقييم وتحفيز الموظفين</b>
@@ -960,7 +980,7 @@ export default function App() {
                   setPage(id);
                   setSidebar(false);
                 }}
-                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold ${activePage === id ? "bg-brand-700 text-white" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}
+                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold ${activePage === id ? "company-active-nav bg-brand-700 text-white" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}
               >
                 <I size={19} />
                 {label}
@@ -971,7 +991,7 @@ export default function App() {
         </nav>
         <div className="border-t border-white/10 p-4">
           <div className="mb-3 flex items-center gap-3 rounded-xl bg-white/5 p-3">
-            <div className="grid h-9 w-9 place-items-center rounded-full bg-brand-700 font-bold">
+            <div className="company-primary-bg grid h-9 w-9 place-items-center rounded-full bg-brand-700 font-bold">
               {initials}
             </div>
             <div>
@@ -1038,7 +1058,7 @@ export default function App() {
 	              <button onClick={() => setNotificationsOpen((v) => !v)} className="relative rounded-xl border p-2.5">
 	                <Bell size={19} />
 	                {notifications.some((n) => !n.is_read) && (
-	                  <i className="absolute -left-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full border-2 border-white bg-brand-700 px-1 text-[10px] font-bold text-white">
+	                  <i className="company-primary-bg absolute -left-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full border-2 border-white bg-brand-700 px-1 text-[10px] font-bold text-white">
 	                    {notifications.filter((n) => !n.is_read).length}
 	                  </i>
 	                )}
@@ -1082,7 +1102,8 @@ export default function App() {
         <main className="p-4 md:p-7">
           <PageErrorBoundary resetKey={activePage} onBack={() => setPage("dashboard")}>
           {requestedPageBlockedByCompany && <CompanyModuleDisabled onBack={() => setPage(firstAllowedPage || "dashboard")} />}
-          {!requestedPageBlockedByCompany && (
+          {requestedPageBlockedByRole && <RolePageDisabled onBack={() => setPage(firstAllowedPage || "dashboard")} />}
+          {!requestedPageBlockedByCompany && !requestedPageBlockedByRole && (
           <>
           {activePage === "companies_admin" && <CompaniesAdminPage {...p} />}{" "}
           {activePage === "dashboard" && <Dashboard {...p} />}{" "}
@@ -1123,9 +1144,26 @@ function CompanyModuleDisabled({ onBack }) {
     <div className="grid min-h-[55vh] place-items-center">
       <div className="panel max-w-xl p-8 text-center">
         <ShieldCheck className="mx-auto mb-4 text-brand-700" size={42} />
-        <h2 className="text-xl font-extrabold">هذه الصلاحية غير مفعلة لهذه الشركة</h2>
+        <h2 className="text-xl font-extrabold">هذه الصفحة غير مفعلة ضمن صلاحيات الشركة</h2>
         <p className="mt-3 text-sm leading-7 text-slate-500">
           يمكن لمشرف المنصة تفعيل هذه الوحدة من إدارة الشركات ← صلاحيات الشركات.
+        </p>
+        <button type="button" onClick={onBack} className="btn-primary mt-5">
+          العودة إلى صفحة مسموحة
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RolePageDisabled({ onBack }) {
+  return (
+    <div className="grid min-h-[55vh] place-items-center">
+      <div className="panel max-w-xl p-8 text-center">
+        <ShieldCheck className="mx-auto mb-4 text-brand-700" size={42} />
+        <h2 className="text-xl font-extrabold">لا تملك صلاحية الوصول إلى هذه الصفحة</h2>
+        <p className="mt-3 text-sm leading-7 text-slate-500">
+          الصفحة مفعلة للشركة، لكن دور المستخدم الحالي لا يملك صلاحية العرض.
         </p>
         <button type="button" onClick={onBack} className="btn-primary mt-5">
           العودة إلى صفحة مسموحة
@@ -1286,6 +1324,17 @@ function CompaniesAdminPage({ currentUser }) {
     max_users: 25,
     max_branches: 5,
     primary_color: "#7f1d1d",
+    secondary_color: "#374151",
+    accent_color: "#991b1b",
+    sidebar_bg_color: "#111827",
+    sidebar_text_color: "#ffffff",
+    button_color: "#991b1b",
+    button_text_color: "#ffffff",
+    card_accent_color: "#fee2e2",
+    table_header_color: "#f8fafc",
+    report_header_color: "#8b1e1e",
+    theme_mode: "light",
+    theme_name: "default",
     is_active: true,
     admin_username: "",
     admin_name: "",
@@ -1354,7 +1403,7 @@ function CompaniesAdminPage({ currentUser }) {
           {loading ? <p className="text-sm text-slate-400">جاري التحميل...</p> : <div className="table-wrap"><table><thead><tr><th>اسم الشركة</th><th>كود الشركة</th><th>حالة الاشتراك</th><th>الحالة</th><th>اسم مستخدم مدير الشركة</th><th>اسم مدير الشركة</th><th>عدد المستخدمين</th><th>الحد الأقصى للمستخدمين</th><th>الصلاحيات</th><th></th></tr></thead><tbody>{rows.map((row) => <tr key={row.company_id}><td>{row.company_name}</td><td>{row.company_code}</td><td><Status>{row.subscription_status}</Status></td><td><Status>{row.is_active ? "نشط" : "معطل"}</Status></td><td>{row.admin_username || "غير محدد"}</td><td>{row.admin_name || "غير محدد"}</td><td>{row.users_count ?? "—"}</td><td>{row.max_users}</td><td><div className="flex flex-wrap gap-1"><button onClick={() => managePermissions(row.company_id)} className="btn-secondary !h-9">إدارة</button><button onClick={() => enableAllPermissions(row.company_id)} className="btn-secondary !h-9">تفعيل الكل</button><button onClick={() => disableAllPermissions(row.company_id)} className="btn-secondary !h-9">تعطيل الكل</button></div></td><td><button onClick={() => openEditCompany(row)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => companiesService.deleteOrDeactivateCompany(row).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>}
         </div>
       )}
-      {dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6"><DialogTitle title="بيانات الشركة" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="اسم الشركة"><input required value={dialog.company_name || ""} onChange={(e) => setDialog({ ...dialog, company_name: e.target.value })} className="field mt-2" /></Label><Label t="كود الشركة"><input required value={dialog.company_code || ""} onChange={(e) => setDialog({ ...dialog, company_code: e.target.value.toUpperCase() })} className="field mt-2" /></Label><Label t="البريد"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label><Label t="الهاتف"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label><Label t="الباقة"><input value={dialog.subscription_plan || ""} onChange={(e) => setDialog({ ...dialog, subscription_plan: e.target.value })} className="field mt-2" /></Label><Label t="حالة الاشتراك"><select value={dialog.subscription_status || "active"} onChange={(e) => setDialog({ ...dialog, subscription_status: e.target.value })} className="field mt-2"><option value="active">active</option><option value="trial">trial</option><option value="inactive">inactive</option></select></Label><Label t="الحد الأقصى للمستخدمين"><input type="number" value={dialog.max_users || 0} onChange={(e) => setDialog({ ...dialog, max_users: e.target.value })} className="field mt-2" /></Label><Label t="الحد الأقصى للفروع"><input type="number" value={dialog.max_branches || 0} onChange={(e) => setDialog({ ...dialog, max_branches: e.target.value })} className="field mt-2" /></Label><Label t="رابط الشعار"><input value={dialog.logo_url || ""} onChange={(e) => setDialog({ ...dialog, logo_url: e.target.value })} className="field mt-2" /></Label><Label t="اللون الأساسي"><input type="color" value={dialog.primary_color || "#7f1d1d"} onChange={(e) => setDialog({ ...dialog, primary_color: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label><Label t="اسم مستخدم مدير الشركة"><input required value={dialog.admin_username || ""} onChange={(e) => setDialog({ ...dialog, admin_username: e.target.value })} onBlur={(e) => setDialog((d) => ({ ...d, admin_username: e.target.value.trim() }))} className="field mt-2" /></Label><Label t="اسم مدير الشركة"><input value={dialog.admin_name || ""} onChange={(e) => setDialog({ ...dialog, admin_name: e.target.value })} className="field mt-2" /></Label><Label t="كلمة مرور مدير الشركة"><input type="password" value={dialog.admin_password || ""} placeholder={dialog.company_id ? "اتركها فارغة للإبقاء على كلمة المرور الحالية" : "123456"} onChange={(e) => setDialog({ ...dialog, admin_password: e.target.value })} className="field mt-2" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}
+      {dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6"><DialogTitle title="بيانات الشركة" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="اسم الشركة"><input required value={dialog.company_name || ""} onChange={(e) => setDialog({ ...dialog, company_name: e.target.value })} className="field mt-2" /></Label><Label t="كود الشركة"><input required value={dialog.company_code || ""} onChange={(e) => setDialog({ ...dialog, company_code: e.target.value.toUpperCase() })} className="field mt-2" /></Label><Label t="البريد"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label><Label t="الهاتف"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label><Label t="الباقة"><input value={dialog.subscription_plan || ""} onChange={(e) => setDialog({ ...dialog, subscription_plan: e.target.value })} className="field mt-2" /></Label><Label t="حالة الاشتراك"><select value={dialog.subscription_status || "active"} onChange={(e) => setDialog({ ...dialog, subscription_status: e.target.value })} className="field mt-2"><option value="active">active</option><option value="trial">trial</option><option value="inactive">inactive</option></select></Label><Label t="الحد الأقصى للمستخدمين"><input type="number" value={dialog.max_users || 0} onChange={(e) => setDialog({ ...dialog, max_users: e.target.value })} className="field mt-2" /></Label><Label t="الحد الأقصى للفروع"><input type="number" value={dialog.max_branches || 0} onChange={(e) => setDialog({ ...dialog, max_branches: e.target.value })} className="field mt-2" /></Label><Label t="رابط الشعار"><input value={dialog.logo_url || ""} onChange={(e) => setDialog({ ...dialog, logo_url: e.target.value })} className="field mt-2" /></Label><Label t="اللون الأساسي"><input type="color" value={dialog.primary_color || "#7f1d1d"} onChange={(e) => setDialog({ ...dialog, primary_color: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label><Label t="اسم مستخدم مدير الشركة"><input required value={dialog.admin_username || ""} onChange={(e) => setDialog({ ...dialog, admin_username: e.target.value })} onBlur={(e) => setDialog((d) => ({ ...d, admin_username: e.target.value.trim() }))} className="field mt-2" /></Label><Label t="اسم مدير الشركة"><input value={dialog.admin_name || ""} onChange={(e) => setDialog({ ...dialog, admin_name: e.target.value })} className="field mt-2" /></Label><Label t="كلمة مرور مدير الشركة"><input type="password" value={dialog.admin_password || ""} placeholder={dialog.company_id ? "اتركها فارغة للإبقاء على كلمة المرور الحالية" : "123456"} onChange={(e) => setDialog({ ...dialog, admin_password: e.target.value })} className="field mt-2" /></Label></div><CompanyThemeFields theme={dialog} setTheme={(patch) => setDialog({ ...dialog, ...patch })} /><DialogActions close={() => setDialog(null)} /></form></div>}
     </div>
   );
 }
@@ -1362,6 +1411,8 @@ function CompaniesAdminPage({ currentUser }) {
 function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCompany }) {
   const [rows, setRows] = useState([]);
   const [copySource, setCopySource] = useState("");
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(false);
   const selectedCompany = companies.find((company) => company.company_id === selectedCompanyId);
   const load = async () => {
@@ -1440,7 +1491,41 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
       setLoading(false);
     }
   };
-  const visibleRows = mergeWithDefaultCompanyPermissions(rows, selectedCompanyId);
+  const sync = async () => {
+    try {
+      setLoading(true);
+      const saved = await companyPermissionsService.syncCompanyPermissionsWithPageRegistry(selectedCompanyId);
+      setRows(saved);
+      alert("تمت مزامنة الصلاحيات مع الصفحات بنجاح");
+    } catch (error) {
+      alert(error.message || "فشل مزامنة الصلاحيات مع الصفحات");
+    } finally {
+      setLoading(false);
+    }
+  };
+  const filterOptions = [
+    ["all", "الكل"],
+    ["enabled", "مفعلة"],
+    ["disabled", "معطلة"],
+    ["core", "أساسية"],
+    ["duplicate", "مكررة"],
+    ["reports", "تقارير"],
+    ["hr", "موارد بشرية"],
+    ["financial", "مالية"],
+    ["inventory", "مخزون"],
+    ["settings", "إعدادات"],
+  ];
+  const visibleRows = mergeWithDefaultCompanyPermissions(rows, selectedCompanyId).filter((row) => {
+    const text = `${row.permission_label} ${row.module_label} ${row.permission_key} ${row.group_label}`.toLowerCase();
+    const matchesQuery = !query || text.includes(query.toLowerCase());
+    const matchesFilter =
+      filter === "all" ||
+      (filter === "enabled" && row.is_enabled && row.can_access) ||
+      (filter === "disabled" && (!row.is_enabled || !row.can_access)) ||
+      (filter === "duplicate" && row.is_duplicate_allowed) ||
+      row.group_key === filter;
+    return matchesQuery && matchesFilter;
+  });
   return (
     <div className="panel p-4">
       <div className="mb-4 flex flex-wrap items-end gap-3">
@@ -1456,6 +1541,7 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
           </select>
         </Label>
         <button onClick={copy} disabled={!selectedCompanyId || !copySource || loading} className="btn-secondary">نسخ الصلاحيات</button>
+        <button onClick={sync} disabled={!selectedCompanyId || loading} className="btn-secondary">مزامنة الصلاحيات مع الصفحات</button>
         <button onClick={() => setAll(true)} disabled={!selectedCompanyId || loading} className="btn-secondary">تحديد الكل</button>
         <button onClick={() => setAll(false)} disabled={!selectedCompanyId || loading} className="btn-secondary">مسح الكل</button>
         <button onClick={reset} disabled={!selectedCompanyId || loading} className="btn-secondary">إعادة الافتراضي</button>
@@ -1464,19 +1550,29 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
       <div className="mb-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
         الشركة الحالية: <b>{selectedCompany?.company_name || "غير محدد"}</b>. تعطيل أي وحدة هنا يمنع ظهورها في القائمة حتى لو كان الدور يملك صلاحيتها.
       </div>
+      <div className="mb-4 flex flex-wrap gap-3">
+        <input value={query} onChange={(e) => setQuery(e.target.value)} className="field min-w-[260px] flex-1" placeholder="ابحث عن صفحة أو صلاحية" />
+        <select value={filter} onChange={(e) => setFilter(e.target.value)} className="field max-w-[220px]">
+          {filterOptions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+        </select>
+      </div>
       {loading ? <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">جاري تحميل صلاحيات الشركة...</p> : (
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>الوحدة</th>
+                <th>الصفحة</th>
+                <th>المجموعة</th>
+                <th>مفتاح الصلاحية</th>
                 {companyPermissionActions.map(([, label]) => <th key={label}>{label}</th>)}
               </tr>
             </thead>
             <tbody>
               {visibleRows.map((row) => (
                 <tr key={row.permission_key}>
-                  <td><b>{row.module_label || row.permission_label}</b><p className="text-xs text-slate-400">{row.permission_key}</p></td>
+                  <td><b>{row.module_label || row.permission_label}</b>{row.is_duplicate_allowed && <p className="text-xs text-amber-600">صفحة مكررة مسموحة</p>}</td>
+                  <td>{row.group_label || row.group_key}</td>
+                  <td className="font-mono text-xs">{row.permission_key}</td>
                   {companyPermissionActions.map(([key]) => (
                     <td key={key} className="text-center">
                       <input
@@ -1493,6 +1589,75 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+function CompanyThemeFields({ theme, setTheme, onSave, onReset, canSave = false }) {
+  const normalized = normalizeThemePayload(theme || {});
+  const colorFields = [
+    ["primary_color", "اللون الأساسي"],
+    ["secondary_color", "اللون الثانوي"],
+    ["accent_color", "لون التمييز"],
+    ["sidebar_bg_color", "لون خلفية القائمة الجانبية"],
+    ["sidebar_text_color", "لون نص القائمة الجانبية"],
+    ["button_color", "لون الأزرار"],
+    ["button_text_color", "لون نص الأزرار"],
+    ["card_accent_color", "لون بطاقات الإحصائيات"],
+    ["table_header_color", "لون رأس الجداول"],
+    ["report_header_color", "لون رأس التقارير"],
+  ];
+  const preview = () => {
+    const next = normalizeThemePayload(theme || {});
+    applyCompanyTheme(next);
+    alert("تمت معاينة الثيم");
+  };
+  return (
+    <div className="mt-6 rounded-2xl border border-slate-200 p-4">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div>
+          <h3 className="text-lg font-extrabold">ألوان الثيم</h3>
+          <p className="mt-1 text-xs text-slate-500">تطبق الألوان على القائمة الجانبية والأزرار والبطاقات ورؤوس التقارير.</p>
+        </div>
+        <select
+          className="field mr-auto max-w-[240px]"
+          onChange={(e) => {
+            const preset = themePresets.find(([name]) => name === e.target.value)?.[1];
+            if (preset) setTheme({ ...getDefaultTheme(), ...preset, button_color: preset.primary_color, report_header_color: preset.primary_color });
+          }}
+          defaultValue=""
+        >
+          <option value="">اختر قالب ألوان...</option>
+          {themePresets.map(([name]) => <option key={name}>{name}</option>)}
+        </select>
+      </div>
+      <div className="grid gap-4 md:grid-cols-3">
+        {colorFields.map(([key, label]) => (
+          <Label key={key} t={label}>
+            <input type="color" value={normalized[key]} onChange={(e) => setTheme({ [key]: e.target.value })} className="field mt-2" />
+          </Label>
+        ))}
+        <Label t="وضع الثيم">
+          <select value={normalized.theme_mode} onChange={(e) => setTheme({ theme_mode: e.target.value })} className="field mt-2">
+            <option value="light">light</option>
+            <option value="dark">dark</option>
+          </select>
+        </Label>
+        <Label t="اسم الثيم">
+          <input value={normalized.theme_name} onChange={(e) => setTheme({ theme_name: e.target.value })} className="field mt-2" />
+        </Label>
+      </div>
+      <div className="mt-5 grid gap-3 md:grid-cols-4">
+        <button type="button" style={{ backgroundColor: normalized.button_color, color: normalized.button_text_color }} className="rounded-xl px-4 py-3 text-sm font-bold">نموذج زر</button>
+        <div style={{ backgroundColor: normalized.card_accent_color }} className="rounded-xl p-4 text-sm font-bold">نموذج بطاقة</div>
+        <div style={{ backgroundColor: normalized.primary_color, color: normalized.button_text_color }} className="rounded-xl p-4 text-sm font-bold">عنصر قائمة نشط</div>
+        <div style={{ backgroundColor: normalized.report_header_color, color: normalized.button_text_color }} className="rounded-xl p-4 text-sm font-bold">رأس تقرير</div>
+      </div>
+      <div className="mt-5 flex flex-wrap gap-2">
+        <button type="button" onClick={preview} className="btn-secondary">معاينة الثيم</button>
+        {canSave && <button type="button" onClick={onSave} className="btn-primary">حفظ ألوان الثيم</button>}
+        {canSave && <button type="button" onClick={onReset} className="btn-secondary">استعادة الألوان الافتراضية</button>}
+      </div>
     </div>
   );
 }
@@ -2968,6 +3133,7 @@ function SettingsPage({
   setEmployees,
   setEvaluations,
   currentUser,
+  currentCompany,
   canNode,
 }) {
   const tabs = [
@@ -2978,10 +3144,15 @@ function SettingsPage({
     ["معايير التقييم", ClipboardList],
     ["المستخدمون", Users],
     ["الصلاحيات", ShieldCheck],
+    ["الثيم والألوان", Settings],
   ];
   const [tab, setTab] = useState("مدير النظام"),
     [selected, setSelected] = useState(null),
-    [dialog, setDialog] = useState(null);
+    [dialog, setDialog] = useState(null),
+    [themeDraft, setThemeDraft] = useState(() => normalizeThemePayload(currentCompany || {}));
+  useEffect(() => {
+    setThemeDraft(normalizeThemePayload(currentCompany || {}));
+  }, [currentCompany?.company_id, currentCompany?.primary_color, currentCompany?.button_color]);
   const key =
     tab === "الفروع"
       ? "branches"
@@ -3237,6 +3408,32 @@ function SettingsPage({
                 <Save size={18} />
               </div>
             </div>
+          ) : tab === "الثيم والألوان" ? (
+            <CompanyThemeFields
+              theme={themeDraft}
+              setTheme={(patch) => setThemeDraft((prev) => normalizeThemePayload({ ...prev, ...patch }))}
+              canSave={canNode?.("theme_settings", "can_edit") !== false}
+              onSave={async () => {
+                try {
+                  const saved = await themeService.saveCompanyTheme(currentCompany?.company_id, themeDraft);
+                  setThemeDraft(saved);
+                  applyCompanyTheme(saved);
+                  alert("تم حفظ ألوان الثيم بنجاح");
+                } catch (error) {
+                  alert(error.message || "فشل حفظ ألوان الثيم");
+                }
+              }}
+              onReset={async () => {
+                try {
+                  const saved = await themeService.resetCompanyTheme(currentCompany?.company_id);
+                  setThemeDraft(saved);
+                  applyCompanyTheme(saved);
+                  alert("تم استعادة الألوان الافتراضية");
+                } catch (error) {
+                  alert(error.message || "فشل حفظ ألوان الثيم");
+                }
+              }}
+            />
           ) : isPermission ? (
             <PermissionsMatrix settings={settings} setSettings={setSettings} />
           ) : (

@@ -2,6 +2,19 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --company-primary: #8b1e1e;
+  --company-secondary: #374151;
+  --company-accent: #991b1b;
+  --company-sidebar-bg: #111827;
+  --company-sidebar-text: #ffffff;
+  --company-button: #991b1b;
+  --company-button-text: #ffffff;
+  --company-card-accent: #fee2e2;
+  --company-table-header: #f8fafc;
+  --company-report-header: #8b1e1e;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -38,6 +51,8 @@ textarea {
 }
 .btn-primary {
   @apply inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-brand-700 px-4 text-sm font-bold text-white transition hover:bg-brand-800;
+  background-color: var(--company-button);
+  color: var(--company-button-text);
 }
 .btn-secondary {
   @apply inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50;
@@ -50,6 +65,7 @@ table {
 }
 thead {
   @apply bg-slate-50 text-xs font-bold text-slate-500;
+  background-color: var(--company-table-header);
 }
 th,
 td {
@@ -57,6 +73,28 @@ td {
 }
 tbody tr {
   @apply border-t border-slate-100 transition hover:bg-slate-50/70;
+}
+
+.company-sidebar {
+  background-color: var(--company-sidebar-bg) !important;
+  color: var(--company-sidebar-text) !important;
+}
+.company-primary-bg {
+  background-color: var(--company-primary) !important;
+}
+.company-primary-text {
+  color: var(--company-primary) !important;
+}
+.company-card-accent {
+  background-color: var(--company-card-accent) !important;
+}
+.company-active-nav {
+  background-color: var(--company-primary) !important;
+  color: var(--company-button-text) !important;
+}
+.company-report-header {
+  background-color: var(--company-report-header) !important;
+  color: var(--company-button-text) !important;
 }
 @media print {
   .no-print {
