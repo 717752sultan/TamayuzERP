@@ -142,6 +142,10 @@ export const hrPageConfigs = {
   },
 };
 
+hrPageConfigs.hr_requests_approvals = hrPageConfigs.hr_requests;
+hrPageConfigs.hr_reports = hrPageConfigs.hr_reports_full;
+hrPageConfigs.hr_settings = hrPageConfigs.hr_settings_full;
+
 const requireCompanyId = (companyId) => {
   const id = String(companyId || "").trim();
   if (!id) throw new Error("لم يتم تحديد الشركة الحالية");

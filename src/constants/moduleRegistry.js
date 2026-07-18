@@ -59,6 +59,50 @@ const ERP_MODULE_DEFINITIONS = [
   },
 ];
 
+const CANONICAL_HR_PAGE_KEYS = new Set([
+  "hr_home",
+  "employees",
+  "discipline",
+  "hr_leaves",
+  "hr_salary",
+  "hr_requests_approvals",
+  "hr_disciplinary",
+  "hr_termination",
+  "hr_files",
+  "hr_contracts",
+  "guarantees",
+  "hr_custodies",
+  "evaluations",
+  "hr_performance_full",
+  "incentives",
+  "overtime",
+  "shifts",
+  "recruitment",
+  "hr_training",
+  "hr_circulars",
+  "hr_complaints",
+  "hr_reports",
+  "hr_settings",
+  "users_permissions",
+]);
+
+const dedupeByKey = (items = [], keyGetter) => {
+  const map = new Map();
+  for (const item of items || []) {
+    const key = keyGetter(item);
+    if (!key) continue;
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, item);
+      continue;
+    }
+    const existingIsPlaceholder = existing.status === "placeholder" || existing.isPlaceholder === true || String(existing.description || "").includes("قيد التجهيز");
+    const itemIsActive = item.status === "active" || item.isActive === true || item.component || item.routeKey;
+    if (existingIsPlaceholder && itemIsActive) map.set(key, item);
+  }
+  return Array.from(map.values());
+};
+
 const normalizeModulePage = (page = {}) => ({
   key: page.key,
   label: page.label,
@@ -75,13 +119,14 @@ const normalizeModulePage = (page = {}) => ({
 
 const modulePages = pageRegistry
   .filter((page) => ERP_MODULE_DEFINITIONS.some((module) => module.key === page.moduleKey))
+  .filter((page) => page.moduleKey !== "hr" || CANONICAL_HR_PAGE_KEYS.has(page.key))
   .map(normalizeModulePage);
 
 export const ERP_MODULES = ERP_MODULE_DEFINITIONS.map((module) => ({
   ...module,
-  pages: modulePages
+  pages: dedupeByKey(modulePages
     .filter((page) => page.moduleKey === module.key)
-    .sort((a, b) => Number(a.order || 0) - Number(b.order || 0)),
+    .sort((a, b) => Number(a.order || 0) - Number(b.order || 0)), (page) => page.key),
 }));
 
 export const ERP_MODULE_BY_KEY = Object.fromEntries(ERP_MODULES.map((module) => [module.key, module]));

@@ -155,6 +155,9 @@ const icons = {
   hr_contracts: ClipboardList,
   hr_custodies: Wallet,
   hr_training: Star,
+  hr_reports: FileBarChart,
+  hr_settings: Settings,
+  hr_requests_approvals: ClipboardList,
   hr_approvals: BadgeCheck,
   hr_org_chart: Building2,
   hr_settings_full: Settings,
@@ -162,33 +165,47 @@ const icons = {
   hr_templates_full: ClipboardList,
 };
 const fullHrNavItems = [
-  ["hr_home", "الرئيسية"],
-  ["hr_employees_full", "قائمة الموظفين"],
-  ["hr_reports_full", "قسم التقارير"],
-  ["hr_requests", "الطلبات"],
-  ["hr_performance_full", "قياس الأداء"],
-  ["hr_incentives_full", "الحوافز"],
-  ["hr_attendance_payroll", "حساب الدوام"],
-  ["hr_salary", "حساب الراتب"],
-  ["hr_disciplinary", "المساءلات والإنذارات"],
-  ["hr_recruitment_full", "التوظيف"],
+  ["hr_home", "لوحة الموارد البشرية"],
+  ["employees", "الموظفون"],
+  ["discipline", "الحضور والانصراف"],
   ["hr_leaves", "الإجازات"],
-  ["hr_complaints", "الشكاوى"],
-  ["hr_circulars", "التعاميم"],
+  ["hr_salary", "الرواتب"],
+  ["hr_requests_approvals", "الطلبات والموافقات"],
+  ["hr_disciplinary", "المخالفات والإنذارات"],
   ["hr_termination", "إنهاء الخدمة"],
-  ["hr_surveys", "الاستبيانات"],
-  ["hr_insurance", "التأمينات"],
-  ["hr_announcements", "قسم الإعلانات"],
-  ["hr_files", "إدارة الملفات"],
+  ["hr_files", "ملفات الموظفين"],
   ["hr_contracts", "العقود"],
+  ["guarantees", "الضمانات"],
   ["hr_custodies", "العهد"],
+  ["evaluations", "التقييم"],
+  ["hr_performance_full", "قياس الأداء"],
+  ["incentives", "الحوافز"],
+  ["overtime", "العمل الإضافي"],
+  ["shifts", "الشفتات"],
+  ["recruitment", "التوظيف"],
   ["hr_training", "التدريب"],
-  ["hr_approvals", "الموافقات"],
-  ["hr_org_chart", "الهيكل التنظيمي"],
-  ["hr_settings_full", "إعدادات"],
-  ["hr_financial_setup", "تهيئة المعلومات المالية"],
-  ["hr_templates_full", "القوالب"],
+  ["hr_circulars", "التعاميم"],
+  ["hr_complaints", "الشكاوى"],
+  ["hr_reports", "تقارير الموارد البشرية"],
+  ["hr_settings", "إعدادات الموارد البشرية"],
+  ["users_permissions", "المستخدمون والصلاحيات"],
 ];
+const genericHrPageKeys = new Set(["hr_home", "hr_leaves", "hr_salary", "hr_requests_approvals", "hr_disciplinary", "hr_termination", "hr_files", "hr_contracts", "hr_custodies", "hr_performance_full", "hr_training", "hr_circulars", "hr_complaints", "hr_reports", "hr_settings"]);
+const canonicalHrPageAliases = {
+  hr_employees_full: "employees",
+  hr_reports_full: "hr_reports",
+  reports: "hr_reports",
+  reports_center: "hr_reports",
+  hr_requests: "hr_requests_approvals",
+  hr_approvals: "hr_requests_approvals",
+  hr_settings_full: "hr_settings",
+  settings: "hr_settings",
+  hr_financial_setup: "hr_settings",
+  hr_templates_full: "hr_settings",
+  hr_attendance_payroll: "discipline",
+  hr_recruitment_full: "recruitment",
+  hr_incentives_full: "incentives",
+};
 const navItems = [
   ["companies_admin", "إدارة الشركات"],
   ...baseNavItems.slice(0, -2),
@@ -705,9 +722,14 @@ export default function App() {
     syncSettings(settings);
   }, [settings]);
   useEffect(() => {
+    const canonical = canonicalHrPageAliases[page];
+    if (activeModuleKey === "hr" && canonical && canonical !== page) {
+      setPage(canonical);
+      return;
+    }
     const moduleKey = getModuleForPage(page);
     if (moduleKey && moduleKey !== activeModuleKey) setActiveModuleKey(moduleKey);
-  }, [page]);
+  }, [page, activeModuleKey]);
   useEffect(() => {
     let alive = true;
     if (!currentCompany?.company_id) {
@@ -1257,7 +1279,7 @@ export default function App() {
 	          {activePage === "audit_logs" && <AuditLogsPage {...p} />}{" "}
 	          {activePage === "reports" && <EnhancedReports {...p} />}{" "}
 	          {activePage === "settings" && <SettingsPage {...p} />}
-          {fullHrNavItems.some(([id]) => id === activePage) && <HRModulePage pageKey={activePage} currentCompany={company} can={p.can} />}
+          {genericHrPageKeys.has(activePage) && <HRModulePage pageKey={activePage} currentCompany={company} can={p.can} />}
           </>
           )}
           </PageErrorBoundary>

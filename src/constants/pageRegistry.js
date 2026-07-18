@@ -44,10 +44,10 @@ const moduleOverrides = {
 const hrPageKeys = new Set([
   "dashboard", "employees", "templates", "evaluations", "productivity", "discipline", "incentives", "top", "plans", "reports", "settings",
   "guarantees", "overtime", "shifts", "daily_operations", "performance_criteria", "performance_kpi_scores", "users_permissions", "recruitment",
-  "reports_center", "audit_logs", "hr_home", "hr_employees_full", "hr_reports_full", "hr_requests", "hr_performance_full", "hr_incentives_full",
+  "reports_center", "audit_logs", "hr_home", "hr_employees_full", "hr_reports", "hr_reports_full", "hr_requests_approvals", "hr_requests", "hr_performance_full", "hr_incentives_full",
   "hr_attendance_payroll", "hr_salary", "hr_disciplinary", "hr_recruitment_full", "hr_leaves", "hr_complaints", "hr_circulars", "hr_termination",
   "hr_surveys", "hr_insurance", "hr_announcements", "hr_files", "hr_contracts", "hr_custodies", "hr_training", "hr_approvals", "hr_org_chart", "hr_settings_full",
-  "hr_financial_setup", "hr_templates_full", "ai_assistant", "theme_settings",
+  "hr_financial_setup", "hr_templates_full", "hr_settings", "ai_assistant", "theme_settings",
 ]);
 
 const pageActionOverrides = {
@@ -57,11 +57,14 @@ const pageActionOverrides = {
   discipline: approvalActions,
   hr_attendance_payroll: approvalActions,
   hr_salary: financialActions,
+  hr_requests_approvals: approvalActions,
   incentives: financialActions,
   hr_incentives_full: financialActions,
   reports: reportActions,
   reports_center: reportActions,
+  hr_reports: reportActions,
   settings: settingsActions,
+  hr_settings: settingsActions,
   users_permissions: settingsActions,
   audit_logs: ["can_view", "can_export", "can_print", "can_view_sensitive"],
   companies_admin: settingsActions,
@@ -137,6 +140,9 @@ export const pageRegistry = [
   { key: "audit_logs", label: "سجل العمليات", aliases: ["سجل التدقيق"], icon: "ClipboardList", group: "settings", groupLabel: "إعدادات", permissionKey: "audit_logs", moduleKey: "audit_logs", order: 22, isOfficialPage: true, isDuplicateAllowed: false },
   { key: "companies_admin", label: "إدارة الشركات", aliases: ["شركات المنصة"], icon: "Building2", group: "platform", groupLabel: "منصة", permissionKey: "companies_management", moduleKey: "companies_management", order: 23, isOfficialPage: true, isDuplicateAllowed: false },
   { key: "hr_home", label: "الرئيسية", aliases: ["رئيسية الموارد البشرية"], icon: "LayoutDashboard", group: "core", groupLabel: "أساسية", permissionKey: "hr_home", moduleKey: "hr_home", order: 101, isOfficialPage: true, isDuplicateAllowed: true },
+  { key: "hr_requests_approvals", label: "الطلبات والموافقات", aliases: ["طلبات الموارد البشرية", "الموافقات"], icon: "ClipboardList", group: "hr", groupLabel: "موارد بشرية", permissionKey: "hr.requests_approvals", moduleKey: "hr_requests_approvals", order: 106, isOfficialPage: true, isDuplicateAllowed: false },
+  { key: "hr_reports", label: "تقارير الموارد البشرية", aliases: ["تقارير HR"], icon: "FileBarChart", group: "reports", groupLabel: "تقارير", permissionKey: "hr.reports", moduleKey: "hr_reports", order: 122, isOfficialPage: true, isDuplicateAllowed: false },
+  { key: "hr_settings", label: "إعدادات الموارد البشرية", aliases: ["إعدادات HR"], icon: "Settings", group: "settings", groupLabel: "إعدادات", permissionKey: "hr.settings", moduleKey: "hr_settings", order: 123, isOfficialPage: true, isDuplicateAllowed: false },
   { key: "hr_employees_full", label: "قائمة الموظفين", aliases: ["قائمة موظفين كاملة"], icon: "Users", group: "hr", groupLabel: "موارد بشرية", permissionKey: "hr_employees_full", moduleKey: "hr_employees_full", order: 102, isOfficialPage: true, isDuplicateAllowed: true },
   { key: "hr_reports_full", label: "قسم التقارير", aliases: ["قسم تقارير كامل"], icon: "FileBarChart", group: "reports", groupLabel: "تقارير", permissionKey: "hr_reports_full", moduleKey: "hr_reports_full", order: 103, isOfficialPage: true, isDuplicateAllowed: true },
   { key: "hr_requests", label: "الطلبات", aliases: ["طلبات الموظفين"], icon: "ClipboardList", group: "hr", groupLabel: "موارد بشرية", permissionKey: "requests", moduleKey: "requests", order: 104, isOfficialPage: true, isDuplicateAllowed: false },
