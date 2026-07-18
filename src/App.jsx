@@ -104,6 +104,7 @@ import { clearTenantSession, getCurrentCompany, getCurrentUser, loadTenantSessio
 import { assistantModes } from "./constants/pageRegistry";
 import { APP_BRAND_NAME, APP_DESCRIPTION, APP_OFFICIAL_NAME, APP_REPORT_SUBTITLE, APP_REPORT_TITLE, APP_SHORT_NAME, APP_SYSTEM_NAME, APP_TAGLINE } from "./constants/branding";
 import { buildReportBrandingHtml } from "./services/reportBranding";
+import { ERP_MODULES, ERP_PAGE_BY_KEY, ERP_PAGE_BY_ROUTE, getModuleForPage, getModulePages, isPlaceholderPage } from "./constants/moduleRegistry";
 const icons = {
   dashboard: LayoutDashboard,
   employees: Users,
@@ -646,6 +647,7 @@ export default function App() {
       () => localStorage.getItem("ep_logged") === "1",
     ),
     [page, setPage] = useState("dashboard"),
+    [activeModuleKey, setActiveModuleKey] = useState("hr"),
     [sidebar, setSidebar] = useState(false),
     [role, setRole] = useState(
       () => localStorage.getItem("ep_role") || "مدير النظام",
@@ -693,6 +695,10 @@ export default function App() {
   useEffect(() => {
     syncSettings(settings);
   }, [settings]);
+  useEffect(() => {
+    const moduleKey = getModuleForPage(page);
+    if (moduleKey && moduleKey !== activeModuleKey) setActiveModuleKey(moduleKey);
+  }, [page]);
   useEffect(() => {
     let alive = true;
     if (!currentCompany?.company_id) {
@@ -919,7 +925,7 @@ export default function App() {
         if (!companyCanPage(pageKey, action)) return false;
         return pageAllowedByTree(treeRolePermissions, role, pageKey, action) || canByPermission(appPermissions, role, pageKey, action);
       },
-	    visibleNavItems = navItems.filter(([id]) => {
+	    rawVisibleNavItems = navItems.filter(([id]) => {
         if (isPlatformAdminUser) return hasSelectedCompany ? id === "companies_admin" || companyCanPage(id, "can_view") : id === "companies_admin";
         if (id === "companies_admin") return false;
         if (!companyCanPage(id, "can_view")) return false;
@@ -928,11 +934,23 @@ export default function App() {
 	      if (appPermissions.length) return canByPermission(appPermissions, role, id === "reports" ? "reports" : id, "can_view");
 	      return hasRoleMatrix ? roleMatrix[id]?.view : isAdminLikeRole(role);
 	    }),
-      requestedPageBlockedByCompany = page !== "companies_admin" && hasSelectedCompany && !companyCanPage(page, "can_view"),
-      requestedPageBlockedByRole = page !== "companies_admin" && hasSelectedCompany && companyCanPage(page, "can_view") && !canPage(page, "can_view"),
-	    firstAllowedPage = isPlatformAdminUser && !hasSelectedCompany ? "companies_admin" : getFirstAllowedPageForUser({ ...currentUser, role }, treeRolePermissions, appPermissions, visibleNavItems),
-	    activePage = (requestedPageBlockedByCompany || requestedPageBlockedByRole) ? page : (visibleNavItems.some(([id]) => id === page) ? page : firstAllowedPage),
-    title = navItems.find((x) => x[0] === activePage)?.[1],
+      selectedModuleKey = ERP_MODULES.some((module) => module.key === activeModuleKey) ? activeModuleKey : getModuleForPage(page),
+      selectedModule = ERP_MODULES.find((module) => module.key === selectedModuleKey) || ERP_MODULES[0],
+      rawVisibleIds = new Set(rawVisibleNavItems.map(([id]) => id)),
+      moduleVisibleNavItems = isPlatformAdminUser && !hasSelectedCompany
+        ? rawVisibleNavItems
+        : getModulePages(selectedModuleKey).filter((item) => {
+            if (item.status === "placeholder") return isAdminLikeRole(role) || isPlatformAdminUser;
+            return rawVisibleIds.has(item.routeKey) || rawVisibleIds.has(item.key);
+          }).map((item) => [item.key, item.label, item.routeKey, item.status, item.moduleKey]),
+      visibleNavItems = moduleVisibleNavItems.length ? moduleVisibleNavItems : rawVisibleNavItems,
+      currentPageMeta = ERP_PAGE_BY_KEY[page] || null,
+      pageIsPlaceholder = currentPageMeta?.status === "placeholder",
+      requestedPageBlockedByCompany = !pageIsPlaceholder && page !== "companies_admin" && hasSelectedCompany && !companyCanPage(page, "can_view"),
+      requestedPageBlockedByRole = !pageIsPlaceholder && page !== "companies_admin" && hasSelectedCompany && companyCanPage(page, "can_view") && !canPage(page, "can_view"),
+	    firstAllowedPage = isPlatformAdminUser && !hasSelectedCompany ? "companies_admin" : ((visibleNavItems[0]?.[2] || visibleNavItems[0]?.[0]) || getFirstAllowedPageForUser({ ...currentUser, role }, treeRolePermissions, appPermissions, rawVisibleNavItems)),
+	    activePage = (requestedPageBlockedByCompany || requestedPageBlockedByRole) ? page : (visibleNavItems.some(([id, _label, routeKey]) => id === page || routeKey === page) ? page : firstAllowedPage),
+    title = ERP_PAGE_BY_KEY[activePage]?.label || ERP_PAGE_BY_ROUTE[activePage]?.label || navItems.find((x) => x[0] === activePage)?.[1],
     company = currentCompany || getCurrentCompany() || {},
     companyName = company.company_name || currentUser.company_name || (isPlatformAdminUser ? "إدارة المنصة" : APP_BRAND_NAME),
     companyLogo = company.logo_url || currentUser.logo_url || "",
@@ -1003,6 +1021,20 @@ export default function App() {
   if (!visibleNavItems.length) {
     return <div className="grid min-h-screen place-items-center bg-slate-50 p-5" dir="rtl"><div className="panel max-w-xl p-6 text-center"><ShieldCheck className="mx-auto mb-3 text-brand-700" /><h2 className="text-xl font-extrabold">لا توجد صلاحيات مفعلة لهذا المستخدم</h2><button onClick={() => { localStorage.removeItem("ep_logged"); localStorage.removeItem("ep_role"); clearTenantSession(); setCurrentCompany(null); setCurrentUserState(null); setLogged(false); }} className="btn-primary mt-5">تسجيل الخروج</button></div></div>;
   }
+  const availableModulePages = (moduleKey) =>
+    getModulePages(moduleKey).filter((item) =>
+      item.status === "placeholder"
+        ? isAdminLikeRole(role) || isPlatformAdminUser
+        : rawVisibleIds.has(item.routeKey) || rawVisibleIds.has(item.key),
+    );
+  const safeModules = isPlatformAdminUser && !hasSelectedCompany
+    ? []
+    : ERP_MODULES.filter((module) => availableModulePages(module.key).length > 0);
+  const switchErpModule = (moduleKey) => {
+    const pages = availableModulePages(moduleKey);
+    setActiveModuleKey(moduleKey);
+    if (pages[0]) setPage(pages[0].routeKey || pages[0].key);
+  };
   return (
     <div className="min-h-screen" dir="rtl">
       {sidebar && (
@@ -1032,20 +1064,24 @@ export default function App() {
           </button>
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-	          {visibleNavItems.map(([id, label]) => {
-            const I = icons[id];
+	          {visibleNavItems.map(([id, label, routeKey, itemStatus, moduleKey]) => {
+            const targetPage = routeKey || id;
+            const I = icons[targetPage] || icons[id] || BriefcaseBusiness;
+            const isActiveNav = activePage === targetPage || activePage === id;
             return (
               <button
                 key={id}
                 onClick={() => {
-                  setPage(id);
+                  if (moduleKey) setActiveModuleKey(moduleKey);
+                  setPage(targetPage);
                   setSidebar(false);
                 }}
-                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold ${activePage === id ? "company-active-nav bg-brand-700 text-white" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}
+                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold ${isActiveNav ? "company-active-nav bg-brand-700 text-white" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}
               >
                 <I size={19} />
                 {label}
-                {activePage === id && <ChevronLeft className="mr-auto" size={16} />}
+                {itemStatus === "placeholder" && <span className="mr-auto rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-slate-300">قريبًا</span>}
+                {isActiveNav && <ChevronLeft className="mr-auto" size={16} />}
               </button>
             );
           })}
@@ -1161,11 +1197,34 @@ export default function App() {
           </div>
         </header>
         <main className="p-4 md:p-7">
+          {safeModules.length > 0 && (
+            <div className="no-print mb-5 rounded-3xl border bg-white p-3 shadow-sm">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <span className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-extrabold text-white">{APP_SHORT_NAME}</span>
+                <span className="text-xs text-slate-500">{APP_DESCRIPTION}</span>
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {safeModules.map((module) => (
+                  <button
+                    key={module.key}
+                    type="button"
+                    onClick={() => switchErpModule(module.key)}
+                    className={`shrink-0 rounded-2xl px-4 py-2 text-sm font-extrabold transition ${selectedModuleKey === module.key ? "company-primary-bg bg-brand-700 text-white shadow" : "bg-slate-50 text-slate-600 hover:bg-slate-100"}`}
+                    title={module.description}
+                  >
+                    {module.label}
+                  </button>
+                ))}
+              </div>
+              {selectedModule?.description && <p className="mt-3 text-xs text-slate-500">{selectedModule.description}</p>}
+            </div>
+          )}
           <PageErrorBoundary resetKey={activePage} onBack={() => setPage("dashboard")}>
           {requestedPageBlockedByCompany && <CompanyModuleDisabled onBack={() => setPage(firstAllowedPage || "dashboard")} />}
           {requestedPageBlockedByRole && <RolePageDisabled onBack={() => setPage(firstAllowedPage || "dashboard")} />}
           {!requestedPageBlockedByCompany && !requestedPageBlockedByRole && (
           <>
+          {isPlaceholderPage(activePage) && <ErpPlaceholderPage pageKey={activePage} moduleKey={selectedModuleKey} onBack={() => switchErpModule("hr")} />}{" "}
           {activePage === "companies_admin" && <CompaniesAdminPage {...p} />}{" "}
           {activePage === "dashboard" && <Dashboard {...p} />}{" "}
           {activePage === "employees" && <EnhancedEmployees {...p} />}{" "}
@@ -1211,6 +1270,26 @@ function CompanyModuleDisabled({ onBack }) {
         </p>
         <button type="button" onClick={onBack} className="btn-primary mt-5">
           العودة إلى صفحة مسموحة
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ErpPlaceholderPage({ pageKey, moduleKey, onBack }) {
+  const pageMeta = ERP_PAGE_BY_KEY[pageKey] || {};
+  const moduleMeta = ERP_MODULES.find((module) => module.key === (moduleKey || pageMeta.parentModule)) || {};
+  return (
+    <div className="grid min-h-[55vh] place-items-center">
+      <div className="panel max-w-2xl p-8 text-center">
+        <BriefcaseBusiness className="mx-auto mb-4 text-brand-700" size={46} />
+        <span className="rounded-full bg-brand-50 px-4 py-1 text-xs font-extrabold text-brand-700">{moduleMeta.label || "وحدة ERP"}</span>
+        <h2 className="mt-4 text-2xl font-black">{pageMeta.label || "وحدة ERP"}</h2>
+        <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-slate-500">
+          هذه الوحدة قيد التجهيز ضمن منصة {APP_SHORT_NAME}. تم وضعها في الهيكل العام للنظام بدون حذف أو تعطيل أي صفحة موجودة.
+        </p>
+        <button type="button" onClick={onBack} className="btn-primary mt-6">
+          العودة للرئيسية
         </button>
       </div>
     </div>

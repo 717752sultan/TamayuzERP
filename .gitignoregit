@@ -1,0 +1,1 @@
+.env.development rm -r --cached node_modules
