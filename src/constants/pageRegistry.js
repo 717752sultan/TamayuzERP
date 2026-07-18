@@ -1,3 +1,117 @@
+export const erpModuleLabels = {
+  platform: "إدارة المنصة",
+  hr: "الموارد البشرية",
+  inventory: "المخازن والمخزون",
+  sales: "المبيعات",
+  purchasing: "المشتريات",
+  accounting: "الحسابات",
+  crm: "CRM",
+  assets: "الأصول",
+  projects: "المشاريع",
+};
+
+export const permissionActionLabels = {
+  can_view: "عرض",
+  can_create: "إضافة",
+  can_edit: "تعديل",
+  can_delete: "حذف",
+  can_approve: "اعتماد",
+  can_reject: "رفض",
+  can_cancel: "إلغاء",
+  can_post: "ترحيل",
+  can_import: "استيراد",
+  can_export: "تصدير",
+  can_print: "طباعة",
+  can_configure: "إدارة",
+  can_override: "تجاوز",
+  can_view_financial: "مالي",
+  can_view_sensitive: "حساس",
+};
+
+export const standardPermissionActions = Object.keys(permissionActionLabels);
+
+const commonActions = ["can_view", "can_create", "can_edit", "can_delete", "can_export", "can_print"];
+const approvalActions = ["can_view", "can_create", "can_edit", "can_delete", "can_approve", "can_reject", "can_cancel", "can_export", "can_print"];
+const financialActions = ["can_view", "can_create", "can_edit", "can_approve", "can_export", "can_print", "can_view_financial", "can_view_sensitive"];
+const reportActions = ["can_view", "can_export", "can_print"];
+const settingsActions = ["can_view", "can_create", "can_edit", "can_delete", "can_configure", "can_export", "can_print"];
+
+const moduleOverrides = {
+  companies_admin: "platform",
+  inventory: "inventory",
+};
+
+const hrPageKeys = new Set([
+  "dashboard", "employees", "templates", "evaluations", "productivity", "discipline", "incentives", "top", "plans", "reports", "settings",
+  "guarantees", "overtime", "shifts", "daily_operations", "performance_criteria", "performance_kpi_scores", "users_permissions", "recruitment",
+  "reports_center", "audit_logs", "hr_home", "hr_employees_full", "hr_reports_full", "hr_requests", "hr_performance_full", "hr_incentives_full",
+  "hr_attendance_payroll", "hr_salary", "hr_disciplinary", "hr_recruitment_full", "hr_leaves", "hr_complaints", "hr_circulars", "hr_termination",
+  "hr_surveys", "hr_insurance", "hr_announcements", "hr_files", "hr_training", "hr_approvals", "hr_org_chart", "hr_settings_full",
+  "hr_financial_setup", "hr_templates_full", "ai_assistant", "theme_settings",
+]);
+
+const pageActionOverrides = {
+  dashboard: ["can_view", "can_export", "can_print"],
+  employees: commonActions,
+  hr_employees_full: commonActions,
+  discipline: approvalActions,
+  hr_attendance_payroll: approvalActions,
+  hr_salary: financialActions,
+  incentives: financialActions,
+  hr_incentives_full: financialActions,
+  reports: reportActions,
+  reports_center: reportActions,
+  settings: settingsActions,
+  users_permissions: settingsActions,
+  audit_logs: ["can_view", "can_export", "can_print", "can_view_sensitive"],
+  companies_admin: settingsActions,
+  evaluations: ["can_view", "can_create", "can_edit", "can_approve", "can_export", "can_print"],
+  performance_criteria: settingsActions,
+  performance_kpi_scores: ["can_view", "can_create", "can_edit", "can_approve", "can_export", "can_print"],
+  templates: settingsActions,
+  inventory: ["can_view", "can_create", "can_edit", "can_delete", "can_approve", "can_post", "can_import", "can_export", "can_print", "can_view_financial"],
+};
+
+const erpRegistryPages = [
+  ["inventory_items", "الأصناف", "inventory", "inventory", "inventory.items", commonActions, "active"],
+  ["inventory_suppliers", "الموردون", "inventory", "inventory", "inventory.suppliers", commonActions, "active"],
+  ["inventory_purchase_requests", "طلبات الشراء", "inventory", "inventory", "inventory.purchase_requests", approvalActions, "active"],
+  ["inventory_purchase_orders", "أوامر الشراء", "inventory", "inventory", "inventory.purchase_orders", approvalActions, "active"],
+  ["inventory_receipts", "الاستلام", "inventory", "inventory", "inventory.receipts", ["can_view", "can_create", "can_edit", "can_post", "can_export", "can_print"], "active"],
+  ["inventory_issue_vouchers", "الصرف", "inventory", "inventory", "inventory.issue_vouchers", approvalActions, "active"],
+  ["inventory_transfers", "التحويل المخزني", "inventory", "inventory", "inventory.transfers", approvalActions, "active"],
+  ["inventory_returns", "الإرجاع", "inventory", "inventory", "inventory.returns", ["can_view", "can_create", "can_edit", "can_post", "can_export", "can_print"], "active"],
+  ["inventory_adjustments", "التسويات", "inventory", "inventory", "inventory.adjustments", approvalActions, "active"],
+  ["inventory_stocktakes", "الجرد", "inventory", "inventory", "inventory.stocktakes", approvalActions, "active"],
+  ["inventory_balances", "الأرصدة", "inventory", "inventory", "inventory.balances", reportActions, "active"],
+  ["inventory_movements", "حركة المخزون", "inventory", "inventory", "inventory.movements", reportActions, "active"],
+  ["inventory_reports", "تقارير المخزون", "inventory", "inventory", "inventory.reports", reportActions, "active"],
+  ["inventory_settings", "إعدادات المخزون", "inventory", "inventory", "inventory.settings", settingsActions, "active"],
+  ...["لوحة المبيعات", "العملاء", "عروض الأسعار", "أوامر البيع", "فواتير البيع", "مردودات البيع", "المدفوعات", "تقارير المبيعات"].map((label, index) => [`sales_${index + 1}`, label, "sales", `sales_${index + 1}`, `sales.page_${index + 1}`, index === 7 ? reportActions : commonActions, "placeholder"]),
+  ...["لوحة المشتريات", "الموردون", "طلبات الشراء", "أوامر الشراء", "فواتير الشراء", "مردودات الشراء", "مدفوعات الموردين", "تقارير المشتريات"].map((label, index) => [`purchasing_${index + 1}`, label, "purchasing", index > 0 && index < 6 ? "inventory" : `purchasing_${index + 1}`, `purchasing.page_${index + 1}`, [2, 3].includes(index) ? approvalActions : index === 7 ? reportActions : commonActions, index > 0 && index < 6 ? "active" : "placeholder"]),
+  ...["لوحة الحسابات", "دليل الحسابات", "القيود اليومية", "سند قبض", "سند صرف", "مراكز التكلفة", "العملات", "التقارير المالية", "ميزان المراجعة", "قائمة الدخل", "المركز المالي", "كشف حساب"].map((label, index) => [`accounting_${index + 1}`, label, "accounting", `accounting_${index + 1}`, `accounting.page_${index + 1}`, index >= 7 ? reportActions : financialActions, "placeholder"]),
+  ...["لوحة CRM", "العملاء المحتملون", "العملاء", "الفرص البيعية", "المتابعات", "التذاكر والشكاوى", "الحملات", "تقارير CRM"].map((label, index) => [`crm_${index + 1}`, label, "crm", `crm_${index + 1}`, `crm.page_${index + 1}`, index === 7 ? reportActions : commonActions, "placeholder"]),
+  ...["لوحة الأصول", "سجل الأصول", "تصنيفات الأصول", "العهد", "الإهلاك", "الصيانة", "نقل الأصول", "استبعاد الأصول", "تقارير الأصول"].map((label, index) => [`assets_${index + 1}`, label, "assets", `assets_${index + 1}`, `assets.page_${index + 1}`, index === 8 ? reportActions : financialActions, "placeholder"]),
+  ...["لوحة المشاريع", "قائمة المشاريع", "المهام", "الفرق", "المصروفات", "المراحل", "المستندات", "تقارير المشاريع"].map((label, index) => [`projects_${index + 1}`, label, "projects", `projects_${index + 1}`, `projects.page_${index + 1}`, index === 7 ? reportActions : commonActions, "placeholder"]),
+].map(([key, label, moduleKey, routeKey, permissionKey, actions, status], index) => ({
+  key,
+  label,
+  aliases: [],
+  icon: "BriefcaseBusiness",
+  group: moduleKey,
+  groupLabel: erpModuleLabels[moduleKey] || moduleKey,
+  permissionKey,
+  moduleKey,
+  moduleLabel: erpModuleLabels[moduleKey] || moduleKey,
+  routeKey,
+  order: 300 + index,
+  actions,
+  status,
+  isOfficialPage: status !== "placeholder",
+  isDuplicateAllowed: true,
+  defaultEnabled: ["hr", "inventory", "purchasing"].includes(moduleKey) || status === "active",
+}));
+
 export const pageRegistry = [
   { key: "dashboard", label: "الرئيسية", aliases: ["لوحة التحكم", "الداشبورد"], icon: "LayoutDashboard", group: "core", groupLabel: "أساسية", permissionKey: "dashboard", moduleKey: "dashboard", order: 1, isOfficialPage: true, isDuplicateAllowed: false },
   { key: "employees", label: "قائمة الموظفين", aliases: ["الموظفون", "سجل الموظفين"], icon: "Users", group: "hr", groupLabel: "موارد بشرية", permissionKey: "employees", moduleKey: "employees", order: 2, isOfficialPage: true, isDuplicateAllowed: false },
@@ -48,11 +162,19 @@ export const pageRegistry = [
   { key: "hr_templates_full", label: "القوالب", aliases: ["قوالب الموارد البشرية"], icon: "ClipboardList", group: "settings", groupLabel: "إعدادات", permissionKey: "hr_templates_full", moduleKey: "hr_templates_full", order: 124, isOfficialPage: true, isDuplicateAllowed: true },
   { key: "ai_assistant", label: "المساعد الذكي", aliases: ["AI"], icon: "UserRoundCog", group: "core", groupLabel: "أساسية", permissionKey: "ai_assistant", moduleKey: "ai_assistant", order: 125, isOfficialPage: true, isDuplicateAllowed: false },
   { key: "theme_settings", label: "الثيم والألوان", aliases: ["ألوان الشركة"], icon: "Settings", group: "settings", groupLabel: "إعدادات", permissionKey: "theme_settings", moduleKey: "theme_settings", order: 126, isOfficialPage: true, isDuplicateAllowed: false },
-].map((page) => ({
+  ...erpRegistryPages,
+].map((page) => {
+  const normalizedModuleKey = moduleOverrides[page.key] || (hrPageKeys.has(page.key) ? "hr" : page.moduleKey || "hr");
+  return {
   ...page,
+  moduleKey: normalizedModuleKey,
+  moduleLabel: page.moduleLabel || erpModuleLabels[normalizedModuleKey] || page.groupLabel || page.label,
+  actions: page.actions || pageActionOverrides[page.key] || commonActions,
+  status: page.status || "active",
   routeKey: page.routeKey || page.key,
   defaultEnabled: page.defaultEnabled ?? !["salaries", "financial_setup", "incentives", "inventory", "ai_assistant", "companies_management"].includes(page.permissionKey),
-}));
+  };
+});
 
 export const pageRegistryByKey = Object.fromEntries(pageRegistry.map((page) => [page.key, page]));
 export const permissionKeyForPage = (pageKey = "") => pageRegistryByKey[pageKey]?.permissionKey || pageKey;

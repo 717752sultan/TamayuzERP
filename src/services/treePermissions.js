@@ -1,21 +1,9 @@
 import { supabase } from "./supabase";
+import { ERP_MODULES } from "../constants/moduleRegistry";
+import { permissionActionLabels } from "../constants/pageRegistry";
 
 export const permissionActions = [
-  ["can_view", "عرض"],
-  ["can_create", "إضافة"],
-  ["can_edit", "تعديل"],
-  ["can_delete", "حذف"],
-  ["can_approve", "اعتماد"],
-  ["can_reject", "رفض"],
-  ["can_cancel", "إلغاء"],
-  ["can_post", "ترحيل"],
-  ["can_import", "استيراد"],
-  ["can_export", "تصدير"],
-  ["can_print", "طباعة"],
-  ["can_configure", "تهيئة"],
-  ["can_override", "تجاوز"],
-  ["can_view_financial", "عرض مالي"],
-  ["can_view_sensitive", "عرض حساس"],
+  ...Object.entries(permissionActionLabels),
   ["can_ask", "استخدام المساعد"],
   ["can_navigate", "التنقل بالصفحات"],
   ["can_generate_reports", "إنشاء التقارير"],
@@ -49,7 +37,7 @@ const node = (node_key, node_name, parent_id = "", node_type = "page", sort_orde
   is_active: true,
 });
 
-export const defaultPermissionTreeNodes = [
+const legacyPermissionTreeNodes = [
   node("dashboard", "لوحة التحكم", "", "module", 0, { page_key: "dashboard" }),
   node("dashboard_main", "لوحة التحكم الرئيسية", "dashboard", "tab", 1, { page_key: "dashboard" }),
   node("dashboard_hr", "لوحة الموارد البشرية", "dashboard", "tab", 2, { page_key: "dashboard" }),
@@ -142,6 +130,38 @@ export const defaultPermissionTreeNodes = [
   node("recruitment_settings", "إعدادات التوظيف", "recruitment", "tab", 12, { page_key: "recruitment" }),
 ];
 
+const erpPermissionTreeNodes = ERP_MODULES.flatMap((module, moduleIndex) => [
+  node(`module_${module.key}`, module.label, "", "module", module.order || moduleIndex + 1, {
+    module_key: module.key,
+    page_key: "",
+  }),
+  ...(module.pages || []).flatMap((page, pageIndex) => [
+    node(page.key, page.label, `module_${module.key}`, "page", page.order || pageIndex + 1, {
+      module_key: module.key,
+      page_key: page.routeKey || page.key,
+      icon: page.icon,
+    }),
+    ...(page.actions || ["can_view"]).map((actionKey, actionIndex) =>
+      node(`${page.key}_${actionKey}`, permissionActionLabels[actionKey] || actionKey, page.key, "action", actionIndex + 1, {
+        module_key: module.key,
+        page_key: page.routeKey || page.key,
+        action_key: actionKey,
+      }),
+    ),
+  ]),
+]);
+
+const dedupeNodes = (nodes = []) => {
+  const map = new Map();
+  nodes.forEach((item) => {
+    if (!item?.node_key) return;
+    map.set(item.node_key, { ...(map.get(item.node_key) || {}), ...item });
+  });
+  return Array.from(map.values());
+};
+
+export const defaultPermissionTreeNodes = dedupeNodes([...legacyPermissionTreeNodes, ...erpPermissionTreeNodes]);
+
 const blankPermission = (roleName, nodeKey) => ({
   permission_id: `${roleName}-${nodeKey}`,
   role_name: roleName,
@@ -186,6 +206,16 @@ export const normalizeTreePermission = (permission = {}) => {
   return next;
 };
 
+export const dedupeTreePermissionRows = (rows = []) => {
+  const map = new Map();
+  (rows || []).forEach((row) => {
+    const normalized = normalizeTreePermission(row);
+    if (!normalized.permission_id || !normalized.node_key || !normalized.role_name) return;
+    map.set(normalized.permission_id, { ...(map.get(normalized.permission_id) || {}), ...normalized });
+  });
+  return Array.from(map.values());
+};
+
 export const buildPermissionTree = (nodes = []) => {
   const map = Object.fromEntries(nodes.map((n) => [n.node_key, { ...n, children: [] }]));
   const roots = [];
@@ -201,17 +231,14 @@ export const flattenPermissionTree = (nodes = []) => nodes.flatMap((n) => [n, ..
 
 export const treePermissionsService = {
   async ensureDefaultNodes() {
-    const payload = defaultPermissionTreeNodes.map((n) => ({ ...n, created_at: new Date().toISOString() }));
+    const payload = dedupeNodes(defaultPermissionTreeNodes).map((n) => ({ ...n, created_at: new Date().toISOString() }));
     const { error } = await supabase.from("app_permission_nodes").upsert(payload, { onConflict: "node_key" }).select();
     if (error) throw error;
   },
   async loadPermissionTree() {
     try {
-      let rows = await supabase.select("app_permission_nodes", "select=*&order=sort_order.asc");
-      if (!rows?.length) {
-        await this.ensureDefaultNodes();
-        rows = await supabase.select("app_permission_nodes", "select=*&order=sort_order.asc");
-      }
+      await this.ensureDefaultNodes();
+      const rows = await supabase.select("app_permission_nodes", "select=*&order=sort_order.asc");
       return buildPermissionTree((rows || []).map(nodeFromDb));
     } catch (error) {
       console.error("Tree permissions error:", error);
@@ -242,7 +269,7 @@ export const treePermissionsService = {
   async saveBulkNodePermissions(roleName, permissions = []) {
     try {
       if (!roleName) throw new Error("يجب تحديد الدور أولًا");
-      const payload = permissions.map((p) => normalizeTreePermission({ ...p, role_name: roleName, permission_id: `${roleName}-${p.node_key}`, updated_at: new Date().toISOString() }));
+      const payload = dedupeTreePermissionRows(permissions.map((p) => normalizeTreePermission({ ...p, role_name: roleName, permission_id: `${roleName}-${p.node_key}`, updated_at: new Date().toISOString() })));
       if (!payload.length) return [];
       const { data, error } = await supabase.from("app_role_node_permissions").upsert(payload, { onConflict: "permission_id" }).select();
       if (error) throw error;
