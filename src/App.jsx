@@ -97,6 +97,7 @@ import { settingsBranchesService } from "./services/settingsBranches";
 import { settingsCurrenciesService } from "./services/settingsCurrencies";
 import { settingsUsersService } from "./services/settingsUsers";
 import { systemSettingsService } from "./services/systemSettings";
+import { hrRecordsService } from "./services/hrRecords";
 import { treePermissionsService, permissionActions, dataScopes, departmentOptions, flattenPermissionTree, normalizeTreePermission } from "./services/treePermissions";
 import { recruitmentService, recruitmentTabs, generateWelcomeMessage } from "./services/recruitment";
 import { generateRecruitmentReports } from "./services/recruitmentReports";
@@ -151,6 +152,8 @@ const icons = {
   hr_insurance: ShieldCheck,
   hr_announcements: Bell,
   hr_files: FileSpreadsheet,
+  hr_contracts: ClipboardList,
+  hr_custodies: Wallet,
   hr_training: Star,
   hr_approvals: BadgeCheck,
   hr_org_chart: Building2,
@@ -177,6 +180,8 @@ const fullHrNavItems = [
   ["hr_insurance", "التأمينات"],
   ["hr_announcements", "قسم الإعلانات"],
   ["hr_files", "إدارة الملفات"],
+  ["hr_contracts", "العقود"],
+  ["hr_custodies", "العهد"],
   ["hr_training", "التدريب"],
   ["hr_approvals", "الموافقات"],
   ["hr_org_chart", "الهيكل التنظيمي"],
@@ -1394,48 +1399,122 @@ const hrModuleTabs = {
   hr_templates_full: ["قوالب العقود", "قوالب عروض العمل", "قوالب التعاميم", "قوالب الإنذارات", "قوالب خطابات الموارد البشرية", "قوالب التقارير", "قوالب رسائل واتساب"],
 };
 
-function HRModulePage({ pageKey, currentCompany }) {
+function HRModulePage({ pageKey, currentCompany, can }) {
   const title = fullHrNavItems.find(([id]) => id === pageKey)?.[1] || "وحدة الموارد البشرية";
-  const tabs = hrModuleTabs[pageKey] || ["نظرة عامة"];
+  const config = hrRecordsService.config(pageKey);
+  const tabs = config.tabs || hrModuleTabs[pageKey] || ["نظرة عامة"];
+  const currentCompanyId = currentCompany?.company_id || getCurrentCompany()?.company_id || getCurrentUser()?.company_id || "";
   const [tab, setTab] = useState(tabs[0]);
   const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [rows, setRows] = useState([]);
+  const [warning, setWarning] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const [dialog, setDialog] = useState(null);
-  const rows = tabs.map((name, index) => ({
-    id: `${pageKey}-${index + 1}`,
-    name,
-    company: currentCompany?.company_name || APP_BRAND_NAME,
-    status: index % 3 === 0 ? "قيد المراجعة" : "نشط",
-    owner: index % 2 === 0 ? "الموارد البشرية" : "مدير الفرع",
-    date: new Date(Date.now() - index * 86400000).toISOString().slice(0, 10),
-  })).filter((row) => !q || row.name.includes(q) || row.status.includes(q) || row.owner.includes(q));
+  const canCreate = can?.(pageKey, "can_create") !== false;
+  const canEdit = can?.(pageKey, "can_edit") !== false;
+  const canDelete = can?.(pageKey, "can_delete") !== false;
+  const canExport = can?.(pageKey, "can_export") !== false;
+  const canPrint = can?.(pageKey, "can_print") !== false;
+  const fields = config.fields || [];
+  const mainField = fields.find(([key]) => !["status", "notes"].includes(key))?.[0] || "title";
+  const load = async () => {
+    if (!currentCompanyId) {
+      setError("لم يتم تحديد الشركة الحالية");
+      setRows([]);
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const result = await hrRecordsService.load(pageKey, currentCompanyId);
+      setRows(Array.isArray(result.rows) ? result.rows : []);
+      setWarning(result.warning || "");
+    } catch (err) {
+      console.error("HR module error:", err);
+      setError(err.message || "تعذر تحميل البيانات");
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { load(); }, [pageKey, currentCompanyId]);
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const statuses = [...new Set(safeRows.map((row) => row.status).filter(Boolean))];
+  const filtered = safeRows.filter((row) => {
+    const text = Object.values(row || {}).join(" ").toLowerCase();
+    return (!q || text.includes(q.toLowerCase())) && (statusFilter === "all" || row.status === statusFilter);
+  });
   const stats = [
-    ["إجمالي السجلات", rows.length],
-    ["النشطة", rows.filter((r) => r.status === "نشط").length],
-    ["قيد المراجعة", rows.filter((r) => r.status === "قيد المراجعة").length],
+    ["إجمالي السجلات", safeRows.length],
+    ["النشطة", safeRows.filter((r) => ["نشط", "معتمدة", "معتمد", "حاضر"].includes(r.status)).length],
+    ["قيد المراجعة", safeRows.filter((r) => String(r.status || "").includes("مراجعة") || String(r.status || "").includes("مسودة")).length],
     ["الشركة", currentCompany?.company_name || APP_BRAND_NAME],
   ];
-  const action = () => {
-    console.error("HRMS UI placeholder error:", { pageKey, tab });
-    alert(uiOnlyMessage);
+  const openAdd = () => {
+    if (!canCreate) return alert("لا تملك صلاحية تنفيذ هذه العملية");
+    const blank = Object.fromEntries(fields.map(([key, , type]) => [key, type === "number" ? 0 : key === "status" ? "نشط" : ""]));
+    setDialog({ ...blank, status: blank.status || "نشط" });
   };
+  const save = async (event) => {
+    event.preventDefault();
+    if (!canEdit && dialog?.id) return alert("لا تملك صلاحية تنفيذ هذه العملية");
+    if (!canCreate && !dialog?.id) return alert("لا تملك صلاحية تنفيذ هذه العملية");
+    try {
+      const saved = await hrRecordsService.save(pageKey, currentCompanyId, dialog);
+      setRows((list) => list.some((row) => row.id === saved.id) ? list.map((row) => row.id === saved.id ? saved : row) : [saved, ...list]);
+      setDialog(null);
+      alert("تم حفظ البيانات بنجاح");
+    } catch (err) {
+      alert(err.message || "تعذر حفظ البيانات");
+    }
+  };
+  const deactivate = async (row) => {
+    if (!canDelete) return alert("لا تملك صلاحية تنفيذ هذه العملية");
+    if (!confirm("هل تريد إلغاء/تعطيل هذا السجل؟")) return;
+    try {
+      const saved = await hrRecordsService.deactivate(pageKey, currentCompanyId, row);
+      setRows((list) => list.map((item) => item.id === saved.id ? saved : item));
+      alert("تم حفظ البيانات بنجاح");
+    } catch (err) {
+      alert(err.message || "تعذر حفظ البيانات");
+    }
+  };
+  const columns = fields.slice(0, 6).map(([key, label]) => ({ key, label }));
+  const printableColumns = columns.length ? columns : [{ key: mainField, label: "البند" }, { key: "status", label: "الحالة" }, { key: "notes", label: "ملاحظات" }];
+  const renderField = ([key, label, type]) => (
+    <Label key={key} t={label}>
+      {type === "textarea" ? (
+        <textarea value={dialog?.[key] || ""} onChange={(e) => setDialog({ ...dialog, [key]: e.target.value })} className="field mt-2 !h-auto py-3" />
+      ) : type === "status" ? (
+        <select value={dialog?.[key] || "نشط"} onChange={(e) => setDialog({ ...dialog, [key]: e.target.value })} className="field mt-2">
+          {["نشط", "مسودة", "قيد المراجعة", "معتمدة", "مرفوضة", "مغلقة", "ملغى"].map((status) => <option key={status}>{status}</option>)}
+        </select>
+      ) : (
+        <input type={type || "text"} value={dialog?.[key] ?? ""} onChange={(e) => setDialog({ ...dialog, [key]: e.target.value })} className="field mt-2" />
+      )}
+    </Label>
+  );
   return (
     <div className="space-y-5">
-      <PageHead title={title} desc={`واجهة موارد بشرية متعددة الشركات - ${currentCompany?.company_name || APP_BRAND_NAME}`} action={<button onClick={() => setDialog({ name: "", status: "نشط" })} className="btn-primary"><Plus size={18} /> إضافة</button>} />
-      <div className="grid gap-4 md:grid-cols-4">
-        {stats.map(([label, value]) => <Mini key={label} label={label} value={value} I={BadgeCheck} />)}
-      </div>
-      <div className="panel flex flex-wrap gap-2 p-3">
-        {tabs.map((item) => <button key={item} onClick={() => setTab(item)} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === item ? "bg-brand-700 text-white" : "bg-slate-100 text-slate-600"}`}>{item}</button>)}
-      </div>
+      <PageHead title={title} desc={`${config.description || "صفحة موارد بشرية"} - ${currentCompany?.company_name || APP_BRAND_NAME}`} action={<button disabled={!canCreate} onClick={openAdd} className="btn-primary"><Plus size={18} /> إضافة</button>} />
+      {warning && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-700">{warning}</div>}
+      {error && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-bold text-red-700">{error}</div>}
+      <div className="grid gap-4 md:grid-cols-4">{stats.map(([label, value]) => <Mini key={label} label={label} value={value} I={BadgeCheck} />)}</div>
+      <div className="panel flex flex-wrap gap-2 p-3">{tabs.map((item) => <button key={item} onClick={() => setTab(item)} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === item ? "bg-brand-700 text-white" : "bg-slate-100 text-slate-600"}`}>{item}</button>)}</div>
       <div className="panel flex flex-wrap gap-3 p-4">
         <input value={q} onChange={(e) => setQ(e.target.value)} className="field min-w-[220px] flex-1" placeholder="بحث..." />
-        <button onClick={() => exportExcel(rows, title)} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button>
-        <button onClick={() => printDocument(title, rowsToReportHtml(title, rows, [{ key: "name", label: "البند" }, { key: "status", label: "الحالة" }, { key: "owner", label: "المسؤول" }, { key: "date", label: "التاريخ" }]))} className="btn-secondary"><Printer size={17} /> طباعة</button>
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="field max-w-[180px]"><option value="all">كل الحالات</option>{statuses.map((status) => <option key={status}>{status}</option>)}</select>
+        <button disabled={!canExport} onClick={() => exportExcel(filtered, title)} className="btn-secondary"><FileSpreadsheet size={17} /> Excel</button>
+        <button disabled={!canPrint} onClick={() => printDocument(title, rowsToReportHtml(title, filtered, printableColumns))} className="btn-secondary"><Printer size={17} /> طباعة</button>
       </div>
       <div className="panel p-4">
-        {rows.length ? <div className="table-wrap"><table><thead><tr><th>البند</th><th>الشركة</th><th>الحالة</th><th>المسؤول</th><th>التاريخ</th><th></th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td>{row.name}</td><td>{row.company}</td><td><Status>{row.status}</Status></td><td>{row.owner}</td><td>{row.date}</td><td><button onClick={() => setDialog(row)} className="p-2 text-slate-600"><Eye size={16} /></button><button onClick={action} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={action} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div> : <div className="p-8 text-center text-sm text-slate-400">لا توجد بيانات للعرض</div>}
+        {loading ? <div className="p-8 text-center text-sm text-slate-400">جاري تحميل البيانات...</div> : filtered.length ? (
+          <div className="table-wrap"><table><thead><tr>{printableColumns.map((col) => <th key={col.key}>{col.label}</th>)}<th>الحالة</th><th>الإجراءات</th></tr></thead><tbody>{filtered.map((row, index) => <tr key={row.id || index}>{printableColumns.map((col) => <td key={col.key}>{String(row[col.key] ?? "—")}</td>)}<td><Status>{row.status || "نشط"}</Status></td><td><button onClick={() => setDialog(row)} className="p-2 text-slate-600"><Eye size={16} /></button><button disabled={!canEdit} onClick={() => setDialog(row)} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canDelete} onClick={() => deactivate(row)} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>
+        ) : <div className="p-8 text-center text-sm text-slate-400">لا توجد بيانات حالياً</div>}
       </div>
-      {dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={(e) => { e.preventDefault(); action(); setDialog(null); }} className="panel w-full max-w-2xl p-6"><DialogTitle title={`${title} - ${tab}`} close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-2"><Label t="الاسم"><input value={dialog.name || ""} onChange={(e) => setDialog({ ...dialog, name: e.target.value })} className="field mt-2" /></Label><Label t="الحالة"><select value={dialog.status || "نشط"} onChange={(e) => setDialog({ ...dialog, status: e.target.value })} className="field mt-2"><option>نشط</option><option>قيد المراجعة</option><option>مغلق</option></select></Label><Label t="ملاحظات"><textarea className="field mt-2 !h-auto py-3" placeholder="سيتم ربط هذا النموذج بقاعدة البيانات لاحقًا" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}
+      {dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6"><DialogTitle title={`${title} - ${tab}`} close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-2">{fields.map(renderField)}</div><DialogActions close={() => setDialog(null)} /></form></div>}
     </div>
   );
 }
