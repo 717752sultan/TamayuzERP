@@ -93,6 +93,10 @@ import { downloadDailyOperationsTemplate, exportDailyOperationsToExcel, importDa
 import { performanceCriteriaService, scoringTypes, defaultJobKpis } from "./services/performanceCriteria";
 import { kpiCalculationService } from "./services/kpiCalculation";
 import { aiAssistantService } from "./services/aiAssistant";
+import { settingsBranchesService } from "./services/settingsBranches";
+import { settingsCurrenciesService } from "./services/settingsCurrencies";
+import { settingsUsersService } from "./services/settingsUsers";
+import { systemSettingsService } from "./services/systemSettings";
 import { treePermissionsService, permissionActions, dataScopes, departmentOptions, flattenPermissionTree, normalizeTreePermission } from "./services/treePermissions";
 import { recruitmentService, recruitmentTabs, generateWelcomeMessage } from "./services/recruitment";
 import { generateRecruitmentReports } from "./services/recruitmentReports";
@@ -3085,11 +3089,13 @@ function LegacySettingsPage({ settings, setSettings, setEmployees }) {
           ))}
         </div>
         <div className="panel p-5">
+          {settingsError && <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-700">{settingsError}</div>}
+          {settingsLoading && <div className="mb-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-500">جاري تحميل بيانات الإعدادات...</div>}
           {tab === "مدير النظام" ? (
             <div>
               <div className="mb-6 flex items-center gap-4 border-b pb-5">
                 <div className="grid h-14 w-14 place-items-center rounded-2xl bg-brand-700 text-lg font-extrabold text-white">
-                  {settings.manager.name
+                  {managerSafe.name
                     .split(" ")
                     .slice(0, 2)
                     .map((x) => x[0])
@@ -3105,11 +3111,11 @@ function LegacySettingsPage({ settings, setSettings, setEmployees }) {
               <div className="grid gap-4 md:grid-cols-2">
                 <Label t="اسم مدير النظام">
                   <input
-                    value={settings.manager.name}
+                    value={managerSafe.name}
                     onChange={(e) =>
                       setSettings({
                         ...settings,
-                        manager: { ...settings.manager, name: e.target.value },
+                        manager: { ...managerSafe, name: e.target.value },
                       })
                     }
                     className="field mt-2"
@@ -3117,12 +3123,12 @@ function LegacySettingsPage({ settings, setSettings, setEmployees }) {
                 </Label>
                 <Label t="اسم المستخدم">
                   <input
-                    value={settings.manager.username}
+                    value={managerSafe.username}
                     onChange={(e) =>
                       setSettings({
                         ...settings,
                         manager: {
-                          ...settings.manager,
+                          ...managerSafe,
                           username: e.target.value,
                         },
                       })
@@ -3285,15 +3291,58 @@ function SettingsPage({
     ["معايير التقييم", ClipboardList],
     ["المستخدمون", Users],
     ["الصلاحيات", ShieldCheck],
+    ["إعدادات عامة", Settings],
     ["الثيم والألوان", Settings],
   ];
   const [tab, setTab] = useState("مدير النظام"),
     [selected, setSelected] = useState(null),
     [dialog, setDialog] = useState(null),
-    [themeDraft, setThemeDraft] = useState(() => normalizeThemePayload(currentCompany || {}));
+    [themeDraft, setThemeDraft] = useState(() => normalizeThemePayload(currentCompany || {})),
+    [settingsRows, setSettingsRows] = useState({ branches: [], currencies: [], users: [], system: {} }),
+    [settingsLoading, setSettingsLoading] = useState(false),
+    [settingsError, setSettingsError] = useState("");
+  const currentCompanyId = currentCompany?.company_id || currentUser?.company_id || "";
+  const managerSafe = settings?.manager || defaultSettings.manager || { name: "", username: "", role: "مدير النظام" };
   useEffect(() => {
     setThemeDraft(normalizeThemePayload(currentCompany || {}));
   }, [currentCompany?.company_id, currentCompany?.primary_color, currentCompany?.button_color]);
+  const loadSettingsCrud = async () => {
+    if (!currentCompanyId) {
+      setSettingsError("لم يتم تحديد الشركة الحالية");
+      return;
+    }
+    setSettingsLoading(true);
+    setSettingsError("");
+    try {
+      const [branchesRows, currenciesRows, usersRows, systemRow] = await Promise.all([
+        settingsBranchesService.loadBranches(currentCompanyId).catch((error) => {
+          console.error("Settings CRUD error:", error);
+          return [];
+        }),
+        settingsCurrenciesService.loadCurrencies(currentCompanyId).catch((error) => {
+          console.error("Settings CRUD error:", error);
+          return [];
+        }),
+        settingsUsersService.loadUsers(currentCompanyId).catch((error) => {
+          console.error("Settings CRUD error:", error);
+          return [];
+        }),
+        systemSettingsService.loadSystemSettings(currentCompanyId).catch((error) => {
+          console.error("Settings CRUD error:", error);
+          return {};
+        }),
+      ]);
+      setSettingsRows({ branches: branchesRows, currencies: currenciesRows, users: usersRows, system: systemRow });
+    } catch (error) {
+      console.error("Settings CRUD error:", error);
+      setSettingsError(error.message || "تعذر تحميل البيانات");
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+  useEffect(() => {
+    loadSettingsCrud();
+  }, [currentCompanyId]);
   const key =
     tab === "الفروع"
       ? "branches"
@@ -3306,29 +3355,40 @@ function SettingsPage({
             : tab === "المستخدمون"
               ? "users"
             : "permissions";
-  const items = settings[key] || defaultSettings[key] || [];
+  const isRemoteBranch = tab === "الفروع";
+  const isRemoteCurrency = tab === "العملات";
+  const isRemoteUser = tab === "المستخدمون";
+  const isGeneralSettings = tab === "إعدادات عامة";
+  const items = isRemoteBranch
+    ? settingsRows.branches
+    : isRemoteCurrency
+      ? settingsRows.currencies
+      : isRemoteUser
+        ? settingsRows.users
+        : settings[key] || defaultSettings[key] || [];
   const isPermission = tab === "الصلاحيات";
-  const isUser = tab === "المستخدمون";
-  const openAdd = () =>
+  const isUser = isRemoteUser;
+  const openAdd = () => {
+    if (!currentCompanyId && (isRemoteBranch || isRemoteCurrency || isRemoteUser || isGeneralSettings)) return alert("لم يتم تحديد الشركة الحالية");
     setDialog(
-      isUser
-        ? {
-            mode: "add",
-            name: "",
-            username: "",
-            password: "",
-            role: "الموظف",
-            employeeId: "",
-          }
-        : isPermission
-        ? { mode: "add", name: "", description: "" }
-        : { mode: "add", value: "" },
+      isRemoteBranch
+        ? { mode: "add", branch_code: "", branch_name: "", branch_type: "فرع", manager_name: "", phone: "", address: "", city: "", status: "نشط", is_active: true, notes: "" }
+        : isRemoteCurrency
+          ? { mode: "add", currency_code: "", currency_name: "", currency_symbol: "", exchange_rate: 1, is_default: false, is_active: true, notes: "" }
+          : isUser
+            ? { mode: "add", name: "", username: "", password: "", role: "الموظف", employee_id: "", employee_name: "", branch: "", job: "", phone: "", email: "", is_active: true }
+            : isPermission
+              ? { mode: "add", name: "", description: "" }
+              : { mode: "add", value: "" },
     );
+  };
   const openEdit = () => {
     if (selected === null) return;
     const item = items[selected];
     setDialog(
-      isUser
+      isRemoteBranch || isRemoteCurrency || isUser
+        ? { mode: "edit", index: selected, ...item }
+        : isUser
         ? { mode: "edit", index: selected, ...item }
         : isPermission
         ? {
@@ -3340,8 +3400,49 @@ function SettingsPage({
         : { mode: "edit", index: selected, value: item },
     );
   };
-  const saveItem = () => {
+  const saveItem = async () => {
     if (!dialog) return;
+    if (!currentCompanyId && (isRemoteBranch || isRemoteCurrency || isUser)) return alert("لم يتم تحديد الشركة الحالية");
+    try {
+      if (isRemoteBranch) {
+        if (dialog.mode === "add" && settingsRows.branches.some((row) => String(row.branch_code || "").trim() === String(dialog.branch_code || "").trim())) return alert("لا يمكن تكرار كود الفرع داخل نفس الشركة");
+        const saved = dialog.mode === "add"
+          ? await settingsBranchesService.createBranch(currentCompanyId, dialog)
+          : await settingsBranchesService.updateBranch(currentCompanyId, dialog.id, dialog);
+        setSettingsRows((state) => ({ ...state, branches: dialog.mode === "add" ? [saved, ...state.branches] : state.branches.map((row) => row.id === saved.id ? saved : row) }));
+        setSettings((state) => ({ ...state, branches: [...new Set([...(state.branches || []), saved.branch_name].filter(Boolean))] }));
+        setDialog(null);
+        setSelected(null);
+        alert(dialog.mode === "add" ? "تم إضافة الفرع بنجاح" : "تم تعديل الفرع بنجاح");
+        return;
+      }
+      if (isRemoteCurrency) {
+        if (dialog.mode === "add" && settingsRows.currencies.some((row) => String(row.currency_code || "").trim().toUpperCase() === String(dialog.currency_code || "").trim().toUpperCase())) return alert("كود العملة مستخدم مسبقًا داخل هذه الشركة");
+        const saved = dialog.mode === "add"
+          ? await settingsCurrenciesService.createCurrency(currentCompanyId, dialog)
+          : await settingsCurrenciesService.updateCurrency(currentCompanyId, dialog.id, dialog);
+        setSettingsRows((state) => ({ ...state, currencies: dialog.mode === "add" ? [saved, ...state.currencies.map((row) => saved.is_default ? { ...row, is_default: false } : row)] : state.currencies.map((row) => row.id === saved.id ? saved : saved.is_default ? { ...row, is_default: false } : row) }));
+        setSettings((state) => ({ ...state, currencies: [...new Set([...(state.currencies || []), saved.currency_code].filter(Boolean))] }));
+        setDialog(null);
+        setSelected(null);
+        alert(dialog.mode === "add" ? "تم إضافة العملة بنجاح" : "تم تعديل العملة بنجاح");
+        return;
+      }
+      if (isUser) {
+        if (dialog.mode === "add" && settingsRows.users.some((row) => String(row.username || "").trim() === String(dialog.username || "").trim())) return alert("اسم المستخدم موجود مسبقًا داخل هذه الشركة");
+        const saved = dialog.mode === "add"
+          ? await settingsUsersService.createUser(currentCompanyId, dialog)
+          : await settingsUsersService.updateUser(currentCompanyId, dialog.user_id || dialog.id, dialog);
+        setSettingsRows((state) => ({ ...state, users: dialog.mode === "add" ? [saved, ...state.users] : state.users.map((row) => row.user_id === saved.user_id ? saved : row) }));
+        setDialog(null);
+        setSelected(null);
+        alert(dialog.mode === "add" ? "تم إضافة المستخدم بنجاح" : "تم تعديل المستخدم بنجاح");
+        return;
+      }
+    } catch (error) {
+      alert(error.message || "تعذر حفظ البيانات");
+      return;
+    }
     const value = isUser
       ? {
           name: dialog.name.trim(),
@@ -3379,8 +3480,50 @@ function SettingsPage({
     setDialog(null);
     setSelected(null);
   };
-  const deleteItem = () => {
+  const deleteItem = async () => {
     if (selected === null) return;
+    if (!currentCompanyId && (isRemoteBranch || isRemoteCurrency || isUser)) return alert("لم يتم تحديد الشركة الحالية");
+    if (isRemoteBranch) {
+      const item = items[selected];
+      if ((employees || []).some((employee) => employee.branch === item.branch_name)) return alert("لا يمكن حذف الفرع لأنه مرتبط بموظفين، يمكنك تعطيله بدلًا من الحذف.");
+      if (!confirm(`هل تريد تعطيل «${item.branch_name}»؟`)) return;
+      try {
+        const saved = await settingsBranchesService.deleteBranch(currentCompanyId, item.id, item);
+        setSettingsRows((state) => ({ ...state, branches: state.branches.map((row) => row.id === saved.id ? saved : row) }));
+        setSelected(null);
+        alert("تم حذف الفرع بنجاح");
+      } catch (error) {
+        alert(error.message || "تعذر حفظ البيانات");
+      }
+      return;
+    }
+    if (isRemoteCurrency) {
+      const item = items[selected];
+      if (!confirm(`هل تريد تعطيل «${item.currency_name}»؟`)) return;
+      try {
+        const saved = await settingsCurrenciesService.deleteCurrency(currentCompanyId, item.id, item);
+        setSettingsRows((state) => ({ ...state, currencies: state.currencies.map((row) => row.id === saved.id ? saved : row) }));
+        setSelected(null);
+        alert("تم حفظ البيانات بنجاح");
+      } catch (error) {
+        alert(error.message || "تعذر حفظ البيانات");
+      }
+      return;
+    }
+    if (isUser) {
+      const item = items[selected];
+      if (item.user_id === currentUser?.user_id || item.username === currentUser?.username) return alert("لا يمكن حذف مدير النظام الحالي.");
+      if (!confirm(`هل تريد تعطيل المستخدم «${item.username}»؟`)) return;
+      try {
+        const saved = await settingsUsersService.deleteUser(currentCompanyId, item.user_id, item);
+        setSettingsRows((state) => ({ ...state, users: state.users.map((row) => row.user_id === saved.user_id ? saved : row) }));
+        setSelected(null);
+        alert("تم حفظ البيانات بنجاح");
+      } catch (error) {
+        alert(error.message || "تعذر حفظ البيانات");
+      }
+      return;
+    }
     if ((tab === "الفروع" || tab === "الوظائف") && items.length === 1) {
       alert("يجب الإبقاء على عنصر واحد على الأقل.");
       return;
@@ -3533,20 +3676,54 @@ function SettingsPage({
                 </Label>
                 <Label t="المسمى / الصلاحية">
                   <input
-                    value={settings.manager.role}
+                    value={managerSafe.role}
                     onChange={(e) =>
                       setSettings({
                         ...settings,
-                        manager: { ...settings.manager, role: e.target.value },
+                        manager: { ...managerSafe, role: e.target.value },
                       })
                     }
                     className="field mt-2"
                   />
                 </Label>
+                <Label t="البريد">
+                  <input value={managerSafe.email || ""} onChange={(e) => setSettings({ ...settings, manager: { ...managerSafe, email: e.target.value } })} className="field mt-2" />
+                </Label>
+                <Label t="الهاتف">
+                  <input value={managerSafe.phone || ""} onChange={(e) => setSettings({ ...settings, manager: { ...managerSafe, phone: e.target.value } })} className="field mt-2" />
+                </Label>
+                <Label t="كلمة مرور جديدة">
+                  <input type="password" value={managerSafe.newPassword || ""} onChange={(e) => setSettings({ ...settings, manager: { ...managerSafe, newPassword: e.target.value } })} className="field mt-2" />
+                </Label>
+                <Label t="تأكيد كلمة المرور">
+                  <input type="password" value={managerSafe.confirmPassword || ""} onChange={(e) => setSettings({ ...settings, manager: { ...managerSafe, confirmPassword: e.target.value } })} className="field mt-2" />
+                </Label>
               </div>
-              <div className="mt-6 flex items-center justify-between rounded-xl bg-emerald-50 p-4 text-sm text-emerald-700">
-                <span>تم تفعيل الحفظ التلقائي لبيانات مدير النظام.</span>
-                <Save size={18} />
+              <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-emerald-50 p-4 text-sm text-emerald-700">
+                <span>يتم حفظ بيانات مدير النظام في Supabase للشركة الحالية.</span>
+                <button className="btn-primary" onClick={async () => {
+                  if (!currentCompanyId) return alert("لم يتم تحديد الشركة الحالية");
+                  if ((managerSafe.newPassword || managerSafe.confirmPassword) && managerSafe.newPassword !== managerSafe.confirmPassword) return alert("تأكيد كلمة المرور غير مطابق");
+                  try {
+                    const adminUser = settingsRows.users.find((user) => String(user.role || "").includes("مدير النظام")) || settingsRows.users[0] || {};
+                    const saved = await settingsUsersService.updateUser(currentCompanyId, adminUser.user_id || `ADMIN-${currentCompanyId}`, {
+                      ...adminUser,
+                      name: managerSafe.name,
+                      employee_name: managerSafe.name,
+                      username: managerSafe.username,
+                      role: managerSafe.role || "مدير النظام",
+                      email: managerSafe.email || adminUser.email,
+                      phone: managerSafe.phone || adminUser.phone,
+                      password: managerSafe.newPassword || "",
+                      is_active: true,
+                    });
+                    setSettingsRows((state) => ({ ...state, users: state.users.some((user) => user.user_id === saved.user_id) ? state.users.map((user) => user.user_id === saved.user_id ? saved : user) : [saved, ...state.users] }));
+                    setSettings({ ...settings, manager: { ...managerSafe, newPassword: "", confirmPassword: "" } });
+                    alert("تم تحديث بيانات مدير النظام بنجاح");
+                  } catch (error) {
+                    alert(error.message || "تعذر تحديث بيانات مدير النظام");
+                  }
+                }}><Save size={17} /> حفظ مدير النظام</button>
               </div>
             </div>
           ) : tab === "الثيم والألوان" ? (
@@ -3575,6 +3752,45 @@ function SettingsPage({
                 }
               }}
             />
+          ) : isGeneralSettings ? (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-lg font-extrabold">إعدادات عامة</h3>
+                <p className="mt-1 text-xs text-slate-500">إعدادات الشركة والتقارير واللغة الافتراضية.</p>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                {[
+                  ["company_display_name", "اسم الشركة الظاهر"],
+                  ["default_language", "اللغة الافتراضية"],
+                  ["default_currency", "العملة الافتراضية"],
+                  ["date_format", "صيغة التاريخ"],
+                  ["time_zone", "المنطقة الزمنية"],
+                  ["report_header_title", "عنوان ترويسة التقرير"],
+                  ["report_footer_note", "ملاحظة تذييل التقرير"],
+                  ["logo_url", "رابط الشعار"],
+                  ["primary_color", "اللون الأساسي"],
+                  ["secondary_color", "اللون الثانوي"],
+                ].map(([field, label]) => (
+                  <Label key={field} t={label}>
+                    <input value={settingsRows.system?.[field] || ""} onChange={(e) => setSettingsRows((state) => ({ ...state, system: { ...(state.system || {}), [field]: e.target.value } }))} className="field mt-2" />
+                  </Label>
+                ))}
+                <label className="flex items-center gap-3 rounded-xl bg-slate-50 p-4 text-sm font-bold">
+                  <input type="checkbox" checked={settingsRows.system?.enable_notifications !== false} onChange={(e) => setSettingsRows((state) => ({ ...state, system: { ...(state.system || {}), enable_notifications: e.target.checked } }))} />
+                  تفعيل الإشعارات
+                </label>
+              </div>
+              <button className="btn-primary" onClick={async () => {
+                if (!currentCompanyId) return alert("لم يتم تحديد الشركة الحالية");
+                try {
+                  const saved = await systemSettingsService.saveSystemSettings(currentCompanyId, settingsRows.system || {});
+                  setSettingsRows((state) => ({ ...state, system: saved }));
+                  alert("تم حفظ البيانات بنجاح");
+                } catch (error) {
+                  alert(error.message || "تعذر حفظ البيانات");
+                }
+              }}><Save size={17} /> حفظ الإعدادات العامة</button>
+            </div>
           ) : isPermission ? (
             <PermissionsMatrix settings={settings} setSettings={setSettings} />
           ) : (
@@ -3609,12 +3825,16 @@ function SettingsPage({
               </div>
               <div className="space-y-2">
                 {items.map((item, i) => {
-                  const name = isPermission || isUser ? item.name : item,
+                  const name = isRemoteBranch ? item.branch_name : isRemoteCurrency ? item.currency_name : isPermission || isUser ? item.name : item,
                     description = isPermission
                       ? item.description
                       : isUser
-                        ? `${item.username} • ${item.role}${item.employeeId ? ` • ${item.employeeId}` : ""}`
-                        : null;
+                        ? `${item.username} • ${item.role}${item.employee_id ? ` • ${item.employee_id}` : ""} • ${item.is_active ? "نشط" : "معطل"}`
+                        : isRemoteBranch
+                          ? `${item.branch_code} • ${item.branch_type || "فرع"} • ${item.city || "—"} • ${item.is_active ? "نشط" : "معطل"}`
+                          : isRemoteCurrency
+                            ? `${item.currency_code} • ${item.currency_symbol || "—"} • ${item.exchange_rate} • ${item.is_default ? "افتراضية" : item.is_active ? "نشطة" : "معطلة"}`
+                            : null;
                   return (
                     <button
                       key={`${name}-${i}`}
@@ -3667,12 +3887,34 @@ function SettingsPage({
                 <X />
               </button>
             </div>
-            {isUser ? (
+            {isRemoteBranch ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Label t="كود الفرع"><input autoFocus value={dialog.branch_code || ""} onChange={(e) => setDialog({ ...dialog, branch_code: e.target.value })} className="field mt-2" /></Label>
+                <Label t="اسم الفرع"><input value={dialog.branch_name || ""} onChange={(e) => setDialog({ ...dialog, branch_name: e.target.value })} className="field mt-2" /></Label>
+                <Label t="نوع الفرع"><input value={dialog.branch_type || ""} onChange={(e) => setDialog({ ...dialog, branch_type: e.target.value })} className="field mt-2" /></Label>
+                <Label t="المدير"><input value={dialog.manager_name || ""} onChange={(e) => setDialog({ ...dialog, manager_name: e.target.value })} className="field mt-2" /></Label>
+                <Label t="الهاتف"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label>
+                <Label t="المدينة"><input value={dialog.city || ""} onChange={(e) => setDialog({ ...dialog, city: e.target.value })} className="field mt-2" /></Label>
+                <Label t="العنوان"><input value={dialog.address || ""} onChange={(e) => setDialog({ ...dialog, address: e.target.value })} className="field mt-2" /></Label>
+                <Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true", status: e.target.value === "true" ? "نشط" : "معطل" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label>
+                <Label t="ملاحظات"><textarea value={dialog.notes || ""} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label>
+              </div>
+            ) : isRemoteCurrency ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Label t="كود العملة"><input autoFocus value={dialog.currency_code || ""} onChange={(e) => setDialog({ ...dialog, currency_code: e.target.value })} className="field mt-2" /></Label>
+                <Label t="اسم العملة"><input value={dialog.currency_name || ""} onChange={(e) => setDialog({ ...dialog, currency_name: e.target.value })} className="field mt-2" /></Label>
+                <Label t="الرمز"><input value={dialog.currency_symbol || ""} onChange={(e) => setDialog({ ...dialog, currency_symbol: e.target.value })} className="field mt-2" /></Label>
+                <Label t="سعر الصرف"><input type="number" step="0.0001" value={dialog.exchange_rate || 1} onChange={(e) => setDialog({ ...dialog, exchange_rate: e.target.value })} className="field mt-2" /></Label>
+                <label className="flex items-center gap-3 rounded-xl bg-slate-50 p-4 text-sm font-bold"><input type="checkbox" checked={dialog.is_default === true} onChange={(e) => setDialog({ ...dialog, is_default: e.target.checked })} /> العملة الافتراضية</label>
+                <Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشطة</option><option value="false">معطلة</option></select></Label>
+                <Label t="ملاحظات"><textarea value={dialog.notes || ""} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label>
+              </div>
+            ) : isUser ? (
               <div className="grid gap-4 sm:grid-cols-2">
                 <Label t="اسم المستخدم الكامل">
                   <input
                     autoFocus
-                    value={dialog.name}
+                    value={dialog.name || ""}
                     onChange={(e) =>
                       setDialog({ ...dialog, name: e.target.value })
                     }
@@ -3681,7 +3923,7 @@ function SettingsPage({
                 </Label>
                 <Label t="اسم الدخول">
                   <input
-                    value={dialog.username}
+                    value={dialog.username || ""}
                     onChange={(e) =>
                       setDialog({ ...dialog, username: e.target.value })
                     }
@@ -3691,7 +3933,7 @@ function SettingsPage({
                 <Label t="كلمة المرور">
                   <input
                     type="password"
-                    value={dialog.password}
+                    value={dialog.password || ""}
                     onChange={(e) =>
                       setDialog({ ...dialog, password: e.target.value })
                     }
@@ -3700,7 +3942,7 @@ function SettingsPage({
                 </Label>
                 <Label t="الصلاحية">
                   <select
-                    value={dialog.role}
+                    value={dialog.role || "الموظف"}
                     onChange={(e) =>
                       setDialog({ ...dialog, role: e.target.value })
                     }
@@ -3715,9 +3957,9 @@ function SettingsPage({
                 </Label>
                 <Label t="ربط بالموظف">
                   <select
-                    value={dialog.employeeId}
+                    value={dialog.employee_id || dialog.employeeId || ""}
                     onChange={(e) =>
-                      setDialog({ ...dialog, employeeId: e.target.value })
+                      setDialog({ ...dialog, employee_id: e.target.value, employee_name: employees.find((emp) => emp.id === e.target.value)?.name || dialog.employee_name })
                     }
                     className="field mt-2"
                   >
@@ -3729,6 +3971,11 @@ function SettingsPage({
                     ))}
                   </select>
                 </Label>
+                <Label t="الفرع"><input value={dialog.branch || ""} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className="field mt-2" /></Label>
+                <Label t="الوظيفة"><input value={dialog.job || ""} onChange={(e) => setDialog({ ...dialog, job: e.target.value })} className="field mt-2" /></Label>
+                <Label t="الهاتف"><input value={dialog.phone || ""} onChange={(e) => setDialog({ ...dialog, phone: e.target.value })} className="field mt-2" /></Label>
+                <Label t="البريد"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label>
+                <Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label>
               </div>
             ) : isPermission ? (
               <div className="space-y-4">
@@ -6336,7 +6583,11 @@ function AIAssistantWidget({ currentUser, currentCompany, page, setPage, can, em
 
   const send = async (text = input) => {
     const question = String(text || "").trim();
-    if (!question) return;
+    if (!question) {
+      setMessages((list) => [...list, { role: "assistant", message: "اكتب طلبك أولًا" }]);
+      return;
+    }
+    if (loading) return;
     setLoading(true);
     try {
       let current = session;
@@ -6445,7 +6696,19 @@ function AIAssistantWidget({ currentUser, currentCompany, page, setPage, can, em
               <button onClick={copyLast} className="btn-secondary !h-10">نسخ</button>
               <button onClick={exportLast} className="btn-secondary !h-10">تصدير</button>
               <div className="flex min-w-[260px] flex-1 gap-2">
-                <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} className="field" placeholder="اكتب طلبك للمساعد..." />
+                <input
+                  value={input}
+                  disabled={loading}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      send();
+                    }
+                  }}
+                  className="field pointer-events-auto"
+                  placeholder="اكتب طلبك للمساعد..."
+                />
                 <button disabled={loading} onClick={() => send()} className="btn-primary">إرسال</button>
               </div>
             </div>

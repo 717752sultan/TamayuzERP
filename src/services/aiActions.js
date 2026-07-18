@@ -1,4 +1,5 @@
 import { findPageByArabicName, pageRegistry } from "../constants/pageRegistry";
+import { ERP_MODULES, getModulePages } from "../constants/moduleRegistry";
 
 const number = (value) => Number(value || 0);
 
@@ -61,6 +62,42 @@ export const buildAssistantBusinessContext = ({
 
 export const detectUserIntent = (message = "") => {
   const text = String(message).trim();
+  const lowerText = text.toLowerCase();
+  const assistantRoutes = [
+    { keywords: ["الضمانات", "صفحة الضمانات"], pageKey: "guarantees" },
+    { keywords: ["الموظفين", "الموظفون", "صفحة الموظفين"], pageKey: "employees" },
+    { keywords: ["الموارد البشرية"], moduleKey: "hr" },
+    { keywords: ["المخزون", "المخازن"], moduleKey: "inventory" },
+    { keywords: ["التقييم", "تقييم"], pageKey: "evaluations" },
+    { keywords: ["الحوافز"], pageKey: "incentives" },
+    { keywords: ["العمل الإضافي", "الاضافي", "الإضافي"], pageKey: "overtime" },
+    { keywords: ["الإعدادات", "اعدادات"], pageKey: "settings" },
+    { keywords: ["المستخدمين والصلاحيات", "المستخدمون والصلاحيات", "الصلاحيات"], pageKey: "users_permissions" },
+    { keywords: ["المبيعات"], moduleKey: "sales" },
+    { keywords: ["المشتريات"], moduleKey: "purchasing" },
+    { keywords: ["الحسابات"], moduleKey: "accounting" },
+    { keywords: ["crm"], moduleKey: "crm" },
+    { keywords: ["الأصول", "الاصول"], moduleKey: "assets" },
+    { keywords: ["المشاريع"], moduleKey: "projects" },
+  ];
+  const isNavigation = /(افتح|انتقل|اذهب|اعرض|روح)/.test(text);
+  if (isNavigation) {
+    const route = assistantRoutes.find((item) => item.keywords.some((keyword) => lowerText.includes(String(keyword).toLowerCase())));
+    if (route?.pageKey) {
+      const matchedPage = pageRegistry.find((item) => item.key === route.pageKey || item.routeKey === route.pageKey);
+      return { type: "navigate", page: matchedPage };
+    }
+    if (route?.moduleKey) {
+      const module = ERP_MODULES.find((item) => item.key === route.moduleKey);
+      const firstPage = getModulePages(route.moduleKey).find((item) => item.status !== "placeholder") || getModulePages(route.moduleKey)[0];
+      return { type: "navigate_module", module, page: firstPage ? pageRegistry.find((item) => item.key === firstPage.key) || firstPage : null };
+    }
+  }
+  if (/تقرير|تقارير|أنشئ تقرير|انشئ تقرير|اكتب تقرير/.test(text)) return { type: "report", reportType: text };
+  if (/استراتيجي|استراتيجية|خطة|برنامج|تشغيلي|تدريب|تحسين/.test(text)) return { type: "plan", topic: text };
+  if (/خطاب|تعميم|صغ|صياغة|إنذار|انذار|نقل موظف|ملاحظة/.test(text)) return { type: "letter", topic: text };
+  if (/kpi|KPI|مؤشر|معايير/.test(text)) return { type: "kpi", topic: text };
+  if (/مخزون|أصناف|اصناف|شراء/.test(text)) return { type: "inventory", topic: text };
   const page = findPageByArabicName(text);
   if (/افتح|انتقل|اذهب|اعرض|روح/.test(text) && page) return { type: "navigate", page };
   if (/تقرير|تقارير|أنشئ تقرير|انشئ تقرير/.test(text)) return { type: "report", page, reportType: page?.label || text };
@@ -171,6 +208,21 @@ export const generateKpiCriteria = (topic = "وظيفة محددة") => [
 
 export const executeAssistantAction = ({ message, context, canOpenPage, navigateToPage } = {}) => {
   const intent = detectUserIntent(message);
+  if (intent.type === "navigate" && intent.page?.key) {
+    if (canOpenPage && !canOpenPage(intent.page.key)) {
+      return { type: "message", reply: "لا تملك صلاحية الوصول إلى هذه الصفحة" };
+    }
+    navigateToPage?.(intent.page.key);
+    return { type: "navigation", pageKey: intent.page.key, reply: `تم فتح صفحة ${intent.page.label}` };
+  }
+  if (intent.type === "navigate_module") {
+    if (!intent.module) return { type: "message", reply: "هذه الصفحة قيد التجهيز ضمن منصة Tamyuz ERP" };
+    if (intent.page?.key && canOpenPage && !canOpenPage(intent.page.key)) {
+      return { type: "message", reply: "لا تملك صلاحية الوصول إلى هذه الصفحة" };
+    }
+    if (intent.page?.key) navigateToPage?.(intent.page.key);
+    return { type: "navigation", pageKey: intent.page?.key, reply: `تم فتح وحدة ${intent.module.label}` };
+  }
   if (intent.type === "navigate") {
     if (!intent.page) return { type: "message", reply: "لم أتمكن من العثور على هذه الصفحة، اكتب اسم الصفحة بشكل أوضح." };
     if (canOpenPage && !canOpenPage(intent.page.key)) {
