@@ -92,6 +92,17 @@ tbody tr {
   background-color: var(--company-primary) !important;
   color: var(--company-button-text) !important;
 }
+.company-sidebar-active-page {
+  background-color: var(--company-primary) !important;
+  background-image: linear-gradient(rgb(15 23 42 / 52%), rgb(15 23 42 / 52%));
+  border-color: rgb(255 255 255 / 18%) !important;
+  box-shadow: 0 5px 14px rgb(0 0 0 / 16%);
+  color: #ffffff !important;
+}
+.company-sidebar-active-page:hover {
+  background-image: linear-gradient(rgb(15 23 42 / 46%), rgb(15 23 42 / 46%));
+  color: #ffffff !important;
+}
 .company-report-header {
   background-color: var(--company-report-header) !important;
   color: var(--company-button-text) !important;

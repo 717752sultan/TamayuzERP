@@ -86,4 +86,8 @@ export const settingsBranchesService = {
   async deleteBranch(companyId, branchId, branch = {}) {
     return this.toggleBranchStatus(companyId, branchId, false, branch);
   },
+
+  subscribe(onChange) {
+    return supabase.subscribeToTable("branches", onChange);
+  },
 };

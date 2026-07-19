@@ -15,12 +15,14 @@ export const companyPermissionActions = [
 
 validateUniquePermissionKeys(pageRegistry);
 
-export const companyPermissionModules = pageRegistry.map((page) => [
-  page.permissionKey,
-  page.label,
-  page.group,
-  page,
-]);
+export const companyPermissionModules = pageRegistry
+  .filter((page) => page.isOfficialPage !== false && page.status !== "alias")
+  .map((page) => [
+    page.permissionKey,
+    page.label,
+    page.group,
+    page,
+  ]);
 
 const sensitiveGroups = new Set(["financial", "inventory", "platform"]);
 const sensitiveKeys = new Set(companyPermissionModules.filter(([, , group]) => sensitiveGroups.has(group)).map(([key]) => key));
@@ -85,7 +87,7 @@ export const normalizeCompanyPermission = (row = {}, companyId = "") => {
     can_manage: row.can_manage === true,
     is_enabled: enabled,
     is_official_page: row.is_official_page !== false,
-    is_duplicate_allowed: row.is_duplicate_allowed === true || meta.is_duplicate_allowed === true,
+    is_duplicate_allowed: meta.is_duplicate_allowed === true,
     sort_order: Number(row.sort_order ?? meta.sort_order ?? 9999),
   };
 };

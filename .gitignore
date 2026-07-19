@@ -3,6 +3,7 @@
 node_modules/
 dist/node_modules/
 dist/
+.vercel/
 .env
 .env.local
 .env.production

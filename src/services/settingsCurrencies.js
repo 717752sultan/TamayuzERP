@@ -37,6 +37,7 @@ const assertCurrency = (payload) => {
   if (!payload.currency_code) throw new Error("كود العملة مطلوب");
   if (!payload.currency_name) throw new Error("اسم العملة مطلوب");
   if (!(Number(payload.exchange_rate) > 0)) throw new Error("سعر الصرف يجب أن يكون رقمًا أكبر من صفر");
+  if (!payload.is_active && payload.is_default) throw new Error("لا يمكن تعطيل العملة الافتراضية قبل تحديد عملة بديلة");
 };
 
 export const settingsCurrenciesService = {
@@ -54,6 +55,8 @@ export const settingsCurrenciesService = {
   async saveCurrency(companyId, currency) {
     try {
       const payload = currencyToDb(companyId, currency);
+      if (payload.is_default && currency.is_active === false) throw new Error("لا يمكن تعطيل العملة الافتراضية قبل تحديد عملة بديلة");
+      if (payload.is_default) payload.is_active = true;
       assertCurrency(payload);
       if (!payload.id) delete payload.id;
       if (payload.is_default) {
@@ -85,8 +88,16 @@ export const settingsCurrenciesService = {
     return this.saveCurrency(companyId, { ...currency, id: currencyId || currency.id, is_default: true, is_active: true });
   },
 
-  async deleteCurrency(companyId, currencyId, currency = {}) {
+  async deleteCurrency(companyId, currencyId, currency = {}, protectedCurrencyCodes = []) {
+    const protectedCodes = new Set((protectedCurrencyCodes || []).map((code) => String(code || "").trim().toUpperCase()).filter(Boolean));
+    if (protectedCodes.has(String(currency.currency_code || "").trim().toUpperCase())) {
+      throw new Error("لا يمكن تعطيل عملة مستخدمة كعملة نظام أو راتب أو معاملات. اختر عملة بديلة أولًا");
+    }
     if (currency.is_default) throw new Error("لا يمكن حذف العملة الافتراضية إلا بعد تحديد عملة افتراضية بديلة");
     return this.saveCurrency(companyId, { ...currency, id: currencyId || currency.id, is_active: false });
+  },
+
+  subscribe(onChange) {
+    return supabase.subscribeToTable("currencies", onChange);
   },
 };

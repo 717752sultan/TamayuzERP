@@ -1,5 +1,10 @@
 const TENANT_SESSION_KEY = "hrms_tenant_session";
 
+const tenantSessionStorages = () => [
+  typeof localStorage !== "undefined" ? localStorage : null,
+  typeof sessionStorage !== "undefined" ? sessionStorage : null,
+].filter(Boolean);
+
 let tenantState = {
   currentCompany: null,
   currentUser: null,
@@ -40,7 +45,9 @@ export const normalizeCompany = (row = {}) => ({
   updated_at: row.updated_at || "",
 });
 
-export const normalizeTenantUser = (row = {}, company = {}) => ({
+export const normalizeTenantUser = (row = {}, company = {}) => {
+  const inheritCompanyContext = !(row.is_platform_admin === true || row.role === platformSuperAdminRole);
+  return ({
   user_id: row.user_id || row.id || row.username || "",
   id: row.user_id || row.id || row.username || "",
   name: row.name || row.employee_name || row.username || "",
@@ -52,42 +59,50 @@ export const normalizeTenantUser = (row = {}, company = {}) => ({
   job: row.job || "",
   phone: row.phone || "",
   email: row.email || "",
-  company_id: row.company_id || company.company_id || "",
-  company_code: row.company_code || company.company_code || "",
-  company_name: row.company_name || company.company_name || "",
-  logo_url: row.logo_url || company.logo_url || "",
-  primary_color: row.primary_color || company.primary_color || "#7f1d1d",
-  secondary_color: row.secondary_color || company.secondary_color || "#374151",
-  accent_color: row.accent_color || company.accent_color || "#991b1b",
-  sidebar_bg_color: row.sidebar_bg_color || company.sidebar_bg_color || "#111827",
-  sidebar_text_color: row.sidebar_text_color || company.sidebar_text_color || "#ffffff",
-  button_color: row.button_color || company.button_color || row.primary_color || company.primary_color || "#991b1b",
-  button_text_color: row.button_text_color || company.button_text_color || "#ffffff",
-  card_accent_color: row.card_accent_color || company.card_accent_color || "#fee2e2",
-  table_header_color: row.table_header_color || company.table_header_color || "#f8fafc",
-  report_header_color: row.report_header_color || company.report_header_color || row.primary_color || company.primary_color || "#8b1e1e",
-  theme_mode: row.theme_mode || company.theme_mode || "light",
-  theme_name: row.theme_name || company.theme_name || "default",
+  company_id: row.company_id || (inheritCompanyContext ? company.company_id : "") || "",
+  company_code: row.company_code || (inheritCompanyContext ? company.company_code : "") || "",
+  company_name: row.company_name || (inheritCompanyContext ? company.company_name : "") || "",
+  logo_url: row.logo_url || (inheritCompanyContext ? company.logo_url : "") || "",
+  primary_color: row.primary_color || (inheritCompanyContext ? company.primary_color : "") || "#7f1d1d",
+  secondary_color: row.secondary_color || (inheritCompanyContext ? company.secondary_color : "") || "#374151",
+  accent_color: row.accent_color || (inheritCompanyContext ? company.accent_color : "") || "#991b1b",
+  sidebar_bg_color: row.sidebar_bg_color || (inheritCompanyContext ? company.sidebar_bg_color : "") || "#111827",
+  sidebar_text_color: row.sidebar_text_color || (inheritCompanyContext ? company.sidebar_text_color : "") || "#ffffff",
+  button_color: row.button_color || (inheritCompanyContext ? company.button_color : "") || row.primary_color || (inheritCompanyContext ? company.primary_color : "") || "#991b1b",
+  button_text_color: row.button_text_color || (inheritCompanyContext ? company.button_text_color : "") || "#ffffff",
+  card_accent_color: row.card_accent_color || (inheritCompanyContext ? company.card_accent_color : "") || "#fee2e2",
+  table_header_color: row.table_header_color || (inheritCompanyContext ? company.table_header_color : "") || "#f8fafc",
+  report_header_color: row.report_header_color || (inheritCompanyContext ? company.report_header_color : "") || row.primary_color || (inheritCompanyContext ? company.primary_color : "") || "#8b1e1e",
+  theme_mode: row.theme_mode || (inheritCompanyContext ? company.theme_mode : "") || "light",
+  theme_name: row.theme_name || (inheritCompanyContext ? company.theme_name : "") || "default",
   is_platform_admin: row.is_platform_admin === true || row.role === platformSuperAdminRole,
   is_active: row.is_active !== false,
-});
+  });
+};
 
 export const setTenantSession = ({ company, user }) => {
   tenantState = {
     currentCompany: company ? normalizeCompany(company) : null,
     currentUser: user ? normalizeTenantUser(user, company || {}) : null,
   };
-  try {
-    sessionStorage.setItem(TENANT_SESSION_KEY, JSON.stringify(tenantState));
-  } catch {
-    // Session storage may be unavailable in restricted browsers.
-  }
+  tenantSessionStorages().forEach((storage) => {
+    try {
+      storage.setItem(TENANT_SESSION_KEY, JSON.stringify(tenantState));
+    } catch {
+      // Auth-session storage may be unavailable in restricted browsers.
+    }
+  });
   return tenantState;
 };
 
 export const loadTenantSession = () => {
   try {
-    const parsed = JSON.parse(sessionStorage.getItem(TENANT_SESSION_KEY) || "{}");
+    const stored = tenantSessionStorages()
+      .map((storage) => {
+        try { return storage.getItem(TENANT_SESSION_KEY); } catch { return ""; }
+      })
+      .find(Boolean);
+    const parsed = JSON.parse(stored || "{}");
     if (parsed.currentCompany || parsed.currentUser) {
       tenantState = {
         currentCompany: parsed.currentCompany ? normalizeCompany(parsed.currentCompany) : null,
@@ -102,11 +117,9 @@ export const loadTenantSession = () => {
 
 export const clearTenantSession = () => {
   tenantState = { currentCompany: null, currentUser: null };
-  try {
-    sessionStorage.removeItem(TENANT_SESSION_KEY);
-  } catch {
-    // Ignore.
-  }
+  tenantSessionStorages().forEach((storage) => {
+    try { storage.removeItem(TENANT_SESSION_KEY); } catch { /* Ignore. */ }
+  });
 };
 
 export const getCurrentTenant = () => tenantState;
@@ -154,7 +167,9 @@ export const tenantAwareTables = new Set([
   "app_permission_nodes",
   "app_role_node_permissions",
   "company_permissions",
+  "company_settings",
   "branches",
+  "currencies",
   "performance_job_templates",
   "performance_kpi_criteria",
   "performance_kpi_scores",

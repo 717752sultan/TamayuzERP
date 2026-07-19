@@ -106,10 +106,13 @@ import { companiesService } from "./services/companies";
 import { companyPermissionActions, companyPermissionModules, companyPermissionsService, companyCanAccessFromRows, mergeWithDefaultCompanyPermissions } from "./services/companyPermissions";
 import { applyCompanyTheme, applyThemeForCurrentCompany, getDefaultTheme, normalizeThemePayload, themePresets, themeService } from "./services/theme";
 import { clearTenantSession, getCurrentCompany, getCurrentUser, loadTenantSession, platformSuperAdminRole, setTenantSession } from "./services/tenant";
-import { assistantModes } from "./constants/pageRegistry";
+import { assistantModes, pageRegistryByKey } from "./constants/pageRegistry";
 import { APP_BRAND_NAME, APP_DESCRIPTION, APP_OFFICIAL_NAME, APP_REPORT_SUBTITLE, APP_REPORT_TITLE, APP_SHORT_NAME, APP_SYSTEM_NAME, APP_TAGLINE } from "./constants/branding";
 import { buildReportBrandingHtml } from "./services/reportBranding";
-import { ERP_MODULES, ERP_PAGE_BY_KEY, ERP_PAGE_BY_ROUTE, getModuleForPage, getModulePages, isPlaceholderPage } from "./constants/moduleRegistry";
+import { ERP_MODULES, ERP_PAGE_BY_KEY, ERP_PAGE_BY_ROUTE, buildGroupedNavigation, getModuleForPage, getModulePages, isPlaceholderPage } from "./constants/moduleRegistry";
+import HRFoundationPage from "./components/hr/HRFoundationPage";
+import SystemSettingsPage from "./components/settings/SystemSettingsPage";
+import GroupedSidebarNav from "./components/navigation/GroupedSidebarNav";
 const icons = {
   dashboard: LayoutDashboard,
   employees: Users,
@@ -157,6 +160,7 @@ const icons = {
   hr_training: Star,
   hr_reports: FileBarChart,
   hr_settings: Settings,
+  system_settings: Settings,
   hr_requests_approvals: ClipboardList,
   hr_approvals: BadgeCheck,
   hr_org_chart: Building2,
@@ -166,31 +170,38 @@ const icons = {
 };
 const fullHrNavItems = [
   ["hr_home", "لوحة الموارد البشرية"],
-  ["employees", "الموظفون"],
-  ["discipline", "الحضور والانصراف"],
-  ["hr_leaves", "الإجازات"],
-  ["hr_salary", "الرواتب"],
-  ["hr_requests_approvals", "الطلبات والموافقات"],
-  ["hr_disciplinary", "المخالفات والإنذارات"],
-  ["hr_termination", "إنهاء الخدمة"],
-  ["hr_files", "ملفات الموظفين"],
-  ["hr_contracts", "العقود"],
-  ["guarantees", "الضمانات"],
-  ["hr_custodies", "العهد"],
-  ["evaluations", "التقييم"],
-  ["hr_performance_full", "قياس الأداء"],
-  ["incentives", "الحوافز"],
-  ["overtime", "العمل الإضافي"],
-  ["shifts", "الشفتات"],
-  ["recruitment", "التوظيف"],
-  ["hr_training", "التدريب"],
-  ["hr_circulars", "التعاميم"],
-  ["hr_complaints", "الشكاوى"],
-  ["hr_reports", "تقارير الموارد البشرية"],
+  ["employees", "قائمة الموظفين"],
+  ["hr_org_chart", "الهيكل التنظيمي"],
   ["hr_settings", "إعدادات الموارد البشرية"],
   ["users_permissions", "المستخدمون والصلاحيات"],
+  ["hr_contracts", "العقود"],
+  ["hr_files", "ملفات الموظفين"],
+  ["guarantees", "الضمانات"],
+  ["hr_custodies", "العهد"],
+  ["daily_operations", "العمليات اليومية"],
+  ["discipline", "الحضور والانصراف"],
+  ["shifts", "الشفتات"],
+  ["overtime", "العمل الإضافي"],
+  ["hr_leaves", "الإجازات"],
+  ["hr_requests_approvals", "الطلبات والموافقات"],
+  ["hr_salary", "الرواتب"],
+  ["templates", "نماذج التقييم"],
+  ["performance_criteria", "معايير الأداء"],
+  ["evaluations", "التقييم"],
+  ["performance_kpi_scores", "درجات KPI"],
+  ["productivity", "الإنتاجية"],
+  ["incentives", "الحوافز"],
+  ["top", "موظف الشهر"],
+  ["plans", "خطط التحسين"],
+  ["recruitment", "التوظيف"],
+  ["hr_training", "التدريب"],
+  ["hr_disciplinary", "المخالفات والإنذارات"],
+  ["hr_circulars", "التعاميم"],
+  ["hr_complaints", "الشكاوى"],
+  ["hr_termination", "إنهاء الخدمة"],
+  ["hr_reports", "تقارير الموارد البشرية"],
 ];
-const genericHrPageKeys = new Set(["hr_home", "hr_leaves", "hr_salary", "hr_requests_approvals", "hr_disciplinary", "hr_termination", "hr_files", "hr_contracts", "hr_custodies", "hr_performance_full", "hr_training", "hr_circulars", "hr_complaints", "hr_reports", "hr_settings"]);
+const genericHrPageKeys = new Set(["hr_leaves", "hr_salary", "hr_requests_approvals", "hr_disciplinary", "hr_termination", "hr_files", "hr_contracts", "hr_custodies", "hr_performance_full", "hr_training", "hr_circulars", "hr_complaints", "hr_reports"]);
 const canonicalHrPageAliases = {
   hr_employees_full: "employees",
   hr_reports_full: "hr_reports",
@@ -208,6 +219,7 @@ const canonicalHrPageAliases = {
 };
 const navItems = [
   ["companies_admin", "إدارة الشركات"],
+  ["system_settings", "الإعدادات العامة"],
   ...baseNavItems.slice(0, -2),
   ["guarantees", "ضمانات الموظفين"],
   ["overtime", "العمل الإضافي"],
@@ -623,11 +635,13 @@ class PageErrorBoundary extends React.Component {
 }
 const isAdminLikeRole = (role = "") =>
   ["مدير النظام", "مدير عام النظام", "الإدارة العليا"].some((x) => String(role).includes(x));
+const isSystemAdministratorRole = (role = "") =>
+  ["مدير النظام", "مدير عام النظام", "مشرف النظام العام"].includes(String(role || "").trim());
 const canByPermission = (permissions, role, pageKey, action = "can_view") => {
   if (isAdminLikeRole(role)) return true;
-  if (!permissions?.length) return action === "can_view" ? false : true;
+  if (!permissions?.length) return false;
   const row = permissions.find((p) => p.role === role && p.page_key === pageKey);
-  return row ? row[action] === true : action === "can_view" ? false : true;
+  return row ? row[action] === true : false;
 };
 const dashboardPermissionNodes = ["dashboard_main", "dashboard_hr", "dashboard_inventory", "dashboard_performance", "dashboard_daily_operations", "dashboard_branches", "dashboard_financial"];
 const permissionNodeGroups = {
@@ -892,6 +906,16 @@ export default function App() {
         settings={settings}
         onLogin={(user) => {
           const isPlatformLogin = user?.is_platform_admin === true || user?.role === platformSuperAdminRole;
+          const identityUser = isPlatformLogin
+            ? {
+                ...user,
+                company_id: "",
+                company_code: "",
+                company_name: "",
+                logo_url: "",
+                primary_color: "",
+              }
+            : user;
           const company = isPlatformLogin ? null : (getCurrentCompany() || {
             company_id: user.company_id,
             company_code: user.company_code,
@@ -899,9 +923,9 @@ export default function App() {
             logo_url: user.logo_url,
             primary_color: user.primary_color,
           });
-          setTenantSession({ company, user });
+          setTenantSession({ company, user: identityUser });
           setCurrentCompany(company);
-          setCurrentUserState(user);
+          setCurrentUserState(identityUser);
           setRole(user.role);
           localStorage.setItem("ep_role", user.role);
           localStorage.setItem("ep_employee_id", user.employeeId || "");
@@ -942,6 +966,7 @@ export default function App() {
     );
 	  const currentUser = currentUserState || getCurrentUser() || {},
       isPlatformAdminUser = currentUser?.is_platform_admin === true || currentUser?.role === platformSuperAdminRole || role === platformSuperAdminRole,
+      isAdministrativeUser = isPlatformAdminUser || isSystemAdministratorRole(currentUser?.role) || isSystemAdministratorRole(role),
       hasSelectedCompany = Boolean(currentCompany?.company_id),
 	    roleMatrix = settings.rolePermissions?.[role] || {},
 	    hasRoleMatrix = Object.keys(roleMatrix).length > 0,
@@ -949,16 +974,19 @@ export default function App() {
       companyCanPage = (pageKey, action = "can_view") => {
         if (pageKey === "companies_admin") return isPlatformAdminUser;
         if (!hasSelectedCompany) return false;
+        if (isAdministrativeUser) return true;
         return companyCanAccessFromRows(companyPermissions, pageKey, action);
       },
 	    canPage = (pageKey, action = "can_view") => {
         if (isPlatformAdminUser) return pageKey === "companies_admin" ? true : companyCanPage(pageKey, action);
+        if (isAdministrativeUser) return true;
         if (!companyCanPage(pageKey, action)) return false;
         return pageAllowedByTree(treeRolePermissions, role, pageKey, action) || canByPermission(appPermissions, role, pageKey, action);
       },
 	    rawVisibleNavItems = navItems.filter(([id]) => {
         if (isPlatformAdminUser) return hasSelectedCompany ? id === "companies_admin" || companyCanPage(id, "can_view") : id === "companies_admin";
         if (id === "companies_admin") return false;
+        if (isAdministrativeUser && hasSelectedCompany) return true;
         if (!companyCanPage(id, "can_view")) return false;
 	      if (id === "dashboard") return hasAnyPermission(treeRolePermissions, role, dashboardPermissionNodes, "can_view");
 	      if (treeRolePermissions.length) return pageAllowedByTree(treeRolePermissions, role, id, "can_view");
@@ -971,6 +999,7 @@ export default function App() {
       moduleVisibleNavItems = isPlatformAdminUser && !hasSelectedCompany
         ? rawVisibleNavItems
         : getModulePages(selectedModuleKey).filter((item) => {
+            if (isAdministrativeUser) return item.status !== "placeholder" || isAdminLikeRole(role) || isPlatformAdminUser;
             if (item.status === "placeholder") return isAdminLikeRole(role) || isPlatformAdminUser;
             return rawVisibleIds.has(item.routeKey) || rawVisibleIds.has(item.key);
           }).map((item) => [item.key, item.label, item.routeKey, item.status, item.moduleKey]),
@@ -981,6 +1010,14 @@ export default function App() {
       requestedPageBlockedByRole = !pageIsPlaceholder && page !== "companies_admin" && hasSelectedCompany && companyCanPage(page, "can_view") && !canPage(page, "can_view"),
 	    firstAllowedPage = isPlatformAdminUser && !hasSelectedCompany ? "companies_admin" : ((visibleNavItems[0]?.[2] || visibleNavItems[0]?.[0]) || getFirstAllowedPageForUser({ ...currentUser, role }, treeRolePermissions, appPermissions, rawVisibleNavItems)),
 	    activePage = (requestedPageBlockedByCompany || requestedPageBlockedByRole) ? page : (visibleNavItems.some(([id, _label, routeKey]) => id === page || routeKey === page) ? page : firstAllowedPage),
+      sidebarNavigationGroups = buildGroupedNavigation(visibleNavItems.map(([id, label, routeKey, itemStatus, moduleKey]) => ({
+        ...(pageRegistryByKey[id] || ERP_PAGE_BY_KEY[id] || ERP_PAGE_BY_ROUTE[routeKey] || {}),
+        key: id,
+        label,
+        routeKey: routeKey || id,
+        status: itemStatus || pageRegistryByKey[id]?.status || "active",
+        moduleKey: moduleKey || pageRegistryByKey[id]?.moduleKey || selectedModuleKey,
+      }))),
     title = ERP_PAGE_BY_KEY[activePage]?.label || ERP_PAGE_BY_ROUTE[activePage]?.label || navItems.find((x) => x[0] === activePage)?.[1],
     company = currentCompany || getCurrentCompany() || {},
     companyName = company.company_name || currentUser.company_name || (isPlatformAdminUser ? "إدارة المنصة" : APP_BRAND_NAME),
@@ -1012,28 +1049,18 @@ export default function App() {
   const handlePlatformCompanyChange = (companyId) => {
     if (!isPlatformAdminUser) return;
     const selected = companies.find((item) => item.company_id === companyId) || null;
-    const nextUser = selected
-      ? {
-          ...currentUser,
-          company_id: selected.company_id,
-          company_code: selected.company_code,
-          company_name: selected.company_name,
-          logo_url: selected.logo_url,
-          primary_color: selected.primary_color,
-          is_platform_admin: true,
-        }
-      : {
-          ...currentUser,
-          company_id: "",
-          company_code: "",
-          company_name: "",
-          logo_url: "",
-          primary_color: "",
-          is_platform_admin: true,
-        };
-    setTenantSession({ company: selected, user: nextUser });
+    const identityUser = {
+      ...currentUser,
+      company_id: "",
+      company_code: "",
+      company_name: "",
+      logo_url: "",
+      primary_color: "",
+      is_platform_admin: true,
+    };
+    setTenantSession({ company: selected, user: identityUser });
     setCurrentCompany(selected);
-    setCurrentUserState(nextUser);
+    setCurrentUserState(identityUser);
     setEmployeesState([]);
     setEvaluationsState([]);
     setSettingsState(hydrateSettings(defaultSettings));
@@ -1053,17 +1080,22 @@ export default function App() {
     return <div className="grid min-h-screen place-items-center bg-slate-50 p-5" dir="rtl"><div className="panel max-w-xl p-6 text-center"><ShieldCheck className="mx-auto mb-3 text-brand-700" /><h2 className="text-xl font-extrabold">لا توجد صلاحيات مفعلة لهذا المستخدم</h2><button onClick={() => { localStorage.removeItem("ep_logged"); localStorage.removeItem("ep_role"); clearTenantSession(); setCurrentCompany(null); setCurrentUserState(null); setLogged(false); }} className="btn-primary mt-5">تسجيل الخروج</button></div></div>;
   }
   const availableModulePages = (moduleKey) =>
-    getModulePages(moduleKey).filter((item) =>
-      item.status === "placeholder"
+    getModulePages(moduleKey).filter((item) => {
+      if (isAdministrativeUser) return item.status !== "placeholder" || isAdminLikeRole(role) || isPlatformAdminUser;
+      return item.status === "placeholder"
         ? isAdminLikeRole(role) || isPlatformAdminUser
-        : rawVisibleIds.has(item.routeKey) || rawVisibleIds.has(item.key),
-    );
+        : rawVisibleIds.has(item.routeKey) || rawVisibleIds.has(item.key);
+    });
   const safeModules = isPlatformAdminUser && !hasSelectedCompany
     ? []
     : ERP_MODULES.filter((module) => availableModulePages(module.key).length > 0);
   const switchErpModule = (moduleKey) => {
     const pages = availableModulePages(moduleKey);
     setActiveModuleKey(moduleKey);
+    if (moduleKey === "system") {
+      setPage("system_settings");
+      return;
+    }
     if (pages[0]) setPage(pages[0].routeKey || pages[0].key);
   };
   return (
@@ -1094,28 +1126,18 @@ export default function App() {
             <X />
           </button>
         </div>
-        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-	          {visibleNavItems.map(([id, label, routeKey, itemStatus, moduleKey]) => {
-            const targetPage = routeKey || id;
-            const I = icons[targetPage] || icons[id] || BriefcaseBusiness;
-            const isActiveNav = activePage === targetPage || activePage === id;
-            return (
-              <button
-                key={id}
-                onClick={() => {
-                  if (moduleKey) setActiveModuleKey(moduleKey);
-                  setPage(targetPage);
-                  setSidebar(false);
-                }}
-                className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold ${isActiveNav ? "company-active-nav bg-brand-700 text-white" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}
-              >
-                <I size={19} />
-                {label}
-                {itemStatus === "placeholder" && <span className="mr-auto rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-slate-300">قريبًا</span>}
-                {isActiveNav && <ChevronLeft className="mr-auto" size={16} />}
-              </button>
-            );
-          })}
+        <nav className="flex-1 overflow-x-hidden overflow-y-auto p-3">
+          <GroupedSidebarNav
+            groups={sidebarNavigationGroups}
+            activePage={activePage}
+            moduleKey={selectedModuleKey}
+            icons={icons}
+            onNavigate={(item) => {
+              if (item.moduleKey) setActiveModuleKey(item.moduleKey);
+              setPage(item.routeKey || item.key);
+              setSidebar(false);
+            }}
+          />
         </nav>
         <div className="border-t border-white/10 p-4">
           <div className="mb-3 flex items-center gap-3 rounded-xl bg-white/5 p-3">
@@ -1279,6 +1301,8 @@ export default function App() {
 	          {activePage === "audit_logs" && <AuditLogsPage {...p} />}{" "}
 	          {activePage === "reports" && <EnhancedReports {...p} />}{" "}
 	          {activePage === "settings" && <SettingsPage {...p} />}
+          {activePage === "system_settings" && <SystemSettingsPage {...p} />}
+          {["hr_home", "hr_org_chart", "hr_settings"].includes(activePage) && <HRFoundationPage {...p} pageKey={activePage} />}
           {genericHrPageKeys.has(activePage) && <HRModulePage pageKey={activePage} currentCompany={company} can={p.can} />}
           </>
           )}
@@ -2290,15 +2314,17 @@ function Employees({ employees, setEmployees }) {
     </div>
   );
 }
-function EmployeeModal({ employee, editing, close, save, setEmployees }) {
+function EmployeeModal({ employee, editing, close, save, setEmployees, branchOptions = branches, jobOptions = jobs, managerOptions = [] }) {
   const currentEmployee = employee || editing;
+  const availableBranches = [...new Set([currentEmployee?.branch, ...(branchOptions || []), ...branches].filter(Boolean))];
+  const availableJobs = [...new Set([currentEmployee?.job, ...(jobOptions || []), ...jobs].filter(Boolean))];
   const [saving, setSaving] = useState(false);
   const [f, setF] = useState(
     currentEmployee || {
       id: `EMP-${Date.now().toString().slice(-4)}`,
       name: "",
-      branch: branches[0],
-      job: jobs[0],
+      branch: availableBranches[0] || "",
+      job: availableJobs[0] || "",
       hireDate: new Date().toISOString().slice(0, 10),
       salary: 5000,
       phone: "05",
@@ -2385,19 +2411,21 @@ function EmployeeModal({ employee, editing, close, save, setEmployees }) {
               <input
                 required
                 type={t || "text"}
+                list={k === "manager" ? "employee-manager-options" : undefined}
                 value={f[k]}
                 onChange={(e) => setF({ ...f, [k]: e.target.value })}
                 className="field mt-2"
               />
             </Label>
           ))}
+          <datalist id="employee-manager-options">{managerOptions.filter((name) => name && name !== f.name).map((name) => <option key={name} value={name} />)}</datalist>
           <Label t="الفرع">
             <select
               value={f.branch}
               onChange={(e) => setF({ ...f, branch: e.target.value })}
               className="field mt-2"
             >
-              {branches.map((x) => (
+              {availableBranches.map((x) => (
                 <option key={x}>{x}</option>
               ))}
             </select>
@@ -2408,7 +2436,7 @@ function EmployeeModal({ employee, editing, close, save, setEmployees }) {
               onChange={(e) => setF({ ...f, job: e.target.value })}
               className="field mt-2"
             >
-              {jobs.map((x) => (
+              {availableJobs.map((x) => (
                 <option key={x}>{x}</option>
               ))}
             </select>
@@ -4932,12 +4960,22 @@ function EnhancedReports({ employees, evaluations }) {
   );
 }
 
-function EnhancedEmployees({ employees, setEmployees, setEvaluations }) {
+function EnhancedEmployees({ employees, setEmployees, setEvaluations, settings }) {
   const [q, setQ] = useState("");
   const [branch, setBranch] = useState("الكل");
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [selected, setSelected] = useState([]);
+  const employeeBranchOptions = [...new Set([
+    ...(settings?.branches || []).map((item) => typeof item === "string" ? item : item?.branch_name || item?.name),
+    ...employees.map((employee) => employee.branch),
+  ].filter(Boolean))];
+  const employeeJobOptions = [...new Set([
+    ...(settings?.jobs || []).map((item) => typeof item === "string" ? item : item?.name || item?.job_name),
+    ...(settings?.jobDefinitions || []).map((item) => item?.name || item?.job_name),
+    ...employees.map((employee) => employee.job),
+  ].filter(Boolean))];
+  const employeeManagerOptions = [...new Set(employees.filter((employee) => employee.status === "نشط").map((employee) => employee.name).filter(Boolean))];
   const filtered = employees.filter(
     (e) =>
       (e.name.includes(q) || e.id.toLowerCase().includes(q.toLowerCase())) &&
@@ -4993,7 +5031,7 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations }) {
           </label>
           <select value={branch} onChange={(e) => setBranch(e.target.value)} className="field max-w-[190px]">
             <option>الكل</option>
-            {branches.map((x) => <option key={x}>{x}</option>)}
+            {employeeBranchOptions.map((x) => <option key={x}>{x}</option>)}
           </select>
           <button onClick={() => exportExcel(filtered, "الموظفون")} className="btn-secondary">
             <FileSpreadsheet size={17} /> تصدير Excel
@@ -5067,7 +5105,7 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations }) {
           </table>
         </div>
       </div>
-      {modal && <EmployeeModal editing={editing} close={() => setModal(false)} setEmployees={setEmployees} />}
+      {modal && <EmployeeModal editing={editing} close={() => setModal(false)} setEmployees={setEmployees} branchOptions={employeeBranchOptions} jobOptions={employeeJobOptions} managerOptions={employeeManagerOptions} />}
     </div>
 	  );
 	}
