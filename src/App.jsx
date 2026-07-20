@@ -89,7 +89,7 @@ import { generateBranchForecast } from "./services/inventoryForecast";
 import { canInventory } from "./services/inventoryPermissions";
 import { inventorySettingsService, defaultInventorySettings, defaultDocumentNumbering } from "./services/inventorySettings";
 import { dailyOperationsService, operationTypes, serviceChannels, operationStatuses } from "./services/dailyOperations";
-import { downloadDailyOperationsTemplate, exportDailyOperationsToExcel, importDailyOperationsRows, parseDailyOperationsExcel, validateDailyOperationsRows } from "./services/dailyOperationsImportExport";
+import { downloadDailyOperationsTemplate, downloadProductivityTemplate, exportDailyOperationsToExcel, importDailyOperationsRows, parseDailyOperationsExcel, validateDailyOperationsRows } from "./services/dailyOperationsImportExport";
 import { performanceCriteriaService, scoringTypes, defaultJobKpis } from "./services/performanceCriteria";
 import { kpiCalculationService } from "./services/kpiCalculation";
 import { aiAssistantService } from "./services/aiAssistant";
@@ -7555,20 +7555,224 @@ function IndicatorManager({ title, indicators, setIndicators }) {
   );
 }
 
-function EnhancedProductivity({ employees, settings, setSettings }) {
+function EnhancedProductivity({ employees = [], settings = {}, setSettings, currentUser, currentCompany, can }) {
   const indicators = settings.productivityIndicators || defaultProductivityIndicators;
-  const [values, setValues] = useState(() => ({ ...initialIndicatorValues(indicators), receive: 142, pay: 168, sell: 46, buy: 39, errors: 2, complaints: 1, time: 7 }));
-  const list = employees.filter((e) => ["كاشير", "خدمة عملاء وتحويلات واتس", "عمليات مصرفية"].includes(e.job));
+  const [values, setValues] = useState(() => initialIndicatorValues(indicators));
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
+  const [employeeSearch, setEmployeeSearch] = useState("");
+  const [operations, setOperations] = useState([]);
+  const [loadingOperations, setLoadingOperations] = useState(true);
+  const [importing, setImporting] = useState(false);
+  const [operationError, setOperationError] = useState("");
+  const [importSummary, setImportSummary] = useState(null);
+  const companyId = currentCompany?.company_id || currentUser?.company_id || "";
+  const canImport = can?.("productivity", "can_import") !== false;
+  const canExport = can?.("productivity", "can_export") !== false;
+
+  const activeEmployees = useMemo(() => (Array.isArray(employees) ? employees : [])
+    .map((employee) => ({
+      ...employee,
+      id: employee?.id || employee?.employee_id || "",
+      name: employee?.name || employee?.employee_name || "موظف",
+      branch: employee?.branch || "",
+      job: employee?.job || employee?.job_name || "",
+      status: employee?.status || "نشط",
+    }))
+    .filter((employee) => {
+      const status = String(employee?.status || "").trim();
+      return !status || status === "نشط" || status.toLowerCase() === "active";
+    })
+    .sort((a, b) => String(a.branch || "").localeCompare(String(b.branch || ""), "ar")
+      || String(a.name || "").localeCompare(String(b.name || ""), "ar")), [employees]);
+
+  const visibleEmployees = useMemo(() => {
+    const search = employeeSearch.trim().toLowerCase();
+    if (!search) return activeEmployees;
+    return activeEmployees.filter((employee) => [employee.name, employee.id, employee.job, employee.branch]
+      .some((value) => String(value || "").toLowerCase().includes(search)));
+  }, [activeEmployees, employeeSearch]);
+
+  const selectedEmployee = activeEmployees.find((employee) => String(employee.id) === String(selectedEmployeeId));
+  const selectedOperations = useMemo(() => operations.filter((row) => String(row.employee_id) === String(selectedEmployeeId)), [operations, selectedEmployeeId]);
+
+  const loadOperations = async () => {
+    setLoadingOperations(true);
+    setOperationError("");
+    try {
+      if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
+      setOperations(await dailyOperationsService.loadDailyOperations({}));
+    } catch (error) {
+      console.error("Productivity daily_operations load error:", error);
+      setOperationError(error.message || "تعذر تحميل عمليات الإنتاجية");
+    } finally {
+      setLoadingOperations(false);
+    }
+  };
+
+  useEffect(() => {
+    loadOperations();
+    let unsubscribe = () => {};
+    try {
+      unsubscribe = dailyOperationsService.subscribe(loadOperations);
+    } catch (error) {
+      console.error("Productivity daily_operations realtime error:", error);
+    }
+    return () => unsubscribe?.();
+  }, [companyId]);
+
+  useEffect(() => {
+    const next = initialIndicatorValues(indicators);
+    if (!selectedEmployeeId || !selectedOperations.length) {
+      setValues(next);
+      return;
+    }
+    const sumByType = (words) => selectedOperations
+      .filter((row) => words.some((word) => String(row.operation_type || "").includes(word)))
+      .reduce((sum, row) => sum + Number(row.operation_count || 0), 0);
+    const serviceTimes = selectedOperations.map((row) => Number(row.average_service_time || 0)).filter((value) => value > 0);
+    setValues({
+      ...next,
+      receive: sumByType(["وارد", "قبض"]),
+      pay: sumByType(["صادر", "صرف"]),
+      sell: sumByType(["بيع"]),
+      buy: sumByType(["شراء"]),
+      errors: selectedOperations.reduce((sum, row) => sum + Number(row.error_count || 0), 0),
+      complaints: selectedOperations.reduce((sum, row) => sum + Number(row.customer_complaints || 0), 0),
+      time: serviceTimes.length ? Number((serviceTimes.reduce((sum, value) => sum + value, 0) / serviceTimes.length).toFixed(2)) : 0,
+    });
+  }, [selectedEmployeeId, selectedOperations, indicators]);
+
   const setIndicators = (next) => setSettings({ ...settings, productivityIndicators: next });
   const score = scoreIndicators(values, indicators, 0);
+
+  const importOperations = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || importing) return;
+    setImporting(true);
+    setImportSummary(null);
+    try {
+      if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
+      const parsed = await parseDailyOperationsExcel(file);
+      const validated = validateDailyOperationsRows(parsed, activeEmployees, companyId);
+      const validRows = validated.filter((row) => row.valid);
+      const invalidRows = validated.filter((row) => !row.valid);
+      const result = validRows.length
+        ? await importDailyOperationsRows(validated, companyId, { duplicateMode: "update" })
+        : { saved: [], inserted: 0, updated: 0, skipped: 0 };
+      setImportSummary({
+        message: validRows.length ? "تم الاستيراد بنجاح" : "فشل الاستيراد",
+        total: validated.length,
+        imported: result.saved?.length || 0,
+        updated: result.updated || 0,
+        rejected: invalidRows.length,
+        warnings: validated.filter((row) => row.warning).length,
+        reasons: invalidRows.slice(0, 10).map((row) => `الصف ${row.rowNumber}: ${row.validationMessage}`),
+      });
+      await loadOperations();
+    } catch (error) {
+      console.error("Productivity Excel import error:", error);
+      setImportSummary({ message: "فشل الاستيراد", total: 0, imported: 0, updated: 0, rejected: 0, warnings: 0, reasons: [error.message || "تعذر استيراد البيانات"] });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const exportIndicators = () => {
+    if (!selectedEmployee) return alert("اختر الموظف أولًا");
+    try {
+      exportExcel(indicators.map((indicator) => ({
+        "الرقم الوظيفي": selectedEmployee.id,
+        "اسم الموظف": selectedEmployee.name,
+        "الفرع": selectedEmployee.branch || "",
+        "الوظيفة": selectedEmployee.job || "",
+        "المؤشر": indicator.label,
+        "القيمة": Number(values[indicator.key] || 0),
+        "الوزن": Number(indicator.weight || 0),
+        "نقاط الإنتاجية": score,
+      })), "productivity-indicators");
+      alert("تم التصدير بنجاح");
+    } catch (error) {
+      console.error("Productivity indicators export error:", error);
+      alert("تعذر تصدير البيانات");
+    }
+  };
+
+  const exportEmployeeOperations = () => {
+    if (!selectedEmployee) return alert("اختر الموظف أولًا");
+    if (!selectedOperations.length) return alert("لا توجد بيانات للتصدير");
+    try {
+      exportDailyOperationsToExcel(selectedOperations, "employee-productivity-operations.xlsx");
+      alert("تم التصدير بنجاح");
+    } catch (error) {
+      console.error("Employee productivity operations export error:", error);
+      alert("تعذر تصدير البيانات");
+    }
+  };
+
+  const exportAllOperations = () => {
+    if (!operations.length) return alert("لا توجد بيانات للتصدير");
+    try {
+      exportDailyOperationsToExcel(operations, "all-productivity-operations.xlsx");
+      alert("تم التصدير بنجاح");
+    } catch (error) {
+      console.error("All productivity operations export error:", error);
+      alert("تعذر تصدير البيانات");
+    }
+  };
+
   return (
     <Entry title="مؤشرات الإنتاجية" desc="يمكن إضافة أو تعديل مؤشرات الإنتاجية ومعاملات احتسابها">
-      <Label t="الموظف"><select className="field mt-2 max-w-md">{list.map((e) => <option key={e.id}>{e.name} — {e.job}</option>)}</select></Label>
+      <div className="panel flex flex-wrap items-center gap-2 p-4">
+        <button type="button" onClick={downloadProductivityTemplate} className="btn-secondary"><Download size={17} /> تحميل نموذج Excel</button>
+        <label className={`btn-secondary cursor-pointer ${!canImport || importing ? "pointer-events-none opacity-50" : ""}`}>
+          <Upload size={17} /> {importing ? "جاري الاستيراد..." : "استيراد Excel"}
+          <input type="file" accept=".xlsx,.xls,.csv" onChange={importOperations} disabled={!canImport || importing} className="hidden" />
+        </label>
+        <button type="button" disabled={!canExport} onClick={exportIndicators} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير Excel</button>
+        <button type="button" disabled={!canExport || !selectedEmployee} onClick={exportEmployeeOperations} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير عمليات الموظف</button>
+        <button type="button" disabled={!canExport} onClick={exportAllOperations} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير كل العمليات</button>
+      </div>
+
+      {operationError && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-bold text-red-700">{operationError}</div>}
+      {importSummary && (
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm">
+          <p className={`mb-2 font-extrabold ${importSummary.imported ? "text-emerald-700" : "text-red-700"}`}>{importSummary.message}</p>
+          <div className="flex flex-wrap gap-4 font-bold">
+            <span>عدد السجلات المقروءة: {importSummary.total}</span><span className="text-emerald-700">عدد السجلات المستوردة: {importSummary.imported}</span>
+            <span className="text-blue-700">السجلات المحدّثة: {importSummary.updated}</span><span className="text-red-700">عدد السجلات المرفوضة: {importSummary.rejected}</span>
+            <span className="text-amber-700">تحذيرات: {importSummary.warnings}</span>
+          </div>
+          {importSummary.reasons?.length > 0 && <ul className="mt-3 list-inside list-disc space-y-1 text-red-700">{importSummary.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
+        </div>
+      )}
+
+      <div className="grid gap-3 md:grid-cols-[minmax(220px,.8fr)_minmax(300px,1.5fr)]">
+        <Label t="البحث عن موظف"><input value={employeeSearch} onChange={(event) => setEmployeeSearch(event.target.value)} className="field mt-2" placeholder="الاسم أو الرقم أو الوظيفة أو الفرع" /></Label>
+        <Label t="الموظف">
+          <select value={selectedEmployeeId} onChange={(event) => setSelectedEmployeeId(event.target.value)} className="field mt-2">
+            <option value="">اختر الموظف</option>
+            {visibleEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} — {employee.job || "بدون وظيفة"} — {employee.branch || "بدون فرع"}</option>)}
+          </select>
+        </Label>
+      </div>
+      {!activeEmployees.length && <div className="rounded-xl bg-amber-50 p-4 text-sm font-bold text-amber-700">لا يوجد موظفون نشطون في الشركة الحالية</div>}
+      {selectedEmployee && <div className="rounded-xl bg-brand-50 p-3 text-sm font-bold text-brand-800">{selectedEmployee.name} — {selectedEmployee.job || "بدون وظيفة"} — {selectedEmployee.branch || "بدون فرع"}</div>}
+
       <IndicatorManager title="إدارة مؤشرات الإنتاجية" indicators={indicators} setIndicators={setIndicators} />
-      <ProductivityComparison employees={employees} indicators={indicators} />
+      <ProductivityComparison employees={activeEmployees} indicators={indicators} />
       <Fields values={values} set={setValues} items={indicators.map((x) => [x.key, x.label])} />
       <Score n={score} label="نقاط الإنتاجية" />
-      <button className="btn-primary"><Save size={17} /> حفظ مؤشرات الشهر</button>
+
+      <div className="rounded-2xl border border-slate-200 p-4">
+        <h3 className="mb-3 text-lg font-extrabold">عمليات الموظف المسجلة</h3>
+        <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>نوع العملية</th><th>عدد العمليات</th><th>الأخطاء</th><th>الشكاوى</th><th>المبلغ</th><th>العملة</th></tr></thead><tbody>
+          {loadingOperations ? <tr><td colSpan="7" className="py-6 text-center">جاري تحميل العمليات...</td></tr>
+            : selectedOperations.length ? selectedOperations.map((row) => <tr key={row.operation_id}><td>{row.operation_date}</td><td>{row.operation_type}</td><td>{row.operation_count}</td><td>{row.error_count}</td><td>{row.customer_complaints}</td><td>{row.amount}</td><td>{row.currency}</td></tr>)
+              : <tr><td colSpan="7" className="py-6 text-center text-slate-400">{selectedEmployeeId ? "لا توجد عمليات مسجلة لهذا الموظف حالياً" : "اختر الموظف لعرض عملياته"}</td></tr>}
+        </tbody></table></div>
+      </div>
+      <button className="btn-primary" disabled={!selectedEmployee}><Save size={17} /> حفظ مؤشرات الشهر</button>
     </Entry>
   );
 }

@@ -14,6 +14,7 @@ export const normalizeEmployeeForDb = (item = {}) => ({
 
 const fromDb = (row = {}) => ({
   id: row.id,
+  company_id: row.company_id || "",
   name: row.name || "",
   branch: row.branch || "",
   job: row.job || row.job_title || "",
@@ -39,6 +40,7 @@ export const employeesService = {
       throw new Error("فشل تحميل بيانات الموظفين من Supabase: " + error.message);
     }
   },
+
   async upsert(employeeOrEmployees) {
     const rows = normalizeEmployeeRows(employeeOrEmployees);
     if (!rows.length) return [];
@@ -51,6 +53,7 @@ export const employeesService = {
       throw new Error("فشل حفظ بيانات الموظفين في Supabase: " + error.message);
     }
   },
+
   async remove(id) {
     try {
       return await supabase.remove("employees", id);
@@ -59,6 +62,7 @@ export const employeesService = {
       throw new Error("فشل حذف بيانات الموظف من Supabase: " + error.message);
     }
   },
+
   subscribe(onChange) {
     return supabase.subscribeToTable("employees", onChange);
   },
