@@ -216,6 +216,71 @@ export const dedupeTreePermissionRows = (rows = []) => {
   return Array.from(map.values());
 };
 
+
+const TREE_PERMISSION_COLUMNS = [
+  "permission_id",
+  "role_name",
+  "node_key",
+  "can_view",
+  "can_create",
+  "can_edit",
+  "can_delete",
+  "can_approve",
+  "can_reject",
+  "can_cancel",
+  "can_post",
+  "can_import",
+  "can_export",
+  "can_print",
+  "can_configure",
+  "can_override",
+  "can_view_financial",
+  "can_view_sensitive",
+  "can_ask",
+  "can_navigate",
+  "can_generate_reports",
+  "can_generate_plans",
+  "can_generate_hr_letters",
+  "can_analyze_inventory",
+  "can_analyze_performance",
+  "can_view_all_company_data",
+  "data_scope",
+  "allowed_branches",
+  "allowed_departments",
+  "created_at",
+  "updated_at",
+];
+
+const toDbTreePermissionRow = (row = {}) => {
+  const normalized = normalizeTreePermission(row);
+  const now = new Date().toISOString();
+
+  return TREE_PERMISSION_COLUMNS.reduce((acc, key) => {
+    if (key === "created_at") {
+      acc[key] = row.created_at || now;
+    } else if (key === "updated_at") {
+      acc[key] = row.updated_at || now;
+    } else if (key === "allowed_branches") {
+      acc[key] = Array.isArray(normalized.allowed_branches) ? normalized.allowed_branches : [];
+    } else if (key === "allowed_departments") {
+      acc[key] = Array.isArray(normalized.allowed_departments) ? normalized.allowed_departments : [];
+    } else if (key === "data_scope") {
+      acc[key] = normalized.data_scope || "own";
+    } else if (key.startsWith("can_")) {
+      acc[key] = Boolean(normalized[key]);
+    } else {
+      acc[key] = normalized[key] ?? "";
+    }
+
+    return acc;
+  }, {});
+};
+
+const normalizeTreePermissionPayloadRows = (rows = []) =>
+  dedupeTreePermissionRows(rows)
+    .map(toDbTreePermissionRow)
+    .filter((row) => row.permission_id && row.role_name && row.node_key);
+
 export const buildPermissionTree = (nodes = []) => {
   const map = Object.fromEntries(nodes.map((n) => [n.node_key, { ...n, children: [] }]));
   const roots = [];
