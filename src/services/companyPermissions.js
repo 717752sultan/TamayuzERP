@@ -16,7 +16,7 @@ export const companyPermissionActions = [
 validateUniquePermissionKeys(pageRegistry);
 
 export const companyPermissionModules = pageRegistry
-  .filter((page) => page.isOfficialPage !== false && page.status !== "alias")
+  .filter((page) => page.isOfficialPage !== false && page.status !== "alias" && !String(page.permissionKey || "").startsWith("platform."))
   .map((page) => [
     page.permissionKey,
     page.label,
