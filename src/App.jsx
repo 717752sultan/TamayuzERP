@@ -105,7 +105,7 @@ import { backupService } from "./services/backup";
 import { companiesService } from "./services/companies";
 import { companyPermissionActions, companyPermissionModules, companyPermissionsService, companyCanAccessFromRows, mergeWithDefaultCompanyPermissions } from "./services/companyPermissions";
 import { applyCompanyTheme, applyThemeForCurrentCompany, getDefaultTheme, normalizeThemePayload, themePresets, themeService } from "./services/theme";
-import { clearTenantSession, getCurrentCompany, getCurrentUser, loadTenantSession, platformSuperAdminRole, setTenantSession } from "./services/tenant";
+import { clearTenantSession, getCurrentCompany, getCurrentUser, isProtectedPlatformRole, isProtectedPlatformUser, loadTenantSession, platformSuperAdminRole, setTenantSession } from "./services/tenant";
 import { assistantModes, pageRegistryByKey } from "./constants/pageRegistry";
 import { APP_BRAND_NAME, APP_DESCRIPTION, APP_OFFICIAL_NAME, APP_REPORT_SUBTITLE, APP_REPORT_TITLE, APP_SHORT_NAME, APP_SYSTEM_NAME, APP_TAGLINE } from "./constants/branding";
 import { buildReportBrandingHtml } from "./services/reportBranding";
@@ -7135,6 +7135,8 @@ function UsersPermissionsPage({ employees, can, companyPermissions }) {
   const [loading, setLoading] = useState(true);
   const [treeLoading, setTreeLoading] = useState(false);
   const [error, setError] = useState("");
+  const currentUser = getCurrentUser() || {};
+  const isPlatformAdmin = currentUser?.is_platform_admin === true || currentUser?.role === platformSuperAdminRole || String(currentUser?.username || "").trim() === "platform";
   const canEdit = can?.("users_permissions", "can_edit") !== false;
   const load = async () => {
     setLoading(true);
@@ -7146,10 +7148,10 @@ function UsersPermissionsPage({ employees, can, companyPermissions }) {
         adminService.loadEmployeesForUserDropdown().catch(() => employees || []),
         adminService.listRoles(),
       ]);
-      setUsers(u);
+      setUsers(isPlatformAdmin ? u : u.filter((row) => !isProtectedPlatformUser(row)));
       setPermissions(p);
       setEmployeeOptions(employeeRows);
-      setRoleRows(roleList);
+      setRoleRows(isPlatformAdmin ? roleList : roleList.filter((role) => !isProtectedPlatformRole(role.role_name)));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -7180,7 +7182,8 @@ function UsersPermissionsPage({ employees, can, companyPermissions }) {
     return () => { active = false; };
   }, [selectedRole]);
   const branchOptions = [...new Set([...(employeeOptions || []).map((e) => e.branch), ...users.map((u) => u.branch), ...branches].filter(Boolean))];
-  const roleOptions = [...new Set([...(roleRows || []).filter((r) => r.is_active !== false).map((r) => r.role_name), ...systemRoles])];
+  const safeRoleRows = isPlatformAdmin ? (roleRows || []) : (roleRows || []).filter((r) => !isProtectedPlatformRole(r.role_name));
+  const roleOptions = [...new Set([...safeRoleRows.filter((r) => r.is_active !== false).map((r) => r.role_name), ...systemRoles])];
   const filterNodesByCompanyPermissions = (nodes = []) =>
     nodes
       .map((node) => {
@@ -7203,6 +7206,7 @@ function UsersPermissionsPage({ employees, can, companyPermissions }) {
   const saveUser = async (e) => {
     e.preventDefault();
     if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    if (!isPlatformAdmin && isProtectedPlatformRole(dialog.role)) return alert("لا يمكن اختيار هذا الدور من إعدادات الشركة");
     if (!dialog.employee_id && !String(dialog.role || "").includes("مدير النظام") && !String(dialog.role || "").includes("مدير النظام")) return alert("يجب اختيار الموظف");
     if (!dialog.username) return alert("يجب إدخال اسم المستخدم");
     if (!dialog.role) return alert("يجب تحديد الدور");
@@ -7346,7 +7350,10 @@ function UsersPermissionsPage({ employees, can, companyPermissions }) {
       <div className="grid gap-5 xl:grid-cols-2">
         <div className="panel p-4">
           <h3 className="mb-3 font-extrabold">المستخدمون</h3>
-          {loading ? <p className="text-sm text-slate-400">جاري التحميل...</p> : <div className="table-wrap"><table><thead><tr><th>المستخدم</th><th>الموظف</th><th>الدور</th><th>الفرع</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((u) => <tr key={u.user_id}><td>{u.username}</td><td>{u.employee_name}<p className="text-xs text-slate-400">{u.employee_id}</p></td><td>{u.role}</td><td>{u.branch}</td><td><Status>{u.is_active ? "نشط" : "معطل"}</Status></td><td><button disabled={!canEdit} onClick={() => setDialog(u)} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canEdit} onClick={() => adminService.saveUser({ ...u, is_active: !u.is_active }).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600">{u.is_active ? "تعطيل" : "تفعيل"}</button></td></tr>)}</tbody></table></div>}
+          {loading ? <p className="text-sm text-slate-400">جاري التحميل...</p> : <div className="table-wrap"><table><thead><tr><th>المستخدم</th><th>الموظف</th><th>الدور</th><th>الفرع</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((u) => {
+              const isProtectedUser = !isPlatformAdmin && isProtectedPlatformUser(u);
+              return <tr key={u.user_id}><td>{u.username}</td><td>{u.employee_name}<p className="text-xs text-slate-400">{u.employee_id}</p></td><td>{u.role}</td><td>{u.branch}</td><td><Status>{u.is_active ? "نشط" : "معطل"}</Status></td><td><button disabled={!canEdit || isProtectedUser} onClick={() => setDialog(u)} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canEdit || isProtectedUser} onClick={() => adminService.saveUser({ ...u, is_active: !u.is_active }).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600">{u.is_active ? "تعطيل" : "تفعيل"}</button></td></tr>;
+            })}</tbody></table></div>}
         </div>
         <TreePermissionsPanel
           selectedRole={selectedRole}

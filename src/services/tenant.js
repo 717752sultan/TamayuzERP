@@ -11,6 +11,19 @@ let tenantState = {
 };
 
 export const platformSuperAdminRole = "مدير عام النظام";
+export const PROTECTED_PLATFORM_ROLES = ["مشرف النظام العام", "Platform Admin", "platform_admin"];
+export const PROTECTED_PLATFORM_USERNAMES = ["platform"];
+
+export const isProtectedPlatformRole = (role = "") => PROTECTED_PLATFORM_ROLES.includes(String(role || "").trim());
+export const isProtectedPlatformUser = (user = {}) => {
+  if (!user) return false;
+  return user?.is_platform_admin === true || isProtectedPlatformRole(user.role) || String(user.username || "").trim() === "platform";
+};
+
+export const isPlatformAdminUser = (user = tenantState.currentUser) =>
+  user?.is_platform_admin === true ||
+  user?.role === platformSuperAdminRole ||
+  String(user?.username || "").trim() === "platform";
 
 export const normalizeCompany = (row = {}) => ({
   company_id: row.company_id || row.id || "",
@@ -127,7 +140,7 @@ export const getCurrentCompany = () => tenantState.currentCompany;
 export const getCurrentUser = () => tenantState.currentUser;
 export const getCurrentCompanyId = () => tenantState.currentCompany?.company_id || tenantState.currentUser?.company_id || "";
 export const getCurrentCompanyCode = () => tenantState.currentCompany?.company_code || tenantState.currentUser?.company_code || "";
-export const isPlatformAdmin = () => tenantState.currentUser?.is_platform_admin === true;
+export const isPlatformAdmin = () => isPlatformAdminUser();
 
 export const requireCompanyId = () => {
   const companyId = getCurrentCompanyId();

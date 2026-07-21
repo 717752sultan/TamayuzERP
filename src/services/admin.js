@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { isPlatformAdminUser, isProtectedPlatformRole, isProtectedPlatformUser } from "./tenant";
 
 export const permissionPages = [
   "dashboard",
@@ -216,16 +217,21 @@ export const adminService = {
       const rows = await supabase.select("app_roles", "select=*&order=role_name.asc");
       const loaded = (rows || []).map(roleFromDb);
       const missing = systemRoles.filter((name) => !loaded.some((role) => role.role_name === name)).map((name) => ({ role_id: `ROLE-${name}`, role_name: name, role_description: "", is_system_role: true, is_active: true }));
-      return [...loaded, ...missing];
+      const result = [...loaded, ...missing];
+      return isPlatformAdminUser() ? result : result.filter((role) => !isProtectedPlatformRole(role.role_name));
     } catch (error) {
       console.error("App roles load/save error:", error);
-      return systemRoles.map((name) => ({ role_id: `ROLE-${name}`, role_name: name, role_description: "", is_system_role: true, is_active: true }));
+      const fallback = systemRoles.map((name) => ({ role_id: `ROLE-${name}`, role_name: name, role_description: "", is_system_role: true, is_active: true }));
+      return fallback;
     }
   },
   async saveRole(role) {
     try {
       const payload = roleToDb(role);
       if (!payload.role_name) throw new Error("يجب إدخال اسم الدور");
+      if (!isPlatformAdminUser() && isProtectedPlatformRole(payload.role_name)) {
+        throw new Error("لا يمكن تعديل هذا الدور من داخل إعدادات الشركة");
+      }
       const { data, error } = await supabase.from("app_roles").upsert(payload, { onConflict: "role_id" }).select().single();
       if (error) throw error;
       return roleFromDb(data);
@@ -238,6 +244,9 @@ export const adminService = {
     try {
       const row = roleFromDb(role);
       if (row.is_system_role) throw new Error("لا يمكن حذف دور نظامي");
+      if (!isPlatformAdminUser() && isProtectedPlatformRole(row.role_name)) {
+        throw new Error("لا يمكن حذف هذا الدور من داخل إعدادات الشركة");
+      }
       if (users.some((user) => user.role === row.role_name)) {
         return this.saveRole({ ...row, is_active: false });
       }
@@ -269,10 +278,11 @@ export const adminService = {
         supabase.select("app_users", "select=*&order=created_at.desc"),
         this.loadEmployeesForUserDropdown().catch(() => []),
       ]);
-      return (userRows || []).map((row) => {
+      const rows = (userRows || []).map((row) => {
         const employee = employees.find((item) => item.id === row.employee_id || item.employee_id === row.employee_id);
         return userFromDb(row, employee);
       });
+      return isPlatformAdminUser() ? rows : rows.filter((row) => !isProtectedPlatformUser(row));
     } catch (error) {
       console.error("Users permissions module error:", error);
       throw new Error("فشل تحميل بيانات المستخدمين من Supabase: " + error.message);
@@ -287,6 +297,9 @@ export const adminService = {
       if (!payload.username) throw new Error("يجب إدخال اسم المستخدم");
       if (!payload.role) throw new Error("يجب تحديد الدور");
       if (!payload.password) throw new Error("يجب إدخال كلمة المرور");
+      if (!isPlatformAdminUser() && (isProtectedPlatformUser(payload) || isProtectedPlatformRole(payload.role))) {
+        throw new Error("لا يمكن حفظ هذا المستخدم من داخل إعدادات الشركة");
+      }
 
       const existing = await this.listUsers().catch(() => []);
       const sameUser = (row) => String(row.user_id || row.id) === String(payload.user_id);
@@ -318,6 +331,9 @@ export const adminService = {
     try {
       const payload = rows.map(permissionToDb).filter((row) => row.role && row.page_key);
       if (!payload.length) return [];
+      if (!isPlatformAdminUser() && payload.some((row) => isProtectedPlatformRole(row.role))) {
+        throw new Error("لا يمكن حفظ صلاحيات هذا الدور من داخل إعدادات الشركة");
+      }
       const { data, error } = await supabase.from("app_permissions").upsert(payload, { onConflict: "id" }).select();
       if (error) throw error;
       return (data || []).map(permissionFromDb);

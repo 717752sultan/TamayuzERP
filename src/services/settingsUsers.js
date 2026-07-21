@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { isPlatformAdminUser, isProtectedPlatformRole, isProtectedPlatformUser } from "./tenant";
 
 const requireCompany = (companyId) => {
   const id = String(companyId || "").trim();
@@ -55,7 +56,7 @@ export const settingsUsersService = {
     try {
       requireCompany(companyId);
       const rows = await supabase.select("app_users", `company_id=eq.${encodeURIComponent(companyId)}&is_platform_admin=eq.false&select=*&order=username.asc`);
-      return (rows || []).map(settingsUserFromDb);
+      return (rows || []).map(settingsUserFromDb).filter((row) => !isProtectedPlatformUser(row));
     } catch (error) {
       console.error("Settings CRUD error:", error);
       throw new Error("تعذر تحميل المستخدمين: " + error.message);
@@ -66,6 +67,12 @@ export const settingsUsersService = {
     try {
       const payload = userToDb(companyId, user);
       assertUser(payload, mode);
+      if (!isPlatformAdminUser() && isProtectedPlatformUser(payload)) {
+        if (isProtectedPlatformRole(payload.role)) {
+          throw new Error("لا يمكن تعيين هذا الدور من داخل إعدادات الشركة");
+        }
+        throw new Error("هذا المستخدم محمي ولا يمكن تعديله من إعدادات الشركة");
+      }
       if (mode !== "add" && !payload.password) delete payload.password;
       const { data, error } = await supabase.from("app_users").upsert(payload, { onConflict: "user_id" }).select().single();
       if (error) throw error;
@@ -95,7 +102,7 @@ export const settingsUsersService = {
   },
 
   async deleteUser(companyId, userId, user = {}) {
-    if (user.is_platform_admin) throw new Error("لا يمكن حذف مشرف المنصة");
+    if (isProtectedPlatformUser(user)) throw new Error("هذا المستخدم محمي ولا يمكن تعديله من إعدادات الشركة");
     return this.toggleUserStatus(companyId, userId, false, user);
   },
 };

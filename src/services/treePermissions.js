@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { isPlatformAdminUser, isProtectedPlatformRole } from "./tenant";
 import { ERP_MODULES } from "../constants/moduleRegistry";
 import { permissionActionLabels } from "../constants/pageRegistry";
 
@@ -322,6 +323,9 @@ export const treePermissionsService = {
   },
   async saveNodePermission(roleName, nodeKey, permission) {
     try {
+      if (!isPlatformAdminUser() && isProtectedPlatformRole(roleName)) {
+        throw new Error("لا يمكن حفظ صلاحيات هذا الدور من داخل إعدادات الشركة");
+      }
       const payload = normalizeTreePermission({ ...permission, role_name: roleName, node_key: nodeKey, updated_at: new Date().toISOString() });
       const { data, error } = await supabase.from("app_role_node_permissions").upsert(payload, { onConflict: "permission_id" }).select().single();
       if (error) throw error;
@@ -334,6 +338,9 @@ export const treePermissionsService = {
   async saveBulkNodePermissions(roleName, permissions = []) {
     try {
       if (!roleName) throw new Error("يجب تحديد الدور أولًا");
+      if (!isPlatformAdminUser() && isProtectedPlatformRole(roleName)) {
+        throw new Error("لا يمكن حفظ صلاحيات هذا الدور من داخل إعدادات الشركة");
+      }
       const payload = dedupeTreePermissionRows(permissions.map((p) => normalizeTreePermission({ ...p, role_name: roleName, permission_id: `${roleName}-${p.node_key}`, updated_at: new Date().toISOString() })));
       if (!payload.length) return [];
       const { data, error } = await supabase.from("app_role_node_permissions").upsert(payload, { onConflict: "permission_id" }).select();
@@ -345,10 +352,16 @@ export const treePermissionsService = {
     }
   },
   async copyRolePermissions(sourceRole, targetRole) {
+    if (!isPlatformAdminUser() && (isProtectedPlatformRole(sourceRole) || isProtectedPlatformRole(targetRole))) {
+      throw new Error("لا يمكن نسخ صلاحيات هذا الدور من داخل إعدادات الشركة");
+    }
     const rows = await this.loadRoleNodePermissions(sourceRole);
     return this.saveBulkNodePermissions(targetRole, rows.map((r) => ({ ...r, role_name: targetRole, permission_id: `${targetRole}-${r.node_key}` })));
   },
   async resetRolePermissions(roleName) {
+    if (!isPlatformAdminUser() && isProtectedPlatformRole(roleName)) {
+      throw new Error("لا يمكن إعادة ضبط صلاحيات هذا الدور من داخل إعدادات الشركة");
+    }
     const nodes = flattenPermissionTree(await this.loadPermissionTree());
     return this.saveBulkNodePermissions(roleName, nodes.map((n) => blankPermission(roleName, n.node_key)));
   },
