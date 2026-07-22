@@ -1,12 +1,18 @@
 import { supabase } from "./supabase";
+import { getCurrentCompanyId } from "./tenant";
 
-export const operationTypes = [
+export const operationTypes = [...new Set([
+  "قبض حوالات",
+  "صرف حوالات",
+  "بيع عملة",
+  "شراء عملة",
+  "حوالات واتس صادر",
+  "حوالات واتس وارد",
+  "عمليات أخرى",
   "حوالات وارد",
   "حوالات صادر",
   "واتساب وارد",
   "واتساب صادر",
-  "بيع عملة",
-  "شراء عملة",
   "صرف نقدي",
   "قبض نقدي",
   "عد نقدية",
@@ -18,10 +24,10 @@ export const operationTypes = [
   "قيد حسابي",
   "فحص امتثال",
   "أخرى",
-];
+])];
 
-export const serviceChannels = ["مباشر", "واتساب", "فرع", "إدارة", "نظام داخلي"];
-export const operationStatuses = ["مسودة", "معتمدة", "مرفوضة"];
+export const serviceChannels = [...new Set(["مباشر", "واتساب", "هاتف", "تطبيق", "أخرى", "فرع", "إدارة", "نظام داخلي"])];
+export const operationStatuses = ["مسودة", "قيد المراجعة", "معتمدة", "مرفوضة"];
 
 const averageServiceTimeMarker = /\n?\[\[average_service_time:([-+]?\d+(?:\.\d+)?)\]\]/g;
 
@@ -40,10 +46,27 @@ const packNotes = (notes = "", averageServiceTime = 0) => {
   return `${cleanNotes}${cleanNotes ? "\n" : ""}[[average_service_time:${Number.isFinite(value) ? value : 0}]]`;
 };
 
+const safeNumber = (value) => {
+  const number = Number(value ?? 0);
+  return Number.isFinite(number) ? number : 0;
+};
+
+const resolveCompanyId = (value) => String(value || getCurrentCompanyId() || "").trim();
+
+export const dailyOperationLogicalKey = (row = {}, companyId = "") => [
+  resolveCompanyId(companyId || row.company_id),
+  String(row.operation_date || "").trim(),
+  String(row.employee_id || row.employeeId || "").trim(),
+  String(row.operation_type || "").trim(),
+  String(row.service_channel || row.channel || "مباشر").trim(),
+].join("|");
+
+export const stableDailyOperationId = (row = {}, companyId = "") => `OP|${dailyOperationLogicalKey(row, companyId)}`;
+
 const fromDb = (row = {}) => {
   const noteData = unpackNotes(row.notes);
   return {
-    operation_id: row.operation_id,
+    operation_id: row.operation_id || "",
     company_id: row.company_id || "",
     operation_date: row.operation_date || "",
     month: row.month || String(row.operation_date || "").slice(0, 7),
@@ -52,15 +75,15 @@ const fromDb = (row = {}) => {
     employee_name: row.employee_name || "",
     job_name: row.job_name || "",
     operation_type: row.operation_type || "",
-    service_channel: row.service_channel || "",
+    service_channel: row.service_channel || "مباشر",
     currency: row.currency || "",
-    operation_count: Number(row.operation_count || 0),
-    amount: Number(row.amount || 0),
-    error_count: Number(row.error_count || 0),
-    returned_count: Number(row.returned_count || 0),
-    completed_count: Number(row.completed_count || 0),
-    pending_count: Number(row.pending_count || 0),
-    customer_complaints: Number(row.customer_complaints || 0),
+    operation_count: safeNumber(row.operation_count),
+    amount: safeNumber(row.amount),
+    error_count: safeNumber(row.error_count),
+    returned_count: safeNumber(row.returned_count),
+    completed_count: safeNumber(row.completed_count),
+    pending_count: safeNumber(row.pending_count),
+    customer_complaints: safeNumber(row.customer_complaints),
     average_service_time: noteData.average_service_time,
     notes: noteData.notes,
     entered_by: row.entered_by || "",
@@ -71,48 +94,69 @@ const fromDb = (row = {}) => {
   };
 };
 
-const toSafeNumber = (value) => {
-  const number = Number(value || 0);
-  return Number.isFinite(number) ? number : 0;
-};
-
 const toDb = (row = {}) => {
-  const operationDate = row.operation_date || new Date().toISOString().slice(0, 10);
-  const companyId = String(row.company_id || "").trim();
-  return {
-    operation_id: String(row.operation_id || row.id || `OP-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).trim(),
-    ...(companyId ? { company_id: companyId } : {}),
+  const companyId = resolveCompanyId(row.company_id);
+  if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
+  const operationDate = String(row.operation_date || "").trim();
+  const normalized = {
+    company_id: companyId,
     operation_date: operationDate,
     month: row.month || operationDate.slice(0, 7),
     branch: String(row.branch || ""),
-    employee_id: String(row.employee_id || row.employeeId || ""),
+    employee_id: String(row.employee_id || row.employeeId || "").trim(),
     employee_name: String(row.employee_name || row.employeeName || ""),
     job_name: String(row.job_name || row.job || ""),
-    operation_type: String(row.operation_type || ""),
-    service_channel: String(row.service_channel || "فرع"),
+    operation_type: String(row.operation_type || "").trim(),
+    service_channel: String(row.service_channel || row.channel || "مباشر").trim(),
     currency: String(row.currency || row.currency_code || ""),
-    operation_count: toSafeNumber(row.operation_count),
-    amount: toSafeNumber(row.amount),
-    error_count: toSafeNumber(row.error_count),
-    returned_count: toSafeNumber(row.returned_count),
-    completed_count: toSafeNumber(row.completed_count ?? row.operation_count),
-    pending_count: toSafeNumber(row.pending_count),
-    customer_complaints: toSafeNumber(row.customer_complaints ?? row.complaints_count),
+    operation_count: safeNumber(row.operation_count),
+    amount: safeNumber(row.amount),
+    error_count: safeNumber(row.error_count),
+    returned_count: safeNumber(row.returned_count),
+    completed_count: safeNumber(row.completed_count),
+    pending_count: safeNumber(row.pending_count),
+    customer_complaints: safeNumber(row.customer_complaints ?? row.complaints_count),
     notes: packNotes(row.notes, row.average_service_time),
     entered_by: String(row.entered_by || ""),
     approved_by: String(row.approved_by || ""),
     status: String(row.status || "مسودة"),
     updated_at: new Date().toISOString(),
   };
+  return {
+    operation_id: String(row.operation_id || stableDailyOperationId(normalized, companyId)).trim(),
+    ...normalized,
+  };
+};
+
+const findLogicalDuplicate = async (payload) => {
+  const query = [
+    `company_id=eq.${encodeURIComponent(payload.company_id)}`,
+    `operation_date=eq.${encodeURIComponent(payload.operation_date)}`,
+    `employee_id=eq.${encodeURIComponent(payload.employee_id)}`,
+    `operation_type=eq.${encodeURIComponent(payload.operation_type)}`,
+    `service_channel=eq.${encodeURIComponent(payload.service_channel)}`,
+    "select=*",
+    "limit=1",
+  ].join("&");
+  const rows = await supabase.select("daily_operations", query);
+  return Array.isArray(rows) ? rows[0] || null : null;
 };
 
 export const dailyOperationsService = {
   async loadDailyOperations(filters = {}) {
     try {
-      let query = "select=*&order=operation_date.desc";
-      if (filters.month) query = `month=eq.${encodeURIComponent(filters.month)}&${query}`;
+      const companyId = resolveCompanyId(filters.companyId || filters.company_id);
+      if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
+      const query = [
+        `company_id=eq.${encodeURIComponent(companyId)}`,
+        ...(filters.month ? [`month=eq.${encodeURIComponent(filters.month)}`] : []),
+        ...(filters.date ? [`operation_date=eq.${encodeURIComponent(filters.date)}`] : []),
+        ...(filters.employeeId ? [`employee_id=eq.${encodeURIComponent(filters.employeeId)}`] : []),
+        "select=*",
+        "order=operation_date.desc",
+      ].join("&");
       const rows = await supabase.select("daily_operations", query);
-      return (rows || []).map(fromDb);
+      return (Array.isArray(rows) ? rows : []).map(fromDb);
     } catch (error) {
       console.error("Supabase daily_operations load error:", error);
       throw new Error("فشل تحميل العمليات اليومية: " + error.message);
@@ -125,7 +169,12 @@ export const dailyOperationsService = {
       if (!payload.operation_date) throw new Error("يجب تحديد التاريخ");
       if (!payload.employee_id) throw new Error("يجب اختيار الموظف");
       if (!payload.operation_type) throw new Error("يجب تحديد نوع العملية");
-      if (payload.operation_count < 0) throw new Error("لا يمكن أن يكون العدد أقل من صفر");
+      if (!payload.service_channel) throw new Error("يجب تحديد القناة");
+      if (payload.operation_count < 0) throw new Error("لا يمكن أن يكون عدد العمليات أقل من صفر");
+
+      const duplicate = await findLogicalDuplicate(payload);
+      if (duplicate && duplicate.operation_id !== payload.operation_id) payload.operation_id = duplicate.operation_id;
+
       const { data, error } = await supabase.from("daily_operations").upsert(payload, { onConflict: "operation_id" }).select().single();
       if (error) throw error;
       return fromDb(data);

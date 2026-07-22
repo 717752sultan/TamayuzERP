@@ -89,7 +89,7 @@ import { generateBranchForecast } from "./services/inventoryForecast";
 import { canInventory } from "./services/inventoryPermissions";
 import { inventorySettingsService, defaultInventorySettings, defaultDocumentNumbering } from "./services/inventorySettings";
 import { dailyOperationsService, operationTypes, serviceChannels, operationStatuses } from "./services/dailyOperations";
-import { downloadDailyOperationsTemplate, downloadProductivityTemplate, exportDailyOperationsToExcel, importDailyOperationsRows, parseDailyOperationsExcel, validateDailyOperationsRows } from "./services/dailyOperationsImportExport";
+import { downloadDailyOperationsTemplate, downloadProductivityTemplate, exportDailyOperationsToExcel, exportProductivityOperationsToExcel, importDailyOperationsRows, parseDailyOperationsExcel, validateDailyOperationsRows } from "./services/dailyOperationsImportExport";
 import { performanceCriteriaService, scoringTypes, defaultJobKpis } from "./services/performanceCriteria";
 import { kpiCalculationService } from "./services/kpiCalculation";
 import { aiAssistantService } from "./services/aiAssistant";
@@ -6658,58 +6658,316 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
   const [rows, setRows] = useState([]);
   const [dialog, setDialog] = useState(null);
   const [importDialog, setImportDialog] = useState(null);
-  const [filters, setFilters] = useState({ month: today.slice(0, 7), date: "", branch: "all", employee: "", status: "all" });
+  const [filters, setFilters] = useState({
+    month: today.slice(0, 7),
+    date: "",
+    branch: "all",
+    employee: "all",
+    operationType: "all",
+    status: "all",
+  });
   const [loading, setLoading] = useState(true);
   const safeEmployees = Array.isArray(employees) ? employees : [];
+  const safeRows = Array.isArray(rows) ? rows : [];
   const companyId = currentCompany?.company_id || currentUser?.company_id || "";
   const canCreate = can?.("daily_operations", "can_create") !== false;
-  const canImport = canCreate && can?.("daily_operations", "can_import") !== false;
+  const canEdit = can?.("daily_operations", "can_edit") !== false;
+  const canDelete = can?.("daily_operations", "can_delete") !== false;
+  const canApprove = can?.("daily_operations", "can_approve") !== false;
   const canExport = can?.("daily_operations", "can_export") !== false;
-  const statusOptions = [...new Set([...operationStatuses, "مسودة", "قيد المراجعة", "معتمدة", "مرفوضة"].filter(Boolean))];
+  const canImport = can?.("daily_operations", "can_import") === true || canCreate;
+  const statusOptions = [...new Set([...operationStatuses, ...safeRows.map((row) => row.status)].filter(Boolean))];
+  const branchOptions = [...new Set([...safeEmployees.map((employee) => employee.branch), ...safeRows.map((row) => row.branch)].filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "ar"));
+  const operationTypeOptions = [...new Set([...operationTypes, ...safeRows.map((row) => row.operation_type)].filter(Boolean))];
+
   const load = async () => {
     setLoading(true);
     try {
       if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
-      setRows(await dailyOperationsService.loadDailyOperations({ month: filters.month }));
-    } catch (e) {
-      alert(e.message || "تعذر تحميل البيانات");
+      setRows(await dailyOperationsService.loadDailyOperations({ companyId, month: filters.month }));
+    } catch (error) {
+      console.error("Daily operations page load error:", error);
+      alert(error.message || "تعذر تحميل العمليات اليومية");
     } finally {
       setLoading(false);
     }
   };
-  useEffect(() => { load(); return dailyOperationsService.subscribe(load); }, [filters.month, companyId]);
-  const filtered = rows.filter((r) => (!filters.date || r.operation_date === filters.date) && (filters.branch === "all" || r.branch === filters.branch) && (!filters.employee || `${r.employee_name || ""} ${r.employee_id || ""}`.includes(filters.employee)) && (filters.status === "all" || r.status === filters.status));
-  const totalOps = filtered.reduce((s, x) => s + Number(x.operation_count || 0), 0), totalErrors = filtered.reduce((s, x) => s + Number(x.error_count || 0), 0);
+
+  useEffect(() => {
+    load();
+    const unsubscribe = dailyOperationsService.subscribe(load);
+    return () => unsubscribe?.();
+  }, [filters.month, companyId]);
+
+  const filtered = safeRows.filter((row) =>
+    (!filters.date || row.operation_date === filters.date)
+    && (filters.branch === "all" || row.branch === filters.branch)
+    && (filters.employee === "all" || row.employee_id === filters.employee)
+    && (filters.operationType === "all" || row.operation_type === filters.operationType)
+    && (filters.status === "all" || row.status === filters.status));
+
+  const sum = (key) => filtered.reduce((total, row) => total + Number(row[key] || 0), 0);
+  const totalOperations = sum("operation_count");
+  const totalErrors = sum("error_count");
+  const summaries = [
+    ["إجمالي العمليات", totalOperations, Gauge],
+    ["العمليات المكتملة", sum("completed_count"), BadgeCheck],
+    ["العمليات المعلقة", sum("pending_count"), Clock3],
+    ["العمليات المرتجعة", sum("returned_count"), ArrowUpLeft],
+    ["عدد الأخطاء", totalErrors, AlertTriangle],
+    ["شكاوى العملاء", sum("customer_complaints"), MessageSquareWarning],
+    ["نسبة الأخطاء", `${totalOperations ? ((totalErrors / totalOperations) * 100).toFixed(1) : 0}%`, TrendingUp],
+    ["المعتمدة", filtered.filter((row) => ["معتمدة", "معتمد"].includes(row.status)).length, BadgeCheck],
+  ];
   const byBranch = Object.entries(groupCount(filtered, "branch")).map(([name, value]) => ({ name, value }));
-  const pickEmployee = (id) => { const emp = safeEmployees.find((x) => x.id === id) || {}; setDialog({ ...dialog, employee_id: id, employee_name: emp.name || "", branch: emp.branch || "", job_name: emp.job || "" }); };
-  const openAdd = () => setDialog({ operation_id: `OP-${Date.now()}`, operation_date: today, month: today.slice(0, 7), employee_id: "", employee_name: "", branch: "", job_name: "", operation_type: operationTypes[0], service_channel: serviceChannels[0], currency: "SAR", operation_count: 0, completed_count: 0, error_count: 0, returned_count: 0, pending_count: 0, customer_complaints: 0, amount: 0, status: "مسودة", notes: "" });
-  const save = async (e) => { e.preventDefault(); try { const saved = await dailyOperationsService.saveDailyOperation({ ...dialog, company_id: companyId, entered_by: currentUser?.username || "" }); setRows((list) => list.some((x) => x.operation_id === saved.operation_id) ? list.map((x) => x.operation_id === saved.operation_id ? saved : x) : [saved, ...list]); setDialog(null); } catch (err) { alert(err.message); } };
-  const approve = (row) => dailyOperationsService.approveDailyOperation(row, currentUser?.username || "").then(load).catch((e) => alert(e.message));
-  const readImportFile = async () => {
-    if (!importDialog?.file) return setImportDialog((d) => ({ ...d, message: "لم يتم اختيار ملف" }));
+
+  const pickEmployee = (id) => {
+    const employee = safeEmployees.find((item) => item.id === id) || {};
+    setDialog((current) => ({
+      ...current,
+      employee_id: id,
+      employee_name: employee.name || "",
+      branch: employee.branch || "",
+      job_name: employee.job || "",
+    }));
+  };
+
+  const openAdd = () => {
+    if (!canCreate) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
+    setDialog({
+      operation_id: "",
+      operation_date: today,
+      month: today.slice(0, 7),
+      employee_id: "",
+      employee_name: "",
+      branch: "",
+      job_name: "",
+      operation_type: operationTypes[0],
+      service_channel: serviceChannels[0],
+      currency: "YER",
+      operation_count: 0,
+      completed_count: 0,
+      pending_count: 0,
+      returned_count: 0,
+      error_count: 0,
+      customer_complaints: 0,
+      amount: 0,
+      status: "مسودة",
+      notes: "",
+    });
+  };
+
+  const save = async (event) => {
+    event.preventDefault();
+    const editing = Boolean(dialog?.operation_id);
+    if (editing ? !canEdit : !canCreate) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
     try {
-      setImportDialog((d) => ({ ...d, loading: true, message: "جاري قراءة الملف..." }));
-      const parsed = await parseDailyOperationsExcel(importDialog.file);
-      setImportDialog((d) => ({ ...d, rows: validateDailyOperationsRows(parsed, safeEmployees, companyId), loading: false, message: "تم قراءة الملف بنجاح" }));
+      const saved = await dailyOperationsService.saveDailyOperation({
+        ...dialog,
+        company_id: companyId,
+        entered_by: currentUser?.username || "",
+      });
+      setRows((list) => list.some((item) => item.operation_id === saved.operation_id)
+        ? list.map((item) => item.operation_id === saved.operation_id ? saved : item)
+        : [saved, ...list]);
+      setDialog(null);
     } catch (error) {
-      console.error("Daily operations import/export error:", error);
-      setImportDialog((d) => ({ ...d, loading: false, message: "تعذر قراءة ملف Excel" }));
+      alert(error.message || "تعذر حفظ العملية اليومية");
     }
   };
-  const saveImportRows = async () => {
+
+  const approve = async (row) => {
+    if (!canApprove) return alert("لا تملك صلاحية اعتماد العملية");
     try {
-      const invalid = (importDialog?.rows || []).filter((row) => !row.valid);
-      if (invalid.length) return setImportDialog((d) => ({ ...d, message: "توجد أخطاء يجب تصحيحها قبل الحفظ" }));
-      const result = await importDailyOperationsRows(importDialog?.rows || [], companyId, { duplicateMode: importDialog?.duplicateMode || "add" });
-      setImportDialog(null);
+      await dailyOperationsService.approveDailyOperation({ ...row, company_id: companyId }, currentUser?.username || "");
       await load();
-      alert(`تم استيراد العمليات اليومية بنجاح. المحفوظ: ${result.saved.length}${result.skipped ? `، تم تجاهل المكرر: ${result.skipped}` : ""}`);
     } catch (error) {
-      console.error("Daily operations import/export error:", error);
-      setImportDialog((d) => ({ ...d, message: error.message || "تعذر استيراد العمليات اليومية" }));
+      alert(error.message);
     }
   };
-  return <div className="space-y-5"><PageHead title="العمليات اليومية" desc="تسجيل الإنتاجية اليومية وربطها بالـ KPI والحوافز" action={<button disabled={!canCreate} onClick={openAdd} className="btn-primary"><Plus size={18} /> إضافة عملية</button>} /><div className="grid gap-4 md:grid-cols-4"><Mini label="إجمالي العمليات" value={totalOps} I={Gauge} /><Mini label="الأخطاء" value={totalErrors} I={AlertTriangle} /><Mini label="نسبة الأخطاء" value={`${totalOps ? ((totalErrors / totalOps) * 100).toFixed(1) : 0}%`} I={TrendingUp} /><Mini label="المعتمدة" value={filtered.filter((x) => x.status === "معتمدة").length} I={BadgeCheck} /></div><div className="panel flex flex-wrap gap-3 p-4"><input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field max-w-[160px]" /><input type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value, month: e.target.value ? e.target.value.slice(0, 7) : filters.month })} className="field max-w-[170px]" /><select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select><input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field min-w-[180px]" placeholder="بحث بالموظف..." /><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option>{statusOptions.map((s) => <option key={s}>{s}</option>)}</select><button onClick={() => { if (!filters.date) setFilters({ ...filters, date: today, month: today.slice(0, 7) }); load(); }} className="btn-secondary"><Download size={17} /> جلب عمليات الموظفين</button><button disabled={!canImport} onClick={() => setImportDialog({ file: null, rows: [], duplicateMode: "add", message: "" })} className="btn-secondary disabled:opacity-50"><Upload size={17} /> استيراد Excel</button><button onClick={downloadDailyOperationsTemplate} className="btn-secondary"><FileSpreadsheet size={17} /> تحميل نموذج</button><button disabled={!canExport} onClick={() => exportDailyOperationsToExcel(filtered, `daily-operations-filtered-${today}.xlsx`)} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير Excel</button><button disabled={!canExport} onClick={() => exportDailyOperationsToExcel(rows, "daily-operations-all.xlsx")} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير الكل</button></div><div className="grid gap-5 xl:grid-cols-2"><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الموظف</th><th>الفرع</th><th>العملية</th><th>العدد</th><th>الأخطاء</th><th>الحالة</th><th></th></tr></thead><tbody>{loading ? <tr><td colSpan="8">جاري التحميل...</td></tr> : filtered.length ? filtered.map((r) => <tr key={r.operation_id}><td>{r.operation_date}</td><td>{r.employee_name}<p className="text-xs text-slate-400">{r.job_name}</p></td><td>{r.branch}</td><td>{r.operation_type}</td><td>{r.operation_count}</td><td>{r.error_count}</td><td><Status>{r.status}</Status></td><td><button onClick={() => setDialog(r)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => approve(r)} className="p-2 text-green-700"><BadgeCheck size={16} /></button><button disabled={r.status !== "مسودة"} onClick={() => dailyOperationsService.deleteDailyOperation(r.operation_id).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>) : <tr><td colSpan="8" className="py-8 text-center text-slate-400">لا توجد عمليات يومية في الفترة المحددة</td></tr>}</tbody></table></div></div><Chart title="العمليات حسب الفروع" sub="توزيع سجلات العمليات"><ResponsiveContainer width="100%" height={260}><BarChart data={byBranch}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8,8,0,0]} /></BarChart></ResponsiveContainer></Chart></div>{dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6"><DialogTitle title="عملية يومية" close={() => setDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="التاريخ"><input type="date" value={dialog.operation_date} onChange={(e) => setDialog({ ...dialog, operation_date: e.target.value, month: e.target.value.slice(0, 7) })} className="field mt-2" /></Label><Label t="الموظف"><select value={dialog.employee_id} onChange={(e) => pickEmployee(e.target.value)} className="field mt-2"><option value="">اختر الموظف</option>{safeEmployees.map((emp) => <option key={emp.id} value={emp.id}>{emp.name} - {emp.id} - {emp.branch}</option>)}</select></Label><Label t="الوظيفة"><input readOnly value={dialog.job_name} className="field mt-2 bg-slate-50" /></Label><Label t="نوع العملية"><select value={dialog.operation_type} onChange={(e) => setDialog({ ...dialog, operation_type: e.target.value })} className="field mt-2">{operationTypes.map((t) => <option key={t}>{t}</option>)}</select></Label><Label t="القناة"><select value={dialog.service_channel} onChange={(e) => setDialog({ ...dialog, service_channel: e.target.value })} className="field mt-2">{serviceChannels.map((t) => <option key={t}>{t}</option>)}</select></Label>{["operation_count","completed_count","pending_count","error_count","returned_count","customer_complaints","amount"].map((k) => <Label key={k} t={k}><input type="number" value={dialog[k] || 0} onChange={(e) => setDialog({ ...dialog, [k]: e.target.value })} className="field mt-2" /></Label>)}<Label t="ملاحظات"><textarea value={dialog.notes} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}{importDialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><div className="panel max-h-[90vh] w-full max-w-6xl overflow-y-auto p-6"><DialogTitle title="استيراد العمليات اليومية من Excel" close={() => setImportDialog(null)} /><div className="grid gap-4 md:grid-cols-3"><Label t="اختيار ملف Excel"><input type="file" accept=".xlsx,.xls" onChange={(e) => setImportDialog({ ...importDialog, file: e.target.files?.[0] || null })} className="field mt-2 py-2" /></Label><Label t="طريقة التعامل مع العمليات المكررة"><select value={importDialog.duplicateMode} onChange={(e) => setImportDialog({ ...importDialog, duplicateMode: e.target.value })} className="field mt-2"><option value="add">إضافة كسجلات جديدة</option><option value="update">تحديث الموجود</option><option value="ignore">تجاهل المكرر</option></select></Label><div className="flex items-end gap-2"><button onClick={readImportFile} disabled={importDialog.loading} className="btn-primary">قراءة الملف</button><button onClick={saveImportRows} disabled={!importDialog.rows?.length || importDialog.loading} className="btn-secondary disabled:opacity-50">حفظ العمليات</button></div></div><div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm leading-7 text-slate-600"><b>الأعمدة المطلوبة:</b> التاريخ، الرقم الوظيفي أو اسم الموظف، نوع العملية، عدد العمليات. يمكن إضافة: الفرع، الوظيفة، عدد الأخطاء، الحالة، ملاحظات.</div>{importDialog.message && <div className="mt-4 rounded-xl bg-blue-50 p-3 text-sm font-bold text-blue-700">{importDialog.message}</div>}<div className="mt-4 grid gap-3 md:grid-cols-4"><Mini label="إجمالي الصفوف" value={importDialog.rows?.length || 0} I={FileSpreadsheet} /><Mini label="الصحيحة" value={(importDialog.rows || []).filter((r) => r.valid && !r.warning).length} I={BadgeCheck} /><Mini label="الخاطئة" value={(importDialog.rows || []).filter((r) => !r.valid).length} I={AlertTriangle} /><Mini label="المحذرة" value={(importDialog.rows || []).filter((r) => r.valid && r.warning).length} I={MessageSquareWarning} /></div><div className="table-wrap mt-4"><table><thead><tr><th>رقم الصف</th><th>التاريخ</th><th>اسم الموظف</th><th>الرقم الوظيفي</th><th>الفرع</th><th>الوظيفة</th><th>نوع العملية</th><th>عدد العمليات</th><th>عدد الأخطاء</th><th>نسبة الأخطاء</th><th>الحالة</th><th>نتيجة التحقق</th></tr></thead><tbody>{(importDialog.rows || []).map((row) => <tr key={row.rowNumber} className={!row.valid ? "bg-red-50" : row.warning ? "bg-amber-50" : ""}><td>{row.rowNumber}</td><td>{row.operation_date}</td><td>{row.employee_name}</td><td>{row.employee_id}</td><td>{row.branch}</td><td>{row.job_name}</td><td>{row.operation_type}</td><td>{row.operation_count}</td><td>{row.error_count}</td><td>{row.error_rate}%</td><td>{row.status}</td><td>{row.validationMessage}</td></tr>)}</tbody></table></div></div></div>}</div>;
+
+  const remove = async (row) => {
+    if (!canDelete) return alert("لا تملك صلاحية حذف العملية");
+    if (!confirm("هل تريد حذف العملية اليومية؟")) return;
+    try {
+      await dailyOperationsService.deleteDailyOperation(row.operation_id);
+      await load();
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+
+  const readImportFile = async () => {
+    if (!importDialog?.file) return setImportDialog((current) => ({ ...current, message: "لم يتم اختيار ملف" }));
+    try {
+      setImportDialog((current) => ({ ...current, loading: true, message: "جاري قراءة الملف...", summary: null }));
+      const parsed = await parseDailyOperationsExcel(importDialog.file);
+      const validated = validateDailyOperationsRows(parsed, safeEmployees, companyId);
+      setImportDialog((current) => ({ ...current, rows: validated, loading: false, message: "تمت قراءة الملف والتحقق من البيانات" }));
+    } catch (error) {
+      console.error("Daily operations Excel read error:", error);
+      setImportDialog((current) => ({ ...current, loading: false, message: error.message || "تعذر قراءة ملف Excel" }));
+    }
+  };
+
+  const saveImportRows = async () => {
+    const importRows = Array.isArray(importDialog?.rows) ? importDialog.rows : [];
+    const invalidRows = importRows.filter((row) => !row.valid);
+    try {
+      setImportDialog((current) => ({ ...current, loading: true, message: "جاري استيراد العمليات..." }));
+      const result = await importDailyOperationsRows(importRows, companyId, { duplicateMode: importDialog?.duplicateMode || "update" });
+      setImportDialog((current) => ({
+        ...current,
+        loading: false,
+        message: "تم استيراد العمليات اليومية بنجاح",
+        summary: {
+          total: importRows.length,
+          imported: result.inserted,
+          updated: result.updated,
+          skipped: result.skipped,
+          errors: invalidRows.map((row) => `الصف ${row.rowNumber}: ${row.validationMessage}`),
+        },
+      }));
+      await load();
+    } catch (error) {
+      console.error("Daily operations Excel import error:", error);
+      setImportDialog((current) => ({
+        ...current,
+        loading: false,
+        message: error.message || "تعذر استيراد العمليات اليومية",
+        summary: {
+          total: importRows.length,
+          imported: 0,
+          updated: 0,
+          skipped: 0,
+          errors: invalidRows.map((row) => `الصف ${row.rowNumber}: ${row.validationMessage}`),
+        },
+      }));
+    }
+  };
+
+  const exportRows = (exportedRows, fileName) => {
+    if (!canExport) return alert("لا تملك صلاحية تصدير البيانات");
+    if (!exportedRows.length) return alert("لا توجد بيانات للتصدير");
+    try {
+      exportDailyOperationsToExcel(exportedRows, fileName);
+    } catch (error) {
+      console.error("Daily operations Excel export error:", error);
+      alert("تعذر تصدير البيانات");
+    }
+  };
+
+  const exportEmployeeRows = () => {
+    if (filters.employee === "all") return alert("اختر الموظف أولًا");
+    exportRows(safeRows.filter((row) => row.employee_id === filters.employee), `daily-operations-employee-${filters.employee}.xlsx`);
+  };
+  const exportDayRows = () => {
+    if (!filters.date) return alert("حدد اليوم أولًا");
+    exportRows(safeRows.filter((row) => row.operation_date === filters.date), `daily-operations-day-${filters.date}.xlsx`);
+  };
+  const exportMonthRows = () => {
+    if (!filters.month) return alert("حدد الشهر أولًا");
+    exportRows(safeRows.filter((row) => row.month === filters.month || String(row.operation_date || "").startsWith(filters.month)), `daily-operations-month-${filters.month}.xlsx`);
+  };
+
+  const numericFields = [
+    ["operation_count", "عدد العمليات"],
+    ["completed_count", "العمليات المكتملة"],
+    ["pending_count", "العمليات المعلقة"],
+    ["returned_count", "العمليات المرتجعة"],
+    ["error_count", "عدد الأخطاء"],
+    ["customer_complaints", "شكاوى العملاء"],
+    ["amount", "المبلغ"],
+  ];
+
+  return (
+    <div className="space-y-5">
+      <PageHead
+        title="العمليات اليومية"
+        desc="تسجيل الإنتاجية اليومية وربطها بالـ KPI والحوافز"
+        action={(
+          <div className="flex flex-wrap justify-end gap-2">
+            <button disabled={!canCreate} onClick={openAdd} className="btn-primary"><Plus size={18} /> إضافة عملية</button>
+            <button onClick={downloadDailyOperationsTemplate} className="btn-secondary"><Download size={17} /> تحميل نموذج Excel</button>
+            <button disabled={!canImport} onClick={() => setImportDialog({ file: null, rows: [], duplicateMode: "update", message: "", summary: null })} className="btn-secondary disabled:opacity-50"><Upload size={17} /> استيراد Excel</button>
+            <button disabled={!canExport} onClick={() => exportRows(filtered, `daily-operations-visible-${today}.xlsx`)} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير Excel</button>
+            <button disabled={!canExport} onClick={exportEmployeeRows} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير عمليات موظف</button>
+            <button disabled={!canExport} onClick={exportDayRows} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير عمليات يوم محدد</button>
+            <button disabled={!canExport} onClick={exportMonthRows} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير عمليات شهر محدد</button>
+          </div>
+        )}
+      />
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {summaries.map(([label, value, Icon]) => <Mini key={label} label={label} value={value} I={Icon} />)}
+      </div>
+
+      <div className="panel flex flex-wrap gap-3 p-4">
+        <input type="month" value={filters.month} onChange={(event) => setFilters({ ...filters, month: event.target.value })} className="field max-w-[160px]" />
+        <input type="date" value={filters.date} onChange={(event) => setFilters({ ...filters, date: event.target.value, month: event.target.value ? event.target.value.slice(0, 7) : filters.month })} className="field max-w-[170px]" />
+        <select value={filters.branch} onChange={(event) => setFilters({ ...filters, branch: event.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branchOptions.map((branch) => <option key={branch} value={branch}>{branch}</option>)}</select>
+        <select value={filters.employee} onChange={(event) => setFilters({ ...filters, employee: event.target.value })} className="field max-w-[230px]"><option value="all">كل الموظفين</option>{safeEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} - {employee.id}</option>)}</select>
+        <select value={filters.operationType} onChange={(event) => setFilters({ ...filters, operationType: event.target.value })} className="field max-w-[210px]"><option value="all">كل أنواع العمليات</option>{operationTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}</select>
+        <select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option>{statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}</select>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-2">
+        <div className="panel p-4">
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>التاريخ</th><th>الموظف</th><th>الفرع</th><th>نوع العملية</th><th>القناة</th><th>العدد</th><th>المكتملة</th><th>المعلقة</th><th>المرتجعة</th><th>الأخطاء</th><th>الشكاوى</th><th>الحالة</th><th></th></tr></thead>
+              <tbody>
+                {loading ? <tr><td colSpan="13">جاري التحميل...</td></tr> : filtered.length ? filtered.map((row) => (
+                  <tr key={row.operation_id}>
+                    <td>{row.operation_date}</td><td>{row.employee_name}<p className="text-xs text-slate-400">{row.job_name}</p></td><td>{row.branch}</td><td>{row.operation_type}</td><td>{row.service_channel}</td><td>{row.operation_count}</td><td>{row.completed_count}</td><td>{row.pending_count}</td><td>{row.returned_count}</td><td>{row.error_count}</td><td>{row.customer_complaints}</td><td><Status>{row.status}</Status></td>
+                    <td><button disabled={!canEdit} onClick={() => setDialog(row)} className="p-2 text-blue-600 disabled:opacity-40"><Pencil size={16} /></button><button disabled={!canApprove} onClick={() => approve(row)} className="p-2 text-green-700 disabled:opacity-40"><BadgeCheck size={16} /></button><button disabled={!canDelete || row.status !== "مسودة"} onClick={() => remove(row)} className="p-2 text-red-600 disabled:opacity-40"><Trash2 size={16} /></button></td>
+                  </tr>
+                )) : <tr><td colSpan="13" className="py-8 text-center text-slate-400">لا توجد عمليات يومية في الفترة المحددة</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <Chart title="العمليات حسب الفروع" sub="توزيع سجلات العمليات"><ResponsiveContainer width="100%" height={260}><BarChart data={byBranch}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></Chart>
+      </div>
+
+      {dialog && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+          <form onSubmit={save} className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-6">
+            <DialogTitle title="عملية يومية" close={() => setDialog(null)} />
+            <div className="grid gap-4 md:grid-cols-3">
+              <Label t="التاريخ"><input required type="date" value={dialog.operation_date} onChange={(event) => setDialog({ ...dialog, operation_date: event.target.value, month: event.target.value.slice(0, 7) })} className="field mt-2" /></Label>
+              <Label t="الموظف"><select required value={dialog.employee_id} onChange={(event) => pickEmployee(event.target.value)} className="field mt-2"><option value="">اختر الموظف</option>{safeEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} - {employee.id} - {employee.branch}</option>)}</select></Label>
+              <Label t="الوظيفة"><input readOnly value={dialog.job_name} className="field mt-2 bg-slate-50" /></Label>
+              <Label t="نوع العملية"><select required value={dialog.operation_type} onChange={(event) => setDialog({ ...dialog, operation_type: event.target.value })} className="field mt-2">{operationTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}</select></Label>
+              <Label t="القناة"><select required value={dialog.service_channel} onChange={(event) => setDialog({ ...dialog, service_channel: event.target.value })} className="field mt-2">{serviceChannels.map((channel) => <option key={channel} value={channel}>{channel}</option>)}</select></Label>
+              {numericFields.map(([key, label]) => <Label key={key} t={label}><input required={key === "operation_count"} type="number" min="0" value={dialog[key] ?? 0} onChange={(event) => setDialog({ ...dialog, [key]: event.target.value })} className="field mt-2" /></Label>)}
+              <Label t="العملة"><input value={dialog.currency || ""} onChange={(event) => setDialog({ ...dialog, currency: event.target.value })} className="field mt-2" /></Label>
+              <Label t="ملاحظات"><textarea value={dialog.notes || ""} onChange={(event) => setDialog({ ...dialog, notes: event.target.value })} className="field mt-2 !h-auto py-3" rows="3" /></Label>
+            </div>
+            <DialogActions close={() => setDialog(null)} />
+          </form>
+        </div>
+      )}
+
+      {importDialog && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+          <div className="panel max-h-[90vh] w-full max-w-6xl overflow-y-auto p-6">
+            <DialogTitle title="استيراد العمليات اليومية من Excel" close={() => setImportDialog(null)} />
+            <div className="grid gap-4 md:grid-cols-3">
+              <Label t="اختيار ملف Excel"><input type="file" accept=".xlsx,.xls" onChange={(event) => setImportDialog({ ...importDialog, file: event.target.files?.[0] || null, rows: [], summary: null })} className="field mt-2 py-2" /></Label>
+              <Label t="طريقة التعامل مع العمليات المكررة"><select value={importDialog.duplicateMode} onChange={(event) => setImportDialog({ ...importDialog, duplicateMode: event.target.value })} className="field mt-2"><option value="update">تحديث الموجود</option><option value="ignore">تجاهل المكرر</option></select></Label>
+              <div className="flex items-end gap-2"><button onClick={readImportFile} disabled={importDialog.loading} className="btn-primary">قراءة الملف</button><button onClick={saveImportRows} disabled={!(importDialog.rows || []).some((row) => row.valid) || importDialog.loading} className="btn-secondary disabled:opacity-50">حفظ العمليات</button></div>
+            </div>
+            <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm leading-7 text-slate-600"><b>الأعمدة المطلوبة:</b> التاريخ، الرقم الوظيفي أو اسم الموظف، نوع العملية، عدد العمليات. يتم استكمال الفرع والوظيفة من سجل الموظف عند تركهما فارغين.</div>
+            {importDialog.message && <div className="mt-4 rounded-xl bg-blue-50 p-3 text-sm font-bold text-blue-700">{importDialog.message}</div>}
+            {importDialog.summary && <div className="mt-4"><div className="grid gap-3 md:grid-cols-5"><Mini label="إجمالي الصفوف" value={importDialog.summary.total} I={FileSpreadsheet} /><Mini label="تم الاستيراد" value={importDialog.summary.imported} I={BadgeCheck} /><Mini label="تم التحديث" value={importDialog.summary.updated} I={Pencil} /><Mini label="تم التجاهل" value={importDialog.summary.skipped} I={Clock3} /><Mini label="أخطاء الاستيراد" value={importDialog.summary.errors.length} I={AlertTriangle} /></div>{importDialog.summary.errors.length > 0 && <div className="mt-3 max-h-36 overflow-y-auto rounded-xl bg-red-50 p-3 text-sm text-red-700">{importDialog.summary.errors.map((message) => <p key={message}>{message}</p>)}</div>}</div>}
+            <div className="mt-4 grid gap-3 md:grid-cols-4"><Mini label="إجمالي الصفوف" value={importDialog.rows?.length || 0} I={FileSpreadsheet} /><Mini label="الصحيحة" value={(importDialog.rows || []).filter((row) => row.valid && !row.warning).length} I={BadgeCheck} /><Mini label="الخاطئة" value={(importDialog.rows || []).filter((row) => !row.valid).length} I={AlertTriangle} /><Mini label="المحذرة" value={(importDialog.rows || []).filter((row) => row.valid && row.warning).length} I={MessageSquareWarning} /></div>
+            <div className="table-wrap mt-4"><table><thead><tr><th>رقم الصف</th><th>التاريخ</th><th>اسم الموظف</th><th>الرقم الوظيفي</th><th>الفرع</th><th>الوظيفة</th><th>نوع العملية</th><th>القناة</th><th>عدد العمليات</th><th>المكتملة</th><th>المعلقة</th><th>المرتجعة</th><th>الأخطاء</th><th>الشكاوى</th><th>نتيجة التحقق</th></tr></thead><tbody>{(importDialog.rows || []).map((row) => <tr key={row.rowNumber} className={!row.valid ? "bg-red-50" : row.warning ? "bg-amber-50" : ""}><td>{row.rowNumber}</td><td>{row.operation_date}</td><td>{row.employee_name}</td><td>{row.employee_id}</td><td>{row.branch}</td><td>{row.job_name}</td><td>{row.operation_type}</td><td>{row.service_channel}</td><td>{row.operation_count}</td><td>{row.completed_count}</td><td>{row.pending_count}</td><td>{row.returned_count}</td><td>{row.error_count}</td><td>{row.customer_complaints}</td><td>{row.validationMessage}</td></tr>)}</tbody></table></div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function DailyOperationsPage({ employees, currentUser, can }) {
@@ -7747,7 +8005,7 @@ function EnhancedProductivity({ employees = [], settings = {}, setSettings, curr
     if (!selectedEmployee) return alert("اختر الموظف أولًا");
     if (!selectedOperations.length) return alert("لا توجد بيانات للتصدير");
     try {
-      exportDailyOperationsToExcel(selectedOperations, "employee-productivity-operations.xlsx");
+      exportProductivityOperationsToExcel(selectedOperations, "employee-productivity-operations.xlsx");
       alert("تم التصدير بنجاح");
     } catch (error) {
       console.error("Employee productivity operations export error:", error);
@@ -7758,7 +8016,7 @@ function EnhancedProductivity({ employees = [], settings = {}, setSettings, curr
   const exportAllOperations = () => {
     if (!operations.length) return alert("لا توجد بيانات للتصدير");
     try {
-      exportDailyOperationsToExcel(operations, "all-productivity-operations.xlsx");
+      exportProductivityOperationsToExcel(operations, "all-productivity-operations.xlsx");
       alert("تم التصدير بنجاح");
     } catch (error) {
       console.error("All productivity operations export error:", error);
