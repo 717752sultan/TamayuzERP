@@ -5,8 +5,11 @@ export const normalizeCloudUser = (raw = {}, fallbackUsername = "") => {
   const source = Array.isArray(raw) ? raw[0] || {} : raw;
   const user = source.user || source;
   const metadata = user.user_metadata || user.raw_user_meta_data || {};
+  const userId = source.id || source.user_id || user.id || fallbackUsername;
+  const isPlatformAdmin = source.is_platform_admin === true || metadata.is_platform_admin === true;
   return {
-    user_id: source.user_id || source.id || user.id || fallbackUsername,
+    id: userId,
+    user_id: userId,
     name: source.name || source.employee_name || user.name || metadata.name || metadata.full_name || fallbackUsername,
     username: source.username || user.username || user.email || fallbackUsername,
     role: source.role || source.permission || metadata.role || metadata.permission || "الموظف",
@@ -20,7 +23,8 @@ export const normalizeCloudUser = (raw = {}, fallbackUsername = "") => {
     company_name: source.company_name || metadata.company_name || "",
     logo_url: source.logo_url || metadata.logo_url || "",
     primary_color: source.primary_color || metadata.primary_color || "#7f1d1d",
-    is_platform_admin: source.is_platform_admin === true || metadata.is_platform_admin === true,
+    is_platform_admin: isPlatformAdmin,
+    is_active: source.is_active !== false,
     cloudId: source.id || user.id || "",
     email: user.email || source.email || "",
   };
@@ -65,11 +69,13 @@ export async function loginWithSupabase(username, password, employeeNumber = "",
   const verifiedUser = extractVerifiedUser(rpcData);
   if (!verifiedUser) throw new Error("بيانات الدخول غير صحيحة");
 
+  const cloudUser = normalizeCloudUser(verifiedUser, username);
   const user = normalizeTenantUser(
     {
-      ...normalizeCloudUser(verifiedUser, username),
-      company_id: company.company_id,
-      company_code: company.company_code,
+      ...verifiedUser,
+      ...cloudUser,
+      company_id: cloudUser.company_id || company.company_id,
+      company_code: cloudUser.company_code || company.company_code,
     },
     company,
   );
