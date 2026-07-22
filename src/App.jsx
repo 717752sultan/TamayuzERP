@@ -107,7 +107,6 @@ import { companyPermissionActions, companyPermissionModules, companyPermissionsS
 import { applyCompanyTheme, applyThemeForCurrentCompany, getDefaultTheme, normalizeThemePayload, themePresets, themeService } from "./services/theme";
 import { clearTenantSession, getCurrentCompany, getCurrentUser, isProtectedPlatformRole, isProtectedPlatformUser, loadTenantSession, platformSuperAdminRole, setTenantSession } from "./services/tenant";
 import { assistantModes, pageRegistryByKey } from "./constants/pageRegistry";
-import PlatformCompanyEntitlementsPage from "./components/platform/PlatformCompanyEntitlementsPage";
 import { APP_BRAND_NAME, APP_DESCRIPTION, APP_OFFICIAL_NAME, APP_REPORT_SUBTITLE, APP_REPORT_TITLE, APP_SHORT_NAME, APP_SYSTEM_NAME, APP_TAGLINE } from "./constants/branding";
 import { buildReportBrandingHtml } from "./services/reportBranding";
 import { ERP_MODULES, ERP_PAGE_BY_KEY, ERP_PAGE_BY_ROUTE, buildGroupedNavigation, getModuleForPage, getModulePages, isPlaceholderPage } from "./constants/moduleRegistry";
@@ -220,7 +219,6 @@ const canonicalHrPageAliases = {
 };
 const navItems = [
   ["companies_admin", "إدارة الشركات"],
-  ["platform_company_entitlements", "إدارة اشتراكات الشركات"],
   ["system_settings", "الإعدادات العامة"],
   ...baseNavItems.slice(0, -2),
   ["guarantees", "ضمانات الموظفين"],
@@ -706,9 +704,7 @@ export default function App() {
 	    [notificationsOpen, setNotificationsOpen] = useState(false),
       [companies, setCompanies] = useState([]),
       [companyPermissions, setCompanyPermissions] = useState([]),
-      [companyEntitlements, setCompanyEntitlements] = useState([]),
       [companyPermissionsLoading, setCompanyPermissionsLoading] = useState(false),
-      [companyEntitlementsLoading, setCompanyEntitlementsLoading] = useState(false),
       [currentCompany, setCurrentCompany] = useState(restoredTenant.currentCompany || null),
       [currentUserState, setCurrentUserState] = useState(restoredTenant.currentUser || null);
   const setEmployees = (updater) =>
@@ -792,9 +788,7 @@ export default function App() {
   useEffect(() => {
     if (!logged || !currentCompany?.company_id) {
       setCompanyPermissions([]);
-      setCompanyEntitlements([]);
       setCompanyPermissionsLoading(false);
-      setCompanyEntitlementsLoading(false);
       return;
     }
     let alive = true;
@@ -810,20 +804,7 @@ export default function App() {
         if (alive) setCompanyPermissionsLoading(false);
       }
     };
-    const loadCompanyEntitlements = async () => {
-      try {
-        setCompanyEntitlementsLoading(true);
-        const rows = await companyEntitlementsService.loadCompanyEntitlements(currentCompany.company_id);
-        if (alive) setCompanyEntitlements(rows);
-      } catch (error) {
-        console.error("Company entitlements load error:", error);
-        if (alive) setDataError(error.message);
-      } finally {
-        if (alive) setCompanyEntitlementsLoading(false);
-      }
-    };
     loadCompanyPermissions();
-    loadCompanyEntitlements();
     const unsubscribe = companyPermissionsService.subscribe(loadCompanyPermissions);
     return () => {
       alive = false;
@@ -990,30 +971,22 @@ export default function App() {
 	    roleMatrix = settings.rolePermissions?.[role] || {},
 	    hasRoleMatrix = Object.keys(roleMatrix).length > 0,
 	    canNode = (nodeKey, action = "can_view") => hasTreePermission(treeRolePermissions, role, nodeKey, action),
-      companyPageEnabledByEntitlements = (pageKey) => {
-        if (!hasSelectedCompany) return false;
-        if (isPlatformAdminUser) return true;
-        return companyEntitlementsService.isCompanyPageEnabled(currentCompany.company_id, pageKey, companyEntitlements);
-      },
       companyCanPage = (pageKey, action = "can_view") => {
         if (pageKey === "companies_admin") return isPlatformAdminUser;
-        if (pageKey === "platform_company_entitlements") return isPlatformAdminUser;
         if (!hasSelectedCompany) return false;
-        if (!companyPageEnabledByEntitlements(pageKey)) return false;
         if (isAdministrativeUser) return true;
         return companyCanAccessFromRows(companyPermissions, pageKey, action);
       },
 	    canPage = (pageKey, action = "can_view") => {
-        if (isPlatformAdminUser) return pageKey === "companies_admin" || pageKey === "platform_company_entitlements" ? true : companyCanPage(pageKey, action);
-        if (pageKey === "platform_company_entitlements") return false;
+        if (isPlatformAdminUser) return pageKey === "companies_admin" ? true : companyCanPage(pageKey, action);
         if (isAdministrativeUser) return true;
         if (!companyCanPage(pageKey, action)) return false;
         return pageAllowedByTree(treeRolePermissions, role, pageKey, action) || canByPermission(appPermissions, role, pageKey, action);
       },
-      rawVisibleNavItems = navItems.filter(([id]) => {
-        if (isPlatformAdminUser) return hasSelectedCompany ? id === "companies_admin" || companyCanPage(id, "can_view") : id === "companies_admin" || id === "platform_company_entitlements";
+	    rawVisibleNavItems = navItems.filter(([id]) => {
+        if (isPlatformAdminUser) return hasSelectedCompany ? id === "companies_admin" || companyCanPage(id, "can_view") : id === "companies_admin";
         if (id === "companies_admin") return false;
-      if (isAdministrativeUser && hasSelectedCompany) return companyPageEnabledByEntitlements(id);
+        if (isAdministrativeUser && hasSelectedCompany) return true;
         if (!companyCanPage(id, "can_view")) return false;
 	      if (id === "dashboard") return hasAnyPermission(treeRolePermissions, role, dashboardPermissionNodes, "can_view");
 	      if (treeRolePermissions.length) return pageAllowedByTree(treeRolePermissions, role, id, "can_view");
@@ -1033,9 +1006,8 @@ export default function App() {
       visibleNavItems = moduleVisibleNavItems.length ? moduleVisibleNavItems : rawVisibleNavItems,
       currentPageMeta = ERP_PAGE_BY_KEY[page] || null,
       pageIsPlaceholder = currentPageMeta?.status === "placeholder",
-      requestedPageBlockedByCompany = !pageIsPlaceholder && page !== "companies_admin" && page !== "platform_company_entitlements" && hasSelectedCompany && !companyCanPage(page, "can_view"),
-      requestedPageBlockedByRole = !pageIsPlaceholder && page !== "companies_admin" && page !== "platform_company_entitlements" && hasSelectedCompany && companyCanPage(page, "can_view") && !canPage(page, "can_view"),
-      requestedPlatformPageBlocked = page === "platform_company_entitlements" && !isPlatformAdminUser,
+      requestedPageBlockedByCompany = !pageIsPlaceholder && page !== "companies_admin" && hasSelectedCompany && !companyCanPage(page, "can_view"),
+      requestedPageBlockedByRole = !pageIsPlaceholder && page !== "companies_admin" && hasSelectedCompany && companyCanPage(page, "can_view") && !canPage(page, "can_view"),
 	    firstAllowedPage = isPlatformAdminUser && !hasSelectedCompany ? "companies_admin" : ((visibleNavItems[0]?.[2] || visibleNavItems[0]?.[0]) || getFirstAllowedPageForUser({ ...currentUser, role }, treeRolePermissions, appPermissions, rawVisibleNavItems)),
 	    activePage = (requestedPageBlockedByCompany || requestedPageBlockedByRole) ? page : (visibleNavItems.some(([id, _label, routeKey]) => id === page || routeKey === page) ? page : firstAllowedPage),
       sidebarNavigationGroups = buildGroupedNavigation(visibleNavItems.map(([id, label, routeKey, itemStatus, moduleKey]) => ({
@@ -1103,7 +1075,7 @@ export default function App() {
   if (!requestedPageBlockedByCompany && !requestedPageBlockedByRole && visibleNavItems.length && activePage && activePage !== page) {
     setTimeout(() => setPage(activePage), 0);
   }
-  if (permissionsLoading || companyPermissionsLoading || companyEntitlementsLoading) return <LoadingScreen message="جاري تحميل الصلاحيات..." />;
+  if (permissionsLoading || companyPermissionsLoading) return <LoadingScreen message="جاري تحميل الصلاحيات..." />;
   if (!visibleNavItems.length) {
     return <div className="grid min-h-screen place-items-center bg-slate-50 p-5" dir="rtl"><div className="panel max-w-xl p-6 text-center"><ShieldCheck className="mx-auto mb-3 text-brand-700" /><h2 className="text-xl font-extrabold">لا توجد صلاحيات مفعلة لهذا المستخدم</h2><button onClick={() => { localStorage.removeItem("ep_logged"); localStorage.removeItem("ep_role"); clearTenantSession(); setCurrentCompany(null); setCurrentUserState(null); setLogged(false); }} className="btn-primary mt-5">تسجيل الخروج</button></div></div>;
   }
@@ -1301,14 +1273,12 @@ export default function App() {
             </div>
           )}
           <PageErrorBoundary resetKey={activePage} onBack={() => setPage("dashboard")}>
-          {requestedPlatformPageBlocked && <div className="grid min-h-[55vh] place-items-center"><div className="panel max-w-xl p-8 text-center"><ShieldCheck className="mx-auto mb-4 text-brand-700" size={42} /><h2 className="text-xl font-extrabold">لا تملك صلاحية الوصول إلى إعدادات المنصة</h2><p className="mt-3 text-sm leading-7 text-slate-500">هذه الصفحة خاصة بمشرف المنصة فقط.</p><button type="button" onClick={() => setPage(firstAllowedPage || "dashboard")} className="btn-primary mt-5">العودة إلى صفحة مسموحة</button></div></div>}
           {requestedPageBlockedByCompany && <CompanyModuleDisabled onBack={() => setPage(firstAllowedPage || "dashboard")} />}
           {requestedPageBlockedByRole && <RolePageDisabled onBack={() => setPage(firstAllowedPage || "dashboard")} />}
-          {!requestedPlatformPageBlocked && !requestedPageBlockedByCompany && !requestedPageBlockedByRole && (
+          {!requestedPageBlockedByCompany && !requestedPageBlockedByRole && (
           <>
           {isPlaceholderPage(activePage) && <ErpPlaceholderPage pageKey={activePage} moduleKey={selectedModuleKey} onBack={() => switchErpModule("hr")} />}{" "}
           {activePage === "companies_admin" && <CompaniesAdminPage {...p} />}{" "}
-          {activePage === "platform_company_entitlements" && <PlatformCompanyEntitlementsPage {...p} />}{" "}
           {activePage === "dashboard" && <Dashboard {...p} />}{" "}
           {activePage === "employees" && <EnhancedEmployees {...p} />}{" "}
           {activePage === "templates" && <EnhancedTemplates {...p} />}{" "}
