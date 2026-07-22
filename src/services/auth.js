@@ -31,43 +31,48 @@ const activeSubscription = (status = "") => {
   return ["active", "trial", "نشط", "تجريبي"].includes(normalized) || ["نشط", "تجريبي"].includes(status);
 };
 
+const extractVerifiedUser = (rpcData) => {
+  const result = Array.isArray(rpcData) ? rpcData[0] || null : rpcData;
+  if (!result) return null;
+  if (result.success === false || result.valid === false || result.authenticated === false) {
+    throw new Error(result.message || result.error || "بيانات الدخول غير صحيحة");
+  }
+  const isWrappedResult = Object.prototype.hasOwnProperty.call(result, "user")
+    || Object.prototype.hasOwnProperty.call(result, "user_data")
+    || Object.prototype.hasOwnProperty.call(result, "data");
+  const payload = isWrappedResult ? (result.user || result.user_data || result.data || null) : result;
+  if (Array.isArray(payload)) return payload[0] || null;
+  return payload && typeof payload === "object" && Object.keys(payload).length ? payload : null;
+};
+
 export async function loginWithSupabase(username, password, employeeNumber = "", companyCode = "PUREMONEY") {
   if (!companyCode?.trim()) throw new Error("يجب إدخال كود الشركة");
 
   const companyRows = await supabase.select(
     "companies",
-    `company_code=eq.${encodeURIComponent(companyCode.trim().toUpperCase())}&select=*&limit=1`
+    `company_code=eq.${encodeURIComponent(companyCode.trim().toUpperCase())}&select=*&limit=1`,
   );
   const company = normalizeCompany(companyRows?.[0] || {});
   if (!company.company_id) throw new Error("الشركة غير موجودة");
   if (!company.is_active) throw new Error("هذه الشركة غير مفعلة، يرجى التواصل مع إدارة النظام");
   if (!activeSubscription(company.subscription_status)) throw new Error("اشتراك الشركة غير نشط، يرجى التواصل مع إدارة النظام");
 
-  const employeeFilter = employeeNumber ? `&employee_id=eq.${encodeURIComponent(employeeNumber)}` : "";
-  const userRows = await supabase.select(
-    "app_users",
-    `company_id=eq.${encodeURIComponent(company.company_id)}&username=eq.${encodeURIComponent(username)}&password=eq.${encodeURIComponent(password)}&is_active=eq.true${employeeFilter}&select=*&limit=1`
-  );
-  if (userRows?.[0]) {
-    const user = normalizeTenantUser(userRows[0], company);
-    setTenantSession({ company, user });
-    return user;
-  }
-
-  // Backward compatible fallback for existing installations that still expose verify_app_login.
   const rpcData = await supabase.rpc("verify_app_login", {
     p_username: username,
     p_password: password,
-    p_employee_id: employeeNumber,
-  }).catch(() => null);
-  if (rpcData && (!Array.isArray(rpcData) || rpcData.length)) {
-    const user = normalizeTenantUser(
-      { ...normalizeCloudUser(rpcData, username), company_id: company.company_id, company_code: company.company_code },
-      company
-    );
-    setTenantSession({ company, user });
-    return user;
-  }
+    p_employee_id: employeeNumber || "",
+  });
+  const verifiedUser = extractVerifiedUser(rpcData);
+  if (!verifiedUser) throw new Error("بيانات الدخول غير صحيحة");
 
-  throw new Error("بيانات الدخول غير صحيحة");
+  const user = normalizeTenantUser(
+    {
+      ...normalizeCloudUser(verifiedUser, username),
+      company_id: company.company_id,
+      company_code: company.company_code,
+    },
+    company,
+  );
+  setTenantSession({ company, user });
+  return user;
 }
