@@ -5482,6 +5482,7 @@ function OvertimeWhatsAppMessageGenerator({ companyId, companyName, canGenerate 
 function OvertimePage({ employees = [], role, currentUser, currentCompany, can }) {
   const [assignments, setAssignments] = useState([]);
   const [assignmentEmployees, setAssignmentEmployees] = useState([]);
+  const [companyBranches, setCompanyBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState(null);
@@ -5492,6 +5493,10 @@ function OvertimePage({ employees = [], role, currentUser, currentCompany, can }
   const safeAssignments = Array.isArray(assignments) ? assignments : [];
   const safeAssignmentEmployees = Array.isArray(assignmentEmployees) ? assignmentEmployees : [];
   const companyId = currentCompany?.company_id || currentUser?.company_id || null;
+  const companyBranchOptions = useMemo(() => [...new Set((Array.isArray(companyBranches) ? companyBranches : [])
+    .filter((branch) => branch?.is_active !== false && (!branch?.status || branch.status === "نشط"))
+    .map((branch) => String(branch?.branch_name || "").trim())
+    .filter(Boolean))], [companyBranches]);
   const canView = can?.("overtime", "can_view") !== false;
   const canCreate = can?.("overtime", "can_create") !== false;
   const canEdit = can?.("overtime", "can_edit") !== false;
@@ -5524,6 +5529,39 @@ function OvertimePage({ employees = [], role, currentUser, currentCompany, can }
     const u2 = overtimeService.subscribeAssignmentEmployees(load);
     return () => { u1?.(); u2?.(); };
   }, [companyId]);
+  useEffect(() => {
+    let active = true;
+    const loadCompanyBranches = async () => {
+      if (!companyId) {
+        if (active) setCompanyBranches([]);
+        return;
+      }
+      try {
+        const rows = await settingsBranchesService.loadBranches(companyId);
+        if (active) setCompanyBranches(Array.isArray(rows) ? rows : []);
+      } catch (branchError) {
+        console.error("Overtime branches load error:", branchError);
+        if (active) {
+          setCompanyBranches([]);
+          setError(branchError.message || "تعذر تحميل فروع الشركة");
+        }
+      }
+    };
+    loadCompanyBranches();
+    const unsubscribe = settingsBranchesService.subscribe(loadCompanyBranches);
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, [companyId]);
+  useEffect(() => {
+    setFilters((current) => current.branch === "all" || companyBranchOptions.includes(current.branch)
+      ? current
+      : { ...current, branch: "all" });
+    setDialog((current) => current && !current.branch && companyBranchOptions[0]
+      ? { ...current, branch: companyBranchOptions[0] }
+      : current);
+  }, [companyBranchOptions]);
   if (!canView) return <div className="panel p-8 text-center font-bold text-slate-500">لا تملك صلاحية إدارة تكليف العمل الإضافي</div>;
   const joinedRows = safeAssignmentEmployees.map((row) => {
     const assignment = safeAssignments.find((a) => a.assignment_id === row.assignment_id) || {};
@@ -5551,7 +5589,7 @@ function OvertimePage({ employees = [], role, currentUser, currentCompany, can }
   ];
   const startCreate = () => {
     if (!canCreate) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
-    setDialog({ assignment_id: `OT-${Date.now()}`, assignment_date: new Date().toISOString().slice(0, 10), branch: branches[0], location: "", start_time: "16:00", end_time: "20:00", reason: "", notes: "", mode: "branch", selected: [] });
+    setDialog({ assignment_id: `OT-${Date.now()}`, assignment_date: new Date().toISOString().slice(0, 10), branch: companyBranchOptions[0] || "", location: "", start_time: "16:00", end_time: "20:00", reason: "", notes: "", mode: "branch", selected: [] });
   };
   const selectedEmployees = () => {
     if (!dialog) return [];
@@ -5706,7 +5744,7 @@ function OvertimePage({ employees = [], role, currentUser, currentCompany, can }
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">{cards.map(([label, value, I]) => <Mini key={label} label={label} value={value} I={I} />)}</div>
       <div className="panel flex flex-wrap gap-3 p-4">
         <input type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} className="field max-w-[170px]" />
-        <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branches.map((b) => <option key={b}>{b}</option>)}</select>
+        <select value={filters.branch} onChange={(e) => setFilters({ ...filters, branch: e.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{companyBranchOptions.length ? companyBranchOptions.map((branchName) => <option key={branchName} value={branchName}>{branchName}</option>) : <option value="" disabled>لم يتم إضافة فروع لهذه الشركة بعد</option>}</select>
         <input value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })} className="field min-w-[200px]" placeholder="اكتب سبب طلب المراجعة..." />
         <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="field max-w-[170px]"><option value="all">كل الحالات</option>{overtimeStatuses.map((s) => <option key={s}>{s}</option>)}</select>
         <input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} className="field max-w-[170px]" />
@@ -5732,7 +5770,7 @@ function OvertimePage({ employees = [], role, currentUser, currentCompany, can }
             <div className="mb-5 flex"><h3 className="text-xl font-extrabold">تكليف عمل إضافي</h3><button type="button" onClick={() => setDialog(null)} className="mr-auto"><X /></button></div>
             <div className="grid gap-4 md:grid-cols-3">
               <Label t="التاريخ"><input required type="date" value={dialog.assignment_date} onChange={(e) => setDialog({ ...dialog, assignment_date: e.target.value })} className="field mt-2" /></Label>
-              <Label t="الفرع"><select value={dialog.branch} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className="field mt-2">{branches.map((b) => <option key={b}>{b}</option>)}</select></Label>
+              <Label t="الفرع"><select value={dialog.branch} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className="field mt-2">{companyBranchOptions.length ? companyBranchOptions.map((branchName) => <option key={branchName} value={branchName}>{branchName}</option>) : <option value="">لم يتم إضافة فروع لهذه الشركة بعد</option>}</select></Label>
               <Label t="الموقع"><input required value={dialog.location} onChange={(e) => setDialog({ ...dialog, location: e.target.value })} className="field mt-2" /></Label>
               <Label t="من الساعة"><input required type="time" value={dialog.start_time} onChange={(e) => setDialog({ ...dialog, start_time: e.target.value })} className="field mt-2" /></Label>
               <Label t="إلى الساعة"><input required type="time" value={dialog.end_time} onChange={(e) => setDialog({ ...dialog, end_time: e.target.value })} className="field mt-2" /></Label>
