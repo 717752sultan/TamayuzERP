@@ -2268,6 +2268,41 @@ function Chart({ title, sub, children }) {
     </section>
   );
 }
+const employeeImageUrl = (employee = {}) =>
+  String(employee.profile_image_url || employee.profileImageUrl || employee.profile_image || employee.avatar_url || employee.photo_url || "").trim();
+
+const employeeInitials = (name = "") =>
+  String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("") || "؟";
+
+function EmployeeAvatar({ employee, size = "md", onClick }) {
+  const [failed, setFailed] = useState(false);
+  const src = employeeImageUrl(employee);
+  useEffect(() => setFailed(false), [src]);
+  const sizes = {
+    sm: "h-9 w-9 text-xs",
+    md: "h-11 w-11 text-sm",
+    lg: "h-24 w-24 text-2xl",
+  };
+  const className = `${sizes[size] || sizes.md} shrink-0 overflow-hidden rounded-full border border-slate-200 bg-slate-100 text-brand-700`;
+  const content = src && !failed
+    ? <img src={src} alt={employee?.name || "صورة الموظف"} onError={() => setFailed(true)} className="h-full w-full object-cover" />
+    : <span className="grid h-full w-full place-items-center font-extrabold">{employeeInitials(employee?.name)}</span>;
+
+  return onClick ? (
+    <button type="button" onClick={onClick} className={`${className} focus:outline-none focus:ring-2 focus:ring-brand-500`}>
+      {content}
+    </button>
+  ) : (
+    <div className={className}>{content}</div>
+  );
+}
+
 function Employees({ employees, setEmployees }) {
   const [q, setQ] = useState(""),
     [branch, setBranch] = useState("الكل"),
@@ -2422,7 +2457,7 @@ function Employees({ employees, setEmployees }) {
     </div>
   );
 }
-function EmployeeModal({ employee, editing, close, save, setEmployees, branchOptions = branches, jobOptions = jobs, managerOptions = [] }) {
+function EmployeeModal({ employee, editing, close, save, setEmployees, branchOptions = branches, jobOptions = jobs, managerOptions = [], canViewFinancial = true }) {
   const currentEmployee = employee || editing;
   const availableBranches = [...new Set([currentEmployee?.branch, ...(branchOptions || []), ...branches].filter(Boolean))];
   const availableJobs = [...new Set([currentEmployee?.job, ...(jobOptions || []), ...jobs].filter(Boolean))];
@@ -2438,6 +2473,7 @@ function EmployeeModal({ employee, editing, close, save, setEmployees, branchOpt
       phone: "05",
       status: "نشط",
       manager: "",
+      profile_image_url: "",
     },
   );
   return (
@@ -2455,6 +2491,7 @@ function EmployeeModal({ employee, editing, close, save, setEmployees, branchOpt
             phone: f.phone,
             status: f.status,
             manager: f.manager,
+            profile_image_url: employeeImageUrl(f),
           };
           setSaving(true);
           try {
@@ -2477,6 +2514,8 @@ function EmployeeModal({ employee, editing, close, save, setEmployees, branchOpt
               phone: data.phone || "",
               status: data.status || "نشط",
               manager: data.manager || "",
+              profile_image_url: data.profile_image_url || data.profile_image || data.avatar_url || data.photo_url || "",
+              profileImageUrl: data.profile_image_url || data.profile_image || data.avatar_url || data.photo_url || "",
             };
             if (save) {
               save(savedEmployee);
@@ -2506,12 +2545,24 @@ function EmployeeModal({ employee, editing, close, save, setEmployees, branchOpt
             <X />
           </button>
         </div>
+        <div className="mb-5 flex items-center gap-4 rounded-2xl bg-slate-50 p-4">
+          <EmployeeAvatar employee={f} size="lg" />
+          <Label t="رابط صورة الموظف">
+            <input
+              type="url"
+              value={employeeImageUrl(f)}
+              onChange={(e) => setF({ ...f, profile_image_url: e.target.value })}
+              placeholder="https://example.com/photo.jpg"
+              className="field mt-2"
+            />
+          </Label>
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
           {[
             ["id", "رقم الموظف"],
             ["name", "اسم الموظف"],
             ["hireDate", "تاريخ التعيين", "date"],
-            ["salary", "الراتب", "number"],
+            ...(canViewFinancial ? [["salary", "الراتب", "number"]] : []),
             ["phone", "رقم الهاتف"],
             ["manager", "المدير المباشر"],
           ].map(([k, l, t]) => (
@@ -5068,12 +5119,14 @@ function EnhancedReports({ employees, evaluations }) {
   );
 }
 
-function EnhancedEmployees({ employees, setEmployees, setEvaluations, settings }) {
+function EnhancedEmployees({ employees, setEmployees, setEvaluations, settings, currentUser, currentCompany, can }) {
   const [q, setQ] = useState("");
   const [branch, setBranch] = useState("الكل");
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [detailsEmployee, setDetailsEmployee] = useState(null);
   const [selected, setSelected] = useState([]);
+  const canViewFinancial = isPlatformAdminUser() || currentUser?.is_platform_admin === true || can?.("employees", "can_view_financial") === true || can?.("hr_salary", "can_view_financial") === true;
   const employeeBranchOptions = [...new Set([
     ...(settings?.branches || []).map((item) => typeof item === "string" ? item : item?.branch_name || item?.name),
     ...employees.map((employee) => employee.branch),
@@ -5166,7 +5219,7 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations, settings }
                 <th>الفرع</th>
                 <th>الوظيفة</th>
                 <th>تاريخ التعيين</th>
-                <th>الراتب</th>
+                {canViewFinancial && <th>الراتب</th>}
                 <th>الحالة</th>
                 <th>المدير المباشر</th>
                 <th></th>
@@ -5174,15 +5227,13 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations, settings }
             </thead>
             <tbody>
               {filtered.map((e) => (
-                <tr key={e.id} className={selected.includes(e.id) ? "bg-brand-50" : ""}>
-                  <td><input type="checkbox" checked={selected.includes(e.id)} onChange={() => toggle(e.id)} /></td>
+                <tr key={e.id} onClick={() => setDetailsEmployee(e)} className={`${selected.includes(e.id) ? "bg-brand-50" : ""} cursor-pointer hover:bg-slate-50`}>
+                  <td onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selected.includes(e.id)} onChange={() => toggle(e.id)} /></td>
                   <td>
                     <div className="flex items-center gap-3">
-                      <div className="grid h-9 w-9 place-items-center rounded-xl bg-slate-100 text-xs font-bold text-brand-700">
-                        {e.name.split(" ").slice(0, 2).map((x) => x[0]).join("")}
-                      </div>
+                      <EmployeeAvatar employee={e} size="sm" onClick={(event) => { event.stopPropagation(); setDetailsEmployee(e); }} />
                       <div>
-                        <b>{e.name}</b>
+                        <button type="button" onClick={(event) => { event.stopPropagation(); setDetailsEmployee(e); }} className="font-extrabold text-slate-900 hover:text-brand-700">{e.name}</button>
                         <p className="text-xs text-slate-400">{e.id} • {e.phone}</p>
                       </div>
                     </div>
@@ -5190,10 +5241,10 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations, settings }
                   <td>{e.branch}</td>
                   <td>{e.job}</td>
                   <td>{e.hireDate}</td>
-                  <td className="font-bold">{money(e.salary)}</td>
+                  {canViewFinancial && <td className="font-bold">{money(e.salary)}</td>}
                   <td><Status>{e.status}</Status></td>
                   <td>{e.manager}</td>
-                  <td>
+                  <td onClick={(event) => event.stopPropagation()}>
                     <button onClick={() => { setEditing(e); setModal(true); }} className="p-2 text-blue-600"><Pencil size={16} /></button>
                     <button
                       onClick={() => {
@@ -5213,11 +5264,108 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations, settings }
           </table>
         </div>
       </div>
-      {modal && <EmployeeModal editing={editing} close={() => setModal(false)} setEmployees={setEmployees} branchOptions={employeeBranchOptions} jobOptions={employeeJobOptions} managerOptions={employeeManagerOptions} />}
+      {detailsEmployee && (
+        <EmployeeDetailsModal
+          employee={detailsEmployee}
+          close={() => setDetailsEmployee(null)}
+          onEdit={() => {
+            setEditing(detailsEmployee);
+            setDetailsEmployee(null);
+            setModal(true);
+          }}
+          currentUser={currentUser}
+          currentCompany={currentCompany}
+          can={can}
+        />
+      )}
+      {modal && <EmployeeModal editing={editing} close={() => setModal(false)} setEmployees={setEmployees} branchOptions={employeeBranchOptions} jobOptions={employeeJobOptions} managerOptions={employeeManagerOptions} canViewFinancial={canViewFinancial} />}
     </div>
 	  );
 	}
 	
+function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCompany, can }) {
+  const platformAdmin = isPlatformAdminUser() || currentUser?.is_platform_admin === true;
+  const sameCompany = platformAdmin || !currentCompany?.company_id || !employee?.company_id || employee.company_id === currentCompany.company_id;
+  const canEditEmployee = sameCompany && (platformAdmin || can?.("employees", "can_edit") !== false);
+  const canViewFinancial = platformAdmin || can?.("employees", "can_view_financial") === true || can?.("hr_salary", "can_view_financial") === true;
+  const canResetPassword = sameCompany && (platformAdmin || can?.("users_permissions", "can_reset_user_password") === true || can?.("system_users", "can_reset_user_password") === true);
+  const details = [
+    ["الرقم الوظيفي", employee.id],
+    ["الاسم", employee.name],
+    ["الهاتف", employee.phone],
+    ["الفرع", employee.branch],
+    ["الإدارة", employee.department || employee.administration || "غير محدد"],
+    ["القسم", employee.department || "غير محدد"],
+    ["الوظيفة / المسمى الوظيفي", employee.job || employee.job_title],
+    ["المدير المباشر", employee.manager || employee.direct_manager || "غير محدد"],
+    ["تاريخ التوظيف", employee.hireDate || employee.hire_date || "غير محدد"],
+    ...(canViewFinancial ? [["الراتب", money(employee.salary || 0)]] : []),
+    ["الحالة", employee.status],
+  ];
+  const disabledAction = !sameCompany;
+  const actions = [
+    ["عرض", false, () => {}],
+    ["تعديل", !canEditEmployee, onEdit],
+    ["بيانات مالية", !canViewFinancial, () => {}],
+    ["الحركات", disabledAction, () => {}],
+    ["وثائق الموظف", disabledAction, () => {}],
+    ["إنهاء الخدمة", !canEditEmployee, () => {}],
+    ["التابعين", disabledAction, () => {}],
+    ["ربط حساب المستخدم", !canEditEmployee, () => {}],
+    ["تغيير كلمة المرور", !canResetPassword, () => {}],
+    ["إلغاء التفعيل", !canEditEmployee, () => {}],
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" dir="rtl">
+      <div className="panel max-h-[90vh] w-full max-w-5xl overflow-y-auto p-0">
+        <div className="flex items-center gap-3 border-b p-5">
+          <div>
+            <p className="text-xs font-bold text-slate-400">ملف الموظف</p>
+            <h3 className="text-xl font-extrabold">{employee.name}</h3>
+          </div>
+          <button type="button" onClick={close} className="mr-auto rounded-full p-2 text-slate-500 hover:bg-slate-100" aria-label="إغلاق">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="grid gap-0 lg:grid-cols-[280px_1fr]">
+          <aside className="border-b bg-slate-50 p-6 lg:border-b-0 lg:border-l">
+            <div className="flex flex-col items-center text-center">
+              <EmployeeAvatar employee={employee} size="lg" />
+              <h4 className="mt-4 text-lg font-extrabold">{employee.name}</h4>
+              <p className="mt-1 text-sm text-slate-500">{employee.job || "غير محدد"}</p>
+              <p className="mt-1 text-xs text-slate-400">{employee.branch || "غير محدد"}</p>
+              <div className="mt-4"><Status>{employee.status || "غير محدد"}</Status></div>
+            </div>
+          </aside>
+          <section className="space-y-5 p-6">
+            {!sameCompany && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-700">هذا الموظف تابع لشركة أخرى، والصلاحيات الإدارية مقيدة.</div>}
+            <div className="overflow-hidden rounded-2xl border">
+              <table className="w-full">
+                <tbody>
+                  {details.map(([label, value]) => (
+                    <tr key={label} className="border-b last:border-0">
+                      <th className="w-48 bg-slate-50 px-4 py-3 text-right text-xs text-slate-500">{label}</th>
+                      <td className="px-4 py-3 text-sm font-bold text-slate-700">{value || "غير محدد"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {actions.map(([label, disabled, action]) => (
+                <button key={label} type="button" disabled={disabled} onClick={action} className={label === "تعديل" ? "btn-primary" : "btn-secondary"}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const guaranteeStatuses = ["سارية", "منتهية", "ناقصة", "موقوفة"];
 const overtimeStatuses = ["مكلف", "تم الإرسال", "معتذر", "منفذ", "ملغي"];
 const arabicDayName = (date) =>
@@ -8592,6 +8740,11 @@ const employeeImportHeaderMap = {
   status: "status",
   "المدير المباشر": "manager",
   manager: "manager",
+  "رابط صورة الموظف": "profile_image_url",
+  profile_image_url: "profile_image_url",
+  profile_image: "profile_image_url",
+  avatar_url: "profile_image_url",
+  photo_url: "profile_image_url",
 };
 const normalizeEmployeeImportKey = (key) => String(key || "").trim().replace(/\s+/g, " ");
 const normalizeEmployeeImportValue = (value) => {
@@ -8616,6 +8769,7 @@ function normalizeEmployeeImportRow(row) {
     phone: "",
     status: "نشط",
     manager: "",
+    profile_image_url: "",
   };
   Object.entries(row || {}).forEach(([key, value]) => {
     const cleanKey = normalizeEmployeeImportKey(key);

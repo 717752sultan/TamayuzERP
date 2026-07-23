@@ -8,8 +8,9 @@ export const normalizeEmployeeForDb = (item = {}) => ({
   hire_date: item.hire_date || item.hireDate || null,
   salary: Number(item.salary || 0),
   phone: String(item.phone || ""),
-  status: String(item.status || "نشط"),
+  status: String(item.status || "???"),
   manager: String(item.manager || ""),
+  profile_image_url: String(item.profile_image_url || item.profileImageUrl || item.profile_image || item.avatar_url || item.photo_url || "").trim(),
 });
 
 const fromDb = (row = {}) => ({
@@ -21,8 +22,10 @@ const fromDb = (row = {}) => ({
   hireDate: row.hire_date || row.hireDate || "",
   salary: Number(row.salary || 0),
   phone: row.phone || "",
-  status: row.status || "نشط",
+  status: row.status || "???",
   manager: row.manager || row.direct_manager || "",
+  profile_image_url: row.profile_image_url || row.profile_image || row.avatar_url || row.photo_url || "",
+  profileImageUrl: row.profile_image_url || row.profile_image || row.avatar_url || row.photo_url || "",
 });
 
 const normalizeEmployeeRows = (employeeOrEmployees) =>
