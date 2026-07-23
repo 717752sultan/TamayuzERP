@@ -2,6 +2,13 @@ import { erpModuleLabels, pageRegistry } from "./pageRegistry";
 
 const ERP_MODULE_DEFINITIONS = [
   {
+    key: "platform",
+    label: erpModuleLabels.platform,
+    description: "إدارة الشركات وإعدادات المنصة",
+    permissionKey: "platform",
+    order: 0,
+  },
+  {
     key: "hr",
     label: erpModuleLabels.hr,
     description: "كل ما يخص الموظفين وشؤون الموارد البشرية والتقييم والحوافز والإعدادات والتقارير",

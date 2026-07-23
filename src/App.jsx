@@ -105,7 +105,7 @@ import { backupService } from "./services/backup";
 import { companiesService } from "./services/companies";
 import { companyPermissionActions, companyPermissionModules, companyPermissionsService, companyCanAccessFromRows, mergeWithDefaultCompanyPermissions } from "./services/companyPermissions";
 import { applyCompanyTheme, applyThemeForCurrentCompany, getDefaultTheme, normalizeThemePayload, themePresets, themeService } from "./services/theme";
-import { clearTenantSession, getCurrentCompany, getCurrentUser, isProtectedPlatformRole, isProtectedPlatformUser, loadTenantSession, platformSuperAdminRole, setTenantSession } from "./services/tenant";
+import { clearTenantSession, getCurrentCompany, getCurrentUser, isPlatformAdminUser, isProtectedPlatformRole, isProtectedPlatformUser, loadTenantSession, setTenantSession } from "./services/tenant";
 import { assistantModes, pageRegistryByKey } from "./constants/pageRegistry";
 import { APP_BRAND_NAME, APP_DESCRIPTION, APP_OFFICIAL_NAME, APP_REPORT_SUBTITLE, APP_REPORT_TITLE, APP_SHORT_NAME, APP_SYSTEM_NAME, APP_TAGLINE } from "./constants/branding";
 import { buildReportBrandingHtml } from "./services/reportBranding";
@@ -763,7 +763,7 @@ export default function App() {
   useEffect(() => {
     if (!logged) return;
     const user = currentUserState || getCurrentUser() || {};
-    const platformAdmin = user?.is_platform_admin === true || user?.role === platformSuperAdminRole || role === platformSuperAdminRole;
+    const platformAdmin = isPlatformAdminUser(user);
     if (!platformAdmin) {
       setCompanies([]);
       return;
@@ -905,17 +905,8 @@ export default function App() {
       <Login
         settings={settings}
         onLogin={(user) => {
-          const isPlatformLogin = user?.is_platform_admin === true || user?.role === platformSuperAdminRole;
-          const identityUser = isPlatformLogin
-            ? {
-                ...user,
-                company_id: "",
-                company_code: "",
-                company_name: "",
-                logo_url: "",
-                primary_color: "",
-              }
-            : user;
+          const isPlatformLogin = isPlatformAdminUser(user);
+          const identityUser = user;
           const company = isPlatformLogin ? null : (getCurrentCompany() || {
             company_id: user.company_id,
             company_code: user.company_code,
@@ -965,26 +956,26 @@ export default function App() {
       />
     );
 	  const currentUser = currentUserState || getCurrentUser() || {},
-      isPlatformAdminUser = currentUser?.is_platform_admin === true || currentUser?.role === platformSuperAdminRole || role === platformSuperAdminRole,
-      isAdministrativeUser = isPlatformAdminUser || isSystemAdministratorRole(currentUser?.role) || isSystemAdministratorRole(role),
+      platformAdmin = isPlatformAdminUser(currentUser),
+      isAdministrativeUser = platformAdmin || isSystemAdministratorRole(currentUser?.role) || isSystemAdministratorRole(role),
       hasSelectedCompany = Boolean(currentCompany?.company_id),
 	    roleMatrix = settings.rolePermissions?.[role] || {},
 	    hasRoleMatrix = Object.keys(roleMatrix).length > 0,
 	    canNode = (nodeKey, action = "can_view") => hasTreePermission(treeRolePermissions, role, nodeKey, action),
       companyCanPage = (pageKey, action = "can_view") => {
-        if (pageKey === "companies_admin") return isPlatformAdminUser;
+        if (pageKey === "companies_admin") return platformAdmin;
         if (!hasSelectedCompany) return false;
         if (isAdministrativeUser) return true;
         return companyCanAccessFromRows(companyPermissions, pageKey, action);
       },
 	    canPage = (pageKey, action = "can_view") => {
-        if (isPlatformAdminUser) return pageKey === "companies_admin" ? true : companyCanPage(pageKey, action);
+        if (platformAdmin) return pageKey === "companies_admin" ? true : companyCanPage(pageKey, action);
         if (isAdministrativeUser) return true;
         if (!companyCanPage(pageKey, action)) return false;
         return pageAllowedByTree(treeRolePermissions, role, pageKey, action) || canByPermission(appPermissions, role, pageKey, action);
       },
 	    rawVisibleNavItems = navItems.filter(([id]) => {
-        if (isPlatformAdminUser) return hasSelectedCompany ? id === "companies_admin" || companyCanPage(id, "can_view") : id === "companies_admin";
+        if (platformAdmin) return hasSelectedCompany ? true : id === "companies_admin";
         if (id === "companies_admin") return false;
         if (isAdministrativeUser && hasSelectedCompany) return true;
         if (!companyCanPage(id, "can_view")) return false;
@@ -996,11 +987,11 @@ export default function App() {
       selectedModuleKey = ERP_MODULES.some((module) => module.key === activeModuleKey) ? activeModuleKey : getModuleForPage(page),
       selectedModule = ERP_MODULES.find((module) => module.key === selectedModuleKey) || ERP_MODULES[0],
       rawVisibleIds = new Set(rawVisibleNavItems.map(([id]) => id)),
-      moduleVisibleNavItems = isPlatformAdminUser && !hasSelectedCompany
+      moduleVisibleNavItems = platformAdmin && !hasSelectedCompany
         ? rawVisibleNavItems
         : getModulePages(selectedModuleKey).filter((item) => {
-            if (isAdministrativeUser) return item.status !== "placeholder" || isAdminLikeRole(role) || isPlatformAdminUser;
-            if (item.status === "placeholder") return isAdminLikeRole(role) || isPlatformAdminUser;
+            if (isAdministrativeUser) return item.status !== "placeholder" || isAdminLikeRole(role) || platformAdmin;
+            if (item.status === "placeholder") return isAdminLikeRole(role) || platformAdmin;
             return rawVisibleIds.has(item.routeKey) || rawVisibleIds.has(item.key);
           }).map((item) => [item.key, item.label, item.routeKey, item.status, item.moduleKey]),
       visibleNavItems = moduleVisibleNavItems.length ? moduleVisibleNavItems : rawVisibleNavItems,
@@ -1008,7 +999,7 @@ export default function App() {
       pageIsPlaceholder = currentPageMeta?.status === "placeholder",
       requestedPageBlockedByCompany = !pageIsPlaceholder && page !== "companies_admin" && hasSelectedCompany && !companyCanPage(page, "can_view"),
       requestedPageBlockedByRole = !pageIsPlaceholder && page !== "companies_admin" && hasSelectedCompany && companyCanPage(page, "can_view") && !canPage(page, "can_view"),
-	    firstAllowedPage = isPlatformAdminUser && !hasSelectedCompany ? "companies_admin" : ((visibleNavItems[0]?.[2] || visibleNavItems[0]?.[0]) || getFirstAllowedPageForUser({ ...currentUser, role }, treeRolePermissions, appPermissions, rawVisibleNavItems)),
+	    firstAllowedPage = platformAdmin && !hasSelectedCompany ? "companies_admin" : ((visibleNavItems[0]?.[2] || visibleNavItems[0]?.[0]) || getFirstAllowedPageForUser({ ...currentUser, role }, treeRolePermissions, appPermissions, rawVisibleNavItems)),
 	    activePage = (requestedPageBlockedByCompany || requestedPageBlockedByRole) ? page : (visibleNavItems.some(([id, _label, routeKey]) => id === page || routeKey === page) ? page : firstAllowedPage),
       sidebarNavigationGroups = buildGroupedNavigation(visibleNavItems.map(([id, label, routeKey, itemStatus, moduleKey]) => ({
         ...(pageRegistryByKey[id] || ERP_PAGE_BY_KEY[id] || ERP_PAGE_BY_ROUTE[routeKey] || {}),
@@ -1020,7 +1011,7 @@ export default function App() {
       }))),
     title = ERP_PAGE_BY_KEY[activePage]?.label || ERP_PAGE_BY_ROUTE[activePage]?.label || navItems.find((x) => x[0] === activePage)?.[1],
     company = currentCompany || getCurrentCompany() || {},
-    companyName = company.company_name || currentUser.company_name || (isPlatformAdminUser ? "إدارة المنصة" : APP_BRAND_NAME),
+    companyName = company.company_name || currentUser.company_name || (platformAdmin ? "إدارة المنصة" : APP_BRAND_NAME),
     companyLogo = company.logo_url || currentUser.logo_url || "",
     userCardName = currentUser?.name || currentUser?.username || "مستخدم",
     userCardUsername = currentUser?.username || "مستخدم",
@@ -1047,15 +1038,10 @@ export default function App() {
 	      canNode,
 	    };
   const handlePlatformCompanyChange = (companyId) => {
-    if (!isPlatformAdminUser) return;
+    if (!platformAdmin) return;
     const selected = companies.find((item) => item.company_id === companyId) || null;
     const identityUser = {
       ...currentUser,
-      company_id: "",
-      company_code: "",
-      company_name: "",
-      logo_url: "",
-      primary_color: "",
       is_platform_admin: true,
     };
     setTenantSession({ company: selected, user: identityUser });
@@ -1081,13 +1067,13 @@ export default function App() {
   }
   const availableModulePages = (moduleKey) =>
     getModulePages(moduleKey).filter((item) => {
-      if (isAdministrativeUser) return item.status !== "placeholder" || isAdminLikeRole(role) || isPlatformAdminUser;
+      if (isAdministrativeUser) return item.status !== "placeholder" || isAdminLikeRole(role) || platformAdmin;
       return item.status === "placeholder"
-        ? isAdminLikeRole(role) || isPlatformAdminUser
+        ? isAdminLikeRole(role) || platformAdmin
         : rawVisibleIds.has(item.routeKey) || rawVisibleIds.has(item.key);
     });
-  const safeModules = isPlatformAdminUser && !hasSelectedCompany
-    ? []
+  const safeModules = platformAdmin && !hasSelectedCompany
+    ? ERP_MODULES.filter((module) => module.key === "platform")
     : ERP_MODULES.filter((module) => availableModulePages(module.key).length > 0);
   const switchErpModule = (moduleKey) => {
     const pages = availableModulePages(moduleKey);
@@ -1180,9 +1166,9 @@ export default function App() {
             </p>
           </div>
           <div className="mr-auto flex items-center gap-3">
-            {isPlatformAdminUser && (
+            {platformAdmin && (
               <label className="flex max-w-[260px] items-center gap-2 rounded-xl border bg-white px-3 py-2 text-xs font-bold text-slate-600">
-                <span>اختر الشركة</span>
+                <span>تغيير الشركات</span>
                 <select
                   value={currentCompany?.company_id || ""}
                   onChange={(event) => handlePlatformCompanyChange(event.target.value)}
@@ -1369,19 +1355,25 @@ function RolePageDisabled({ onBack }) {
 }
 function Login({ onLogin }) {
   const [companyCode, setCompanyCode] = useState("PUREMONEY"),
+    [loginMode, setLoginMode] = useState("company"),
     [u, setU] = useState(""),
     [pw, setPw] = useState(""),
-    [employeeNo, setEmployeeNo] = useState(""),
     [err, setErr] = useState(""),
     [loading, setLoading] = useState(false);
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErr("");
-    if (!companyCode.trim()) return setErr("يجب إدخال كود الشركة");
+    const isPlatformMode = loginMode === "platform";
+    if (!isPlatformMode && !companyCode.trim()) return setErr("يجب إدخال كود الشركة");
     if (!u.trim() || !pw) return setErr("يرجى إدخال اسم المستخدم وكلمة المرور.");
     setLoading(true);
     try {
-      const user = await cloudLoginWithSupabase(u.trim(), pw, employeeNo.trim(), companyCode.trim());
+      const user = await cloudLoginWithSupabase(
+        u.trim(),
+        pw,
+        "",
+        isPlatformMode ? "PLATFORM" : companyCode.trim(),
+      );
       onLogin(user);
     } catch (error) {
       setErr(error.message || "تعذر تسجيل الدخول. تحقق من البيانات وحاول مرة أخرى.");
@@ -1402,11 +1394,14 @@ function Login({ onLogin }) {
           <span className="text-sm font-bold text-brand-700">{APP_SHORT_NAME}</span>
           <h1 className="mt-2 text-3xl font-extrabold">تسجيل الدخول</h1>
           <p className="mt-2 text-sm text-slate-500">{APP_SYSTEM_NAME} - {APP_TAGLINE}</p>
+          <div className="mt-6 grid grid-cols-2 rounded-xl bg-slate-100 p-1 text-sm font-extrabold">
+            <button type="button" onClick={() => setLoginMode("company")} className={`rounded-lg px-3 py-2 ${loginMode === "company" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500"}`}>دخول الشركات</button>
+            <button type="button" onClick={() => setLoginMode("platform")} className={`rounded-lg px-3 py-2 ${loginMode === "platform" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500"}`}>دخول مشرف المنصة</button>
+          </div>
           <div className="mt-8 space-y-5">
-            <Label t="كود الشركة"><input value={companyCode} onChange={(e) => setCompanyCode(e.target.value.toUpperCase())} autoComplete="organization" placeholder="PUREMONEY" className="field mt-2" /></Label>
-            <Label t="اسم المستخدم"><input value={u} onChange={(e) => setU(e.target.value)} autoComplete="username" placeholder="أدخل اسم المستخدم" className="field mt-2" /></Label>
+            {loginMode === "company" && <Label t="كود الشركة أو اسم الشركة"><input value={companyCode} onChange={(e) => setCompanyCode(e.target.value.toUpperCase())} autoComplete="organization" placeholder="PUREMONEY" className="field mt-2" /></Label>}
+            <Label t={loginMode === "platform" ? "اسم مشرف المنصة" : "اسم المستخدم أو الرقم الوظيفي"}><input value={u} onChange={(e) => setU(e.target.value)} autoComplete="username" placeholder={loginMode === "platform" ? "platform" : "admin أو EMP-001"} className="field mt-2" /></Label>
             <Label t="كلمة المرور"><input type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" placeholder="أدخل كلمة المرور" className="field mt-2" /></Label>
-            <Label t="الرقم الوظيفي"><input value={employeeNo} onChange={(e) => setEmployeeNo(e.target.value)} autoComplete="off" placeholder="أدخل الرقم الوظيفي" className="field mt-2" /></Label>
           </div>
           {err && <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">{err}</p>}
           <button disabled={loading} className="btn-primary mt-7 h-12 w-full disabled:cursor-not-allowed disabled:opacity-60">{loading ? "جاري التحقق..." : "دخول إلى النظام"} <ArrowUpLeft size={18} /></button>
@@ -1571,7 +1566,7 @@ function CompaniesAdminPage({ currentUser }) {
   const [permissionsCompanyId, setPermissionsCompanyId] = useState("");
   const [loading, setLoading] = useState(true);
   const [dialog, setDialog] = useState(null);
-  const canManage = currentUser?.is_platform_admin === true || currentUser?.role === platformSuperAdminRole;
+  const canManage = isPlatformAdminUser(currentUser);
   const load = async () => {
     if (!canManage) return;
     setLoading(true);
@@ -7216,6 +7211,7 @@ function RecruitmentPage({ employees, currentUser, canNode }) {
 
 function UserEditorModal({ dialog, setDialog, saveUser, employeeOptions, selectEmployee, roles = systemRoles }) {
   const isAdmin = String(dialog.role || "").includes("مدير النظام") || String(dialog.role || "").includes("مدير النظام");
+  const isNewUser = !dialog.user_id && !dialog.id;
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
       <form onSubmit={saveUser} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6">
@@ -7237,7 +7233,7 @@ function UserEditorModal({ dialog, setDialog, saveUser, employeeOptions, selectE
           </Label>
           <Label t="الرقم الوظيفي"><input readOnly value={dialog.employee_id || ""} className="field mt-2 bg-slate-50" /></Label>
           <Label t="اسم المستخدم"><input required value={dialog.username || ""} onChange={(e) => setDialog({ ...dialog, username: e.target.value })} className="field mt-2" /></Label>
-          <Label t="كلمة المرور"><input required type="password" value={dialog.password || ""} onChange={(e) => setDialog({ ...dialog, password: e.target.value })} className="field mt-2" /></Label>
+          {isNewUser && <Label t="كلمة المرور"><input required type="password" value={dialog.password || ""} onChange={(e) => setDialog({ ...dialog, password: e.target.value })} className="field mt-2" /></Label>}
           <Label t="الدور"><select value={dialog.role || "الموظف"} onChange={(e) => setDialog({ ...dialog, role: e.target.value })} className="field mt-2">{roles.map((role) => <option key={role}>{role}</option>)}</select></Label>
           <Label t="الفرع"><input readOnly={!isAdmin} value={dialog.branch || ""} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className={`field mt-2 ${isAdmin ? "" : "bg-slate-50"}`} /></Label>
           <Label t="الوظيفة"><input readOnly={!isAdmin} value={dialog.job || ""} onChange={(e) => setDialog({ ...dialog, job: e.target.value })} className={`field mt-2 ${isAdmin ? "" : "bg-slate-50"}`} /></Label>
@@ -7432,8 +7428,9 @@ function UsersPermissionsPage({ employees, can, companyPermissions }) {
   const [treeLoading, setTreeLoading] = useState(false);
   const [error, setError] = useState("");
   const currentUser = getCurrentUser() || {};
-  const isPlatformAdmin = currentUser?.is_platform_admin === true || currentUser?.role === platformSuperAdminRole || String(currentUser?.username || "").trim() === "platform";
+  const isPlatformAdmin = isPlatformAdminUser(currentUser);
   const canEdit = can?.("users_permissions", "can_edit") !== false;
+  const canResetPassword = isPlatformAdmin || can?.("users_permissions", "can_reset_user_password") === true;
   const load = async () => {
     setLoading(true);
     setError("");
@@ -7514,6 +7511,17 @@ function UsersPermissionsPage({ employees, can, companyPermissions }) {
         return exists ? list.map((x) => (x.user_id === saved.user_id ? saved : x)) : [saved, ...list];
       });
       setDialog(null);
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+  const resetUserPassword = async (user) => {
+    if (!canResetPassword) return alert("لا تملك صلاحية إعادة تعيين كلمة المرور");
+    const newPassword = prompt("أدخل كلمة المرور الجديدة");
+    if (!newPassword) return;
+    try {
+      await adminService.resetUserPassword(user.user_id || user.id, newPassword);
+      alert("تم تحديث كلمة المرور");
     } catch (err) {
       alert(err.message);
     }
@@ -7648,7 +7656,7 @@ function UsersPermissionsPage({ employees, can, companyPermissions }) {
           <h3 className="mb-3 font-extrabold">المستخدمون</h3>
           {loading ? <p className="text-sm text-slate-400">جاري التحميل...</p> : <div className="table-wrap"><table><thead><tr><th>المستخدم</th><th>الموظف</th><th>الدور</th><th>الفرع</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((u) => {
               const isProtectedUser = !isPlatformAdmin && isProtectedPlatformUser(u);
-              return <tr key={u.user_id}><td>{u.username}</td><td>{u.employee_name}<p className="text-xs text-slate-400">{u.employee_id}</p></td><td>{u.role}</td><td>{u.branch}</td><td><Status>{u.is_active ? "نشط" : "معطل"}</Status></td><td><button disabled={!canEdit || isProtectedUser} onClick={() => setDialog(u)} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canEdit || isProtectedUser} onClick={() => adminService.saveUser({ ...u, is_active: !u.is_active }).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600">{u.is_active ? "تعطيل" : "تفعيل"}</button></td></tr>;
+              return <tr key={u.user_id}><td>{u.username}</td><td>{u.employee_name}<p className="text-xs text-slate-400">{u.employee_id}</p></td><td>{u.role}</td><td>{u.branch}</td><td><Status>{u.is_active ? "نشط" : "معطل"}</Status></td><td><button disabled={!canEdit || isProtectedUser} onClick={() => setDialog(u)} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canResetPassword || isProtectedUser} onClick={() => resetUserPassword(u)} className="p-2 text-amber-700">إعادة كلمة المرور</button><button disabled={!canEdit || isProtectedUser} onClick={() => adminService.saveUser({ ...u, is_active: !u.is_active }).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600">{u.is_active ? "تعطيل" : "تفعيل"}</button></td></tr>;
             })}</tbody></table></div>}
         </div>
         <TreePermissionsPanel

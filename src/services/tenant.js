@@ -22,7 +22,7 @@ export const isProtectedPlatformUser = (user = {}) => {
 
 export const isPlatformAdminUser = (user = tenantState.currentUser) =>
   user?.is_platform_admin === true ||
-  user?.role === platformSuperAdminRole ||
+  user?.role === "مشرف النظام العام" ||
   String(user?.username || "").trim() === "platform";
 
 export const normalizeCompany = (row = {}) => ({
@@ -59,7 +59,8 @@ export const normalizeCompany = (row = {}) => ({
 });
 
 export const normalizeTenantUser = (row = {}, company = {}) => {
-  const inheritCompanyContext = !(row.is_platform_admin === true || row.role === platformSuperAdminRole);
+  const platformAdmin = isPlatformAdminUser(row);
+  const inheritCompanyContext = !platformAdmin;
   return ({
   user_id: row.user_id || row.id || row.username || "",
   id: row.user_id || row.id || row.username || "",
@@ -88,7 +89,7 @@ export const normalizeTenantUser = (row = {}, company = {}) => {
   report_header_color: row.report_header_color || (inheritCompanyContext ? company.report_header_color : "") || row.primary_color || (inheritCompanyContext ? company.primary_color : "") || "#8b1e1e",
   theme_mode: row.theme_mode || (inheritCompanyContext ? company.theme_mode : "") || "light",
   theme_name: row.theme_name || (inheritCompanyContext ? company.theme_name : "") || "default",
-  is_platform_admin: row.is_platform_admin === true || row.role === platformSuperAdminRole,
+  is_platform_admin: platformAdmin,
   is_active: row.is_active !== false,
   });
 };

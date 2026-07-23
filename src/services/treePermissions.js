@@ -10,6 +10,7 @@ export const permissionActions = [
   ["can_generate_reports", "إنشاء التقارير"],
   ["can_generate_plans", "إنشاء الخطط"],
   ["can_generate_hr_letters", "صياغة الخطابات"],
+  ["can_reset_user_password", "إعادة تعيين كلمات مرور المستخدمين"],
   ["can_analyze_inventory", "تحليل المخزون"],
   ["can_analyze_performance", "تحليل الأداء"],
   ["can_view_all_company_data", "عرض كل بيانات الشركة"],

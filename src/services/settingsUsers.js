@@ -13,7 +13,7 @@ export const settingsUserFromDb = (row = {}) => ({
   company_id: row.company_id || "",
   name: row.name || row.employee_name || row.username || "",
   username: row.username || "",
-  password: row.password || "",
+  password: "",
   role: row.role || "الموظف",
   employee_id: row.employee_id || "",
   employee_name: row.employee_name || row.name || "",
@@ -79,7 +79,7 @@ export const settingsUsersService = {
       return settingsUserFromDb(data);
     } catch (error) {
       console.error("Settings CRUD error:", error);
-      if (String(error.message || "").toLowerCase().includes("duplicate")) throw new Error("اسم المستخدم مستخدم مسبقًا، استخدم اسم مستخدم مختلف.");
+      if (String(error.message || "").toLowerCase().includes("duplicate")) throw new Error("اسم المستخدم مستخدم مسبقا، استخدم اسم مستخدم مختلف.");
       throw new Error("تعذر حفظ المستخدم: " + error.message);
     }
   },
@@ -96,9 +96,18 @@ export const settingsUsersService = {
     return this.updateUser(companyId, userId, { ...user, is_active: isActive });
   },
 
-  async resetUserPassword(companyId, userId, newPassword, user = {}) {
-    if (!newPassword) throw new Error("يجب إدخال كلمة المرور الجديدة");
-    return this.updateUser(companyId, userId, { ...user, password: newPassword });
+  async resetUserPassword(companyId, userId, newPassword) {
+    const id = String(userId || "").trim();
+    const password = String(newPassword || "").trim();
+    if (!id) throw new Error("لم يتم تحديد المستخدم");
+    if (!password) throw new Error("يجب إدخال كلمة المرور الجديدة");
+    const companyFilter = isPlatformAdminUser() ? "" : `&company_id=eq.${encodeURIComponent(requireCompany(companyId))}`;
+    await supabase.request(`/rest/v1/app_users?user_id=eq.${encodeURIComponent(id)}${companyFilter}`, {
+      method: "PATCH",
+      prefer: "return=minimal",
+      body: JSON.stringify({ password, updated_at: new Date().toISOString() }),
+    });
+    return { user_id: id };
   },
 
   async deleteUser(companyId, userId, user = {}) {
