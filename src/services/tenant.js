@@ -17,13 +17,13 @@ export const PROTECTED_PLATFORM_USERNAMES = ["platform"];
 export const isProtectedPlatformRole = (role = "") => PROTECTED_PLATFORM_ROLES.includes(String(role || "").trim());
 export const isProtectedPlatformUser = (user = {}) => {
   if (!user) return false;
-  return user?.is_platform_admin === true || isProtectedPlatformRole(user.role) || String(user.username || "").trim() === "platform";
+  return user?.is_platform_admin === true || isProtectedPlatformRole(user.role) || String(user.username || "").trim().toLowerCase() === "platform";
 };
 
 export const isPlatformAdminUser = (user = tenantState.currentUser) =>
   user?.is_platform_admin === true ||
   user?.role === "مشرف النظام العام" ||
-  String(user?.username || "").trim() === "platform";
+  String(user?.username || "").trim().toLowerCase() === "platform";
 
 export const normalizeCompany = (row = {}) => ({
   company_id: row.company_id || row.id || "",

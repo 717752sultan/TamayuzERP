@@ -137,6 +137,7 @@ const icons = {
   reports_center: FileBarChart,
   audit_logs: ClipboardList,
   companies_admin: Building2,
+  platform_admin_settings: ShieldCheck,
   hr_home: LayoutDashboard,
   hr_employees_full: Users,
   hr_reports_full: FileBarChart,
@@ -219,6 +220,7 @@ const canonicalHrPageAliases = {
 };
 const navItems = [
   ["companies_admin", "إدارة الشركات"],
+  ["platform_admin_settings", "إعدادات مشرف المنصة"],
   ["system_settings", "الإعدادات العامة"],
   ...baseNavItems.slice(0, -2),
   ["guarantees", "ضمانات الموظفين"],
@@ -901,7 +903,26 @@ export default function App() {
     };
   }, [logged, role, currentUserState?.user_id, currentCompany?.company_id]);
   if (!logged)
-    return (
+    return (window.location.pathname === "/platform-login" || window.location.pathname === "/admin-platform-login") ? (
+      <PlatformLogin
+        onLogin={(user) => {
+          const isPlatformLogin = isPlatformAdminUser(user);
+          if (!isPlatformLogin) {
+            clearTenantSession();
+            return;
+          }
+          const identityUser = user;
+          setTenantSession({ company: null, user: identityUser });
+          setCurrentCompany(null);
+          setCurrentUserState(identityUser);
+          setRole(user.role);
+          localStorage.setItem("ep_role", user.role);
+          localStorage.setItem("ep_employee_id", user.employeeId || "");
+          localStorage.setItem("ep_logged", "1");
+          setLogged(true);
+        }}
+      />
+    ) : (
       <Login
         settings={settings}
         onLogin={(user) => {
@@ -963,7 +984,7 @@ export default function App() {
 	    hasRoleMatrix = Object.keys(roleMatrix).length > 0,
 	    canNode = (nodeKey, action = "can_view") => hasTreePermission(treeRolePermissions, role, nodeKey, action),
       companyCanPage = (pageKey, action = "can_view") => {
-        if (pageKey === "companies_admin") return platformAdmin;
+        if (pageKey === "companies_admin" || pageKey === "platform_admin_settings") return platformAdmin;
         if (!hasSelectedCompany) return false;
         if (isAdministrativeUser) return true;
         return companyCanAccessFromRows(companyPermissions, pageKey, action);
@@ -975,8 +996,8 @@ export default function App() {
         return pageAllowedByTree(treeRolePermissions, role, pageKey, action) || canByPermission(appPermissions, role, pageKey, action);
       },
 	    rawVisibleNavItems = navItems.filter(([id]) => {
-        if (platformAdmin) return hasSelectedCompany ? true : id === "companies_admin";
-        if (id === "companies_admin") return false;
+        if (platformAdmin) return hasSelectedCompany ? true : ["companies_admin", "platform_admin_settings"].includes(id);
+        if (id === "companies_admin" || id === "platform_admin_settings") return false;
         if (isAdministrativeUser && hasSelectedCompany) return true;
         if (!companyCanPage(id, "can_view")) return false;
 	      if (id === "dashboard") return hasAnyPermission(treeRolePermissions, role, dashboardPermissionNodes, "can_view");
@@ -1031,6 +1052,7 @@ export default function App() {
 	      setSettings,
 	      role,
 	      currentUser,
+        setCurrentUserState,
         currentCompany: company,
         companyPermissions,
         companyCanPage,
@@ -1066,7 +1088,7 @@ export default function App() {
     return <div className="grid min-h-screen place-items-center bg-slate-50 p-5" dir="rtl"><div className="panel max-w-xl p-6 text-center"><ShieldCheck className="mx-auto mb-3 text-brand-700" /><h2 className="text-xl font-extrabold">لا توجد صلاحيات مفعلة لهذا المستخدم</h2><button onClick={() => { localStorage.removeItem("ep_logged"); localStorage.removeItem("ep_role"); clearTenantSession(); setCurrentCompany(null); setCurrentUserState(null); setLogged(false); }} className="btn-primary mt-5">تسجيل الخروج</button></div></div>;
   }
   const availableModulePages = (moduleKey) =>
-    getModulePages(moduleKey).filter((item) => {
+    moduleKey === "platform" && !platformAdmin ? [] : getModulePages(moduleKey).filter((item) => {
       if (isAdministrativeUser) return item.status !== "placeholder" || isAdminLikeRole(role) || platformAdmin;
       return item.status === "placeholder"
         ? isAdminLikeRole(role) || platformAdmin
@@ -1265,6 +1287,7 @@ export default function App() {
           <>
           {isPlaceholderPage(activePage) && <ErpPlaceholderPage pageKey={activePage} moduleKey={selectedModuleKey} onBack={() => switchErpModule("hr")} />}{" "}
           {activePage === "companies_admin" && <CompaniesAdminPage {...p} />}{" "}
+          {activePage === "platform_admin_settings" && <PlatformAdminSettingsPage {...p} />}{" "}
           {activePage === "dashboard" && <Dashboard {...p} />}{" "}
           {activePage === "employees" && <EnhancedEmployees {...p} />}{" "}
           {activePage === "templates" && <EnhancedTemplates {...p} />}{" "}
@@ -1355,7 +1378,6 @@ function RolePageDisabled({ onBack }) {
 }
 function Login({ onLogin }) {
   const [companyCode, setCompanyCode] = useState("PUREMONEY"),
-    [loginMode, setLoginMode] = useState("company"),
     [u, setU] = useState(""),
     [pw, setPw] = useState(""),
     [err, setErr] = useState(""),
@@ -1363,8 +1385,7 @@ function Login({ onLogin }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErr("");
-    const isPlatformMode = loginMode === "platform";
-    if (!isPlatformMode && !companyCode.trim()) return setErr("يجب إدخال كود الشركة");
+    if (!companyCode.trim()) return setErr("يجب إدخال كود الشركة");
     if (!u.trim() || !pw) return setErr("يرجى إدخال اسم المستخدم وكلمة المرور.");
     setLoading(true);
     try {
@@ -1372,7 +1393,7 @@ function Login({ onLogin }) {
         u.trim(),
         pw,
         "",
-        isPlatformMode ? "PLATFORM" : companyCode.trim(),
+        companyCode.trim(),
       );
       onLogin(user);
     } catch (error) {
@@ -1394,13 +1415,9 @@ function Login({ onLogin }) {
           <span className="text-sm font-bold text-brand-700">{APP_SHORT_NAME}</span>
           <h1 className="mt-2 text-3xl font-extrabold">تسجيل الدخول</h1>
           <p className="mt-2 text-sm text-slate-500">{APP_SYSTEM_NAME} - {APP_TAGLINE}</p>
-          <div className="mt-6 grid grid-cols-2 rounded-xl bg-slate-100 p-1 text-sm font-extrabold">
-            <button type="button" onClick={() => setLoginMode("company")} className={`rounded-lg px-3 py-2 ${loginMode === "company" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500"}`}>دخول الشركات</button>
-            <button type="button" onClick={() => setLoginMode("platform")} className={`rounded-lg px-3 py-2 ${loginMode === "platform" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500"}`}>دخول مشرف المنصة</button>
-          </div>
           <div className="mt-8 space-y-5">
-            {loginMode === "company" && <Label t="كود الشركة أو اسم الشركة"><input value={companyCode} onChange={(e) => setCompanyCode(e.target.value.toUpperCase())} autoComplete="organization" placeholder="PUREMONEY" className="field mt-2" /></Label>}
-            <Label t={loginMode === "platform" ? "اسم مشرف المنصة" : "اسم المستخدم أو الرقم الوظيفي"}><input value={u} onChange={(e) => setU(e.target.value)} autoComplete="username" placeholder={loginMode === "platform" ? "platform" : "admin أو EMP-001"} className="field mt-2" /></Label>
+            <Label t="كود الشركة أو اسم الشركة"><input value={companyCode} onChange={(e) => setCompanyCode(e.target.value.toUpperCase())} autoComplete="organization" placeholder="PUREMONEY" className="field mt-2" /></Label>
+            <Label t="اسم المستخدم أو الرقم الوظيفي"><input value={u} onChange={(e) => setU(e.target.value)} autoComplete="username" placeholder="admin أو EMP-001" className="field mt-2" /></Label>
             <Label t="كلمة المرور"><input type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" placeholder="أدخل كلمة المرور" className="field mt-2" /></Label>
           </div>
           {err && <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">{err}</p>}
@@ -1412,6 +1429,84 @@ function Login({ onLogin }) {
 }
 
 const uiOnlyMessage = "تم تجهيز العملية في الواجهة، وسيتم ربطها بقاعدة البيانات لاحقًا.";
+
+function PlatformAdminSettingsPage({ currentUser, currentCompany, setCurrentUserState }) {
+  const [form, setForm] = useState({
+    name: currentUser?.name || "",
+    username: currentUser?.username || "",
+    email: currentUser?.email || "",
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const platformAdmin = isPlatformAdminUser(currentUser);
+  if (!platformAdmin) return <RolePageDisabled onBack={() => {}} />;
+  const emailMissing = !String(form.email || "").trim();
+  const save = async (e) => {
+    e.preventDefault();
+    setMessage("");
+    if (!form.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+      setMessage("يرجى إدخال بريد إلكتروني صحيح");
+      return;
+    }
+    if ((form.newPassword || form.confirmPassword || form.currentPassword) && form.newPassword.length < 8) {
+      setMessage("كلمة المرور الجديدة يجب ألا تقل عن 8 أحرف");
+      return;
+    }
+    if (form.newPassword !== form.confirmPassword) {
+      setMessage("تأكيد كلمة المرور غير مطابق");
+      return;
+    }
+    try {
+      setSaving(true);
+      const saved = await adminService.updatePlatformAdminAccount(currentUser, form);
+      const nextUser = { ...currentUser, ...saved, password: "" };
+      setTenantSession({ company: currentCompany || null, user: nextUser });
+      setCurrentUserState?.(nextUser);
+      setForm((prev) => ({ ...prev, currentPassword: "", newPassword: "", confirmPassword: "" }));
+      setMessage("تم حفظ إعدادات مشرف المنصة");
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="space-y-5">
+      <PageHead title="إعدادات مشرف المنصة" desc="Platform Admin Settings" />
+      {emailMissing && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800">
+          يرجى ربط حساب مشرف المنصة ببريد إلكتروني لحماية الحساب.
+        </div>
+      )}
+      <div className="panel p-5">
+        <div className="grid gap-4 md:grid-cols-5">
+          <Info t="الاسم" v={currentUser?.name || "-"} />
+          <Info t="اسم المستخدم" v={currentUser?.username || "-"} />
+          <Info t="البريد الإلكتروني" v={currentUser?.email || "-"} />
+          <Info t="الدور" v={currentUser?.role || "-"} />
+          <Info t="الحالة" v={currentUser?.is_active === false ? "معطل" : "نشط"} />
+        </div>
+      </div>
+      <form onSubmit={save} className="panel space-y-5 p-5">
+        <div className="grid gap-4 md:grid-cols-3">
+          <Label t="اسم مشرف المنصة"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="field mt-2" /></Label>
+          <Label t="اسم المستخدم"><input required value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} className="field mt-2" /></Label>
+          <Label t="البريد الإلكتروني"><input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="field mt-2" /></Label>
+          <Label t="كلمة المرور الحالية"><input type="password" value={form.currentPassword} onChange={(e) => setForm({ ...form, currentPassword: e.target.value })} className="field mt-2" /></Label>
+          <Label t="كلمة المرور الجديدة"><input type="password" value={form.newPassword} onChange={(e) => setForm({ ...form, newPassword: e.target.value })} className="field mt-2" /></Label>
+          <Label t="تأكيد كلمة المرور الجديدة"><input type="password" value={form.confirmPassword} onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })} className="field mt-2" /></Label>
+        </div>
+        {/* Future: implement email verification and secure password reset via Supabase Auth or Edge Function. */}
+        <p className="text-xs text-slate-500">سيتم ربط التحقق من البريد واستعادة كلمة المرور بمزود حقيقي لاحقًا.</p>
+        {message && <div className="rounded-xl bg-slate-50 p-3 text-sm font-bold text-slate-700">{message}</div>}
+        <button disabled={saving} className="btn-primary disabled:cursor-not-allowed disabled:opacity-60"><Save size={17} /> {saving ? "جاري الحفظ..." : "حفظ إعدادات مشرف المنصة"}</button>
+      </form>
+    </div>
+  );
+}
 
 const hrModuleTabs = {
   hr_home: ["نظرة عامة", "طلبات قيد الموافقة", "إجازات الشهر", "إنذارات الشهر", "وظائف شاغرة"],
@@ -1677,6 +1772,7 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
   const [copySource, setCopySource] = useState("");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const [expandedGroups, setExpandedGroups] = useState([]);
   const [loading, setLoading] = useState(false);
   const selectedCompany = companies.find((company) => company.company_id === selectedCompanyId);
   const load = async () => {
@@ -1698,21 +1794,14 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
     });
   };
   const setAll = (value) => {
+    const actionValues = Object.fromEntries(companyPermissionActions.map(([key]) => [key, value]));
     setRows(companyPermissionModules.map(([key, label]) => ({
       company_id: selectedCompanyId,
       permission_key: key,
       permission_label: label,
       module_key: key,
       module_label: label,
-      can_access: value,
-      can_view: value,
-      can_create: value,
-      can_edit: value,
-      can_delete: value,
-      can_approve: value,
-      can_export: value,
-      can_print: value,
-      can_manage: value,
+      ...actionValues,
       is_enabled: value,
     })));
   };
@@ -1791,6 +1880,17 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
       row.group_key === filter;
     return matchesQuery && matchesFilter;
   });
+  const groupedRows = Object.entries(visibleRows.reduce((acc, row) => {
+    const key = row.group_key || row.module_key || "general";
+    if (!acc[key]) acc[key] = { key, label: row.group_label || row.module_label || key, rows: [] };
+    acc[key].rows.push(row);
+    return acc;
+  }, {})).map(([, group]) => ({ ...group, rows: group.rows.sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0)) }));
+  useEffect(() => {
+    if (!expandedGroups.length && groupedRows.length) setExpandedGroups(groupedRows.map((group) => group.key));
+  }, [visibleRows.length]);
+  const isExpanded = (key) => expandedGroups.includes(key);
+  const toggleGroup = (key) => setExpandedGroups((list) => list.includes(key) ? list.filter((item) => item !== key) : [...list, key]);
   return (
     <div className="panel p-4">
       <div className="mb-4 flex flex-wrap items-end gap-3">
@@ -1807,6 +1907,8 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
         </Label>
         <button onClick={copy} disabled={!selectedCompanyId || !copySource || loading} className="btn-secondary">نسخ الصلاحيات</button>
         <button onClick={sync} disabled={!selectedCompanyId || loading} className="btn-secondary">مزامنة الصلاحيات مع الصفحات</button>
+        <button onClick={() => setExpandedGroups(groupedRows.map((group) => group.key))} disabled={!selectedCompanyId || loading} className="btn-secondary">توسيع الكل</button>
+        <button onClick={() => setExpandedGroups([])} disabled={!selectedCompanyId || loading} className="btn-secondary">طي الكل</button>
         <button onClick={() => setAll(true)} disabled={!selectedCompanyId || loading} className="btn-secondary">تحديد الكل</button>
         <button onClick={() => setAll(false)} disabled={!selectedCompanyId || loading} className="btn-secondary">مسح الكل</button>
         <button onClick={reset} disabled={!selectedCompanyId || loading} className="btn-secondary">إعادة الافتراضي</button>
@@ -1826,29 +1928,40 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
           <table>
             <thead>
               <tr>
-                <th>الصفحة</th>
-                <th>المجموعة</th>
+                <th>المستوى / الصفحة</th>
                 <th>مفتاح الصلاحية</th>
                 {companyPermissionActions.map(([, label]) => <th key={label}>{label}</th>)}
               </tr>
             </thead>
             <tbody>
-              {visibleRows.map((row) => (
-                <tr key={row.permission_key}>
-                  <td><b>{row.module_label || row.permission_label}</b>{row.is_duplicate_allowed && <p className="text-xs text-amber-600">صفحة مكررة مسموحة</p>}</td>
-                  <td>{row.group_label || row.group_key}</td>
-                  <td className="font-mono text-xs">{row.permission_key}</td>
-                  {companyPermissionActions.map(([key]) => (
-                    <td key={key} className="text-center">
-                      <input
-                        type="checkbox"
-                        checked={key === "can_access" ? row.can_access && row.is_enabled : Boolean(row[key])}
-                        onChange={(e) => updateRow(row.permission_key, key, e.target.checked)}
-                        className="h-4 w-4 accent-red-800"
-                      />
+              {groupedRows.map((group) => (
+                <React.Fragment key={group.key}>
+                  <tr className="bg-slate-100">
+                    <td colSpan={2 + companyPermissionActions.length}>
+                      <button type="button" onClick={() => toggleGroup(group.key)} className="flex w-full items-center gap-2 text-right font-extrabold text-slate-700">
+                        <ChevronLeft size={16} className={isExpanded(group.key) ? "-rotate-90 transition" : "transition"} />
+                        {group.label}
+                        <span className="text-xs font-bold text-slate-400">({group.rows.length})</span>
+                      </button>
                     </td>
+                  </tr>
+                  {isExpanded(group.key) && group.rows.map((row) => (
+                    <tr key={row.permission_key}>
+                      <td className="min-w-[220px]"><b>{row.module_label || row.permission_label}</b><p className="text-xs text-slate-400">{row.permission_label}</p>{row.is_duplicate_allowed && <p className="text-xs text-amber-600">صفحة مكررة مسموحة</p>}</td>
+                      <td className="font-mono text-xs">{row.permission_key}</td>
+                      {companyPermissionActions.map(([key]) => (
+                        <td key={key} className="text-center">
+                          <input
+                            type="checkbox"
+                            checked={key === "can_access" ? row.can_access && row.is_enabled : Boolean(row[key])}
+                            onChange={(e) => updateRow(row.permission_key, key, e.target.checked)}
+                            className="h-4 w-4 accent-red-800"
+                          />
+                        </td>
+                      ))}
+                    </tr>
                   ))}
-                </tr>
+                </React.Fragment>
               ))}
             </tbody>
           </table>
@@ -6961,6 +7074,43 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function PlatformLogin({ onLogin }) {
+  const [u, setU] = useState("platform"),
+    [pw, setPw] = useState(""),
+    [err, setErr] = useState(""),
+    [loading, setLoading] = useState(false);
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setErr("");
+    if (!u.trim() || !pw) return setErr("يرجى إدخال اسم مشرف المنصة وكلمة المرور.");
+    setLoading(true);
+    try {
+      const user = await cloudLoginWithSupabase(u.trim(), pw, "", "PLATFORM");
+      if (!isPlatformAdminUser(user)) throw new Error("هذا المسار مخصص لمشرف المنصة فقط");
+      onLogin(user);
+    } catch (error) {
+      setErr(error.message || "تعذر تسجيل دخول مشرف المنصة.");
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <div className="relative grid min-h-screen place-items-center overflow-hidden bg-[#111319] p-5">
+      <div className="relative w-full max-w-xl overflow-hidden rounded-[28px] bg-white p-8 shadow-2xl sm:p-12">
+        <span className="text-sm font-bold text-brand-700">{APP_SHORT_NAME}</span>
+        <h1 className="mt-2 text-3xl font-extrabold">دخول مشرف المنصة</h1>
+        <p className="mt-2 text-sm text-slate-500">مسار محمي لإدارة المنصة والشركات</p>
+        <form onSubmit={handleSubmit} className="mt-8 space-y-5">
+          <Label t="اسم مستخدم مشرف المنصة"><input value={u} onChange={(e) => setU(e.target.value)} autoComplete="username" placeholder="platform" className="field mt-2" /></Label>
+          <Label t="كلمة المرور"><input type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" placeholder="أدخل كلمة المرور" className="field mt-2" /></Label>
+          {err && <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{err}</p>}
+          <button disabled={loading} className="btn-primary h-12 w-full disabled:cursor-not-allowed disabled:opacity-60">{loading ? "جاري التحقق..." : "دخول مشرف المنصة"} <ArrowUpLeft size={18} /></button>
+        </form>
+      </div>
     </div>
   );
 }

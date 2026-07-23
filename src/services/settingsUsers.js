@@ -67,7 +67,7 @@ export const settingsUsersService = {
     try {
       const payload = userToDb(companyId, user);
       assertUser(payload, mode);
-      if (!isPlatformAdminUser() && isProtectedPlatformUser(payload)) {
+      if (isProtectedPlatformUser(payload)) {
         if (isProtectedPlatformRole(payload.role)) {
           throw new Error("لا يمكن تعيين هذا الدور من داخل إعدادات الشركة");
         }
@@ -102,10 +102,10 @@ export const settingsUsersService = {
     if (!id) throw new Error("لم يتم تحديد المستخدم");
     if (!password) throw new Error("يجب إدخال كلمة المرور الجديدة");
     const companyFilter = isPlatformAdminUser() ? "" : `&company_id=eq.${encodeURIComponent(requireCompany(companyId))}`;
-    await supabase.request(`/rest/v1/app_users?user_id=eq.${encodeURIComponent(id)}${companyFilter}`, {
+    await supabase.request(`/rest/v1/app_users?user_id=eq.${encodeURIComponent(id)}&is_platform_admin=eq.false${companyFilter}`, {
       method: "PATCH",
       prefer: "return=minimal",
-      body: JSON.stringify({ password, updated_at: new Date().toISOString() }),
+      body: JSON.stringify({ password, password_changed_at: new Date().toISOString(), updated_at: new Date().toISOString() }),
     });
     return { user_id: id };
   },

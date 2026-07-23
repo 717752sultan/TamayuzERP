@@ -79,6 +79,8 @@ const userFromDb = (row = {}, employee = null) => {
     email: row.email || employee?.email || "",
     phone: row.phone || employee?.phone || "",
     is_active: row.is_active !== false,
+    is_platform_admin: row.is_platform_admin === true,
+    is_protected: row.is_protected === true,
     created_at: row.created_at || "",
     updated_at: row.updated_at || "",
   };
@@ -282,7 +284,7 @@ export const adminService = {
         const employee = employees.find((item) => item.id === row.employee_id || item.employee_id === row.employee_id);
         return userFromDb(row, employee);
       });
-      return isPlatformAdminUser() ? rows : rows.filter((row) => !isProtectedPlatformUser(row));
+      return rows.filter((row) => !isProtectedPlatformUser(row));
     } catch (error) {
       console.error("Users permissions module error:", error);
       throw new Error("ظپط´ظ„ طھط­ظ…ظٹظ„ ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ…ط³طھط®ط¯ظ…ظٹظ† ظ…ظ† Supabase: " + error.message);
@@ -299,7 +301,7 @@ export const adminService = {
       const isNewUser = !user.user_id && !user.id;
       if (isNewUser && !payload.password) throw new Error("يجب إدخال كلمة المرور");
       if (!payload.password) delete payload.password;
-      if (!isPlatformAdminUser() && (isProtectedPlatformUser(payload) || isProtectedPlatformRole(payload.role))) {
+      if (isProtectedPlatformUser(payload) || isProtectedPlatformRole(payload.role)) {
         throw new Error("ظ„ط§ ظٹظ…ظƒظ† ط­ظپط¸ ظ‡ط°ط§ ط§ظ„ظ…ط³طھط®ط¯ظ… ظ…ظ† ط¯ط§ط®ظ„ ط¥ط¹ط¯ط§ط¯ط§طھ ط§ظ„ط´ط±ظƒط©");
       }
 
@@ -326,15 +328,68 @@ export const adminService = {
       const password = String(newPassword || "").trim();
       if (!id) throw new Error("لم يتم تحديد المستخدم");
       if (!password) throw new Error("يجب إدخال كلمة المرور الجديدة");
-      await supabase.request(`/rest/v1/app_users?user_id=eq.${encodeURIComponent(id)}`, {
+      await supabase.request(`/rest/v1/app_users?user_id=eq.${encodeURIComponent(id)}&is_platform_admin=eq.false`, {
         method: "PATCH",
         prefer: "return=minimal",
-        body: JSON.stringify({ password, updated_at: new Date().toISOString() }),
+        body: JSON.stringify({ password, password_changed_at: new Date().toISOString(), updated_at: new Date().toISOString() }),
       });
       return { user_id: id };
     } catch (error) {
       console.error("Users permissions module error:", error);
       throw new Error("فشل إعادة تعيين كلمة المرور: " + error.message);
+    }
+  },
+  async updatePlatformAdminAccount(currentUser = {}, changes = {}) {
+    try {
+      if (!isPlatformAdminUser(currentUser)) throw new Error("هذه الصفحة مخصصة لمشرف المنصة فقط");
+      const userId = String(currentUser.user_id || currentUser.id || "").trim();
+      if (!userId) throw new Error("لم يتم تحديد حساب مشرف المنصة");
+      const nextUsername = String(changes.username || currentUser.username || "").trim();
+      const nextEmail = String(changes.email || "").trim();
+      const nextName = String(changes.name || currentUser.name || "").trim();
+      const currentPassword = String(changes.currentPassword || "");
+      const newPassword = String(changes.newPassword || "");
+      const confirmPassword = String(changes.confirmPassword || "");
+      if (!nextUsername) throw new Error("اسم المستخدم مطلوب");
+      if (!nextEmail) throw new Error("البريد الإلكتروني مطلوب");
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) throw new Error("صيغة البريد الإلكتروني غير صحيحة");
+      const payload = {
+        username: nextUsername,
+        email: nextEmail,
+        name: nextName,
+        employee_name: nextName,
+        is_platform_admin: true,
+        is_protected: true,
+        updated_at: new Date().toISOString(),
+      };
+      if (newPassword || confirmPassword || currentPassword) {
+        if (!currentPassword) throw new Error("كلمة المرور الحالية مطلوبة");
+        if (!newPassword) throw new Error("كلمة المرور الجديدة مطلوبة");
+        if (newPassword.length < 8) throw new Error("كلمة المرور الجديدة يجب ألا تقل عن 8 أحرف");
+        if (newPassword !== confirmPassword) throw new Error("تأكيد كلمة المرور غير مطابق");
+        const verified = await supabase.rpc("verify_app_login", {
+          p_company_code: "PLATFORM",
+          p_login: currentUser.username || "platform",
+          p_password: currentPassword,
+        });
+        if (!verified?.length) throw new Error("كلمة المرور الحالية غير صحيحة");
+      }
+      await supabase.request(`/rest/v1/app_users?user_id=eq.${encodeURIComponent(userId)}&is_platform_admin=eq.true`, {
+        method: "PATCH",
+        prefer: "return=minimal",
+        body: JSON.stringify(payload),
+      });
+      if (newPassword) {
+        await supabase.request(`/rest/v1/app_users?user_id=eq.${encodeURIComponent(userId)}&is_platform_admin=eq.true`, {
+          method: "PATCH",
+          prefer: "return=minimal",
+          body: JSON.stringify({ password: newPassword, password_changed_at: new Date().toISOString(), updated_at: new Date().toISOString() }),
+        });
+      }
+      return { ...currentUser, ...payload, password: "" };
+    } catch (error) {
+      console.error("Platform admin settings error:", { message: error.message });
+      throw new Error("تعذر حفظ إعدادات مشرف المنصة: " + error.message);
     }
   },
   async listPermissions() {
