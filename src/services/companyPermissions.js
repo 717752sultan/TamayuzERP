@@ -169,37 +169,56 @@ const defaultRow = (companyId, [, , group, page], enableAll = false, options = {
   }, companyId);
 };
 
-const toDb = (row, companyId) => {
+const integerSortOrder = (value, fallback) => {
+  const numericValue = Number(value);
+  return value !== null
+    && value !== undefined
+    && String(value).trim() !== ""
+    && Number.isInteger(numericValue)
+      ? numericValue
+      : fallback;
+};
+
+const optionalText = (value) => {
+  const text = String(value ?? "").trim();
+  return text || null;
+};
+
+// Strict Supabase whitelist. UI-only hierarchy metadata must never leak into
+// company_permissions, and decimal/path values such as "2.1" stay UI-only.
+const toDb = (row, companyId, index = 0) => {
   const normalized = normalizeCompanyPermission(row, companyId);
+  const permissionKey = String(
+    row.permission_key || row.node_key || row.key || normalized.permission_key || "",
+  ).trim();
+  const nodeKey = String(
+    row.node_key || row.permission_key || row.key || permissionKey,
+  ).trim();
   return {
     company_id: normalized.company_id,
-    permission_key: normalized.permission_key,
-    permission_label: normalized.permission_label,
-    module_key: normalized.module_key,
-    module_label: normalized.module_label,
-    group_key: normalized.group_key,
-    group_label: normalized.group_label,
-    route_key: normalized.route_key,
-    can_access: normalized.can_access,
-    can_view: normalized.can_view,
-    can_create: normalized.can_create,
-    can_edit: normalized.can_edit,
-    can_delete: normalized.can_delete,
-    can_approve: normalized.can_approve,
-    can_reject: normalized.can_reject,
-    can_cancel: normalized.can_cancel,
-    can_export: normalized.can_export,
-    can_import: normalized.can_import,
-    can_print: normalized.can_print,
-    can_manage: normalized.can_manage,
-    can_configure: normalized.can_configure,
-    can_reset_user_password: normalized.can_reset_user_password,
-    can_view_sensitive: normalized.can_view_sensitive,
-    can_view_financial: normalized.can_view_financial,
-    is_enabled: normalized.is_enabled,
-    is_official_page: normalized.is_official_page,
-    is_duplicate_allowed: normalized.is_duplicate_allowed,
-    sort_order: normalized.sort_order,
+    permission_key: permissionKey,
+    permission_label: String(row.permission_label || row.label || row.name || normalized.permission_label || "").trim(),
+    node_key: nodeKey,
+    module_key: optionalText(row.module_key || normalized.module_key),
+    page_key: optionalText(row.page_key || row.route_key || normalized.route_key),
+    feature_key: optionalText(row.feature_key),
+    is_enabled: Boolean(normalized.is_enabled),
+    can_view: Boolean(normalized.can_view),
+    can_create: Boolean(normalized.can_create),
+    can_edit: Boolean(normalized.can_edit),
+    can_delete: Boolean(normalized.can_delete),
+    can_approve: Boolean(normalized.can_approve),
+    can_reject: Boolean(normalized.can_reject),
+    can_cancel: Boolean(normalized.can_cancel),
+    can_export: Boolean(normalized.can_export),
+    can_import: Boolean(normalized.can_import),
+    can_print: Boolean(normalized.can_print),
+    can_manage: Boolean(normalized.can_manage),
+    can_configure: Boolean(normalized.can_configure),
+    can_reset_user_password: Boolean(normalized.can_reset_user_password),
+    can_view_sensitive: Boolean(normalized.can_view_sensitive),
+    can_view_financial: Boolean(normalized.can_view_financial),
+    sort_order: integerSortOrder(row.sort_order, index + 1),
     updated_at: new Date().toISOString(),
   };
 };
@@ -290,7 +309,7 @@ export const companyPermissionsService = {
   },
 
   async saveCompanyPermission(companyId, permissionKey, payload = {}) {
-    const row = dedupePermissionRows([toDb({ ...payload, permission_key: permissionKey }, companyId)])[0];
+    const row = dedupePermissionRows([toDb({ ...payload, permission_key: permissionKey }, companyId, 0)])[0];
     let { data, error } = await supabase.from("company_permissions").upsert(row, { onConflict: "company_id,permission_key" }).select().single();
     let schemaCompatibilityWarning = false;
     if (error && isMissingExtendedPermissionColumn(error)) {
@@ -306,7 +325,8 @@ export const companyPermissionsService = {
 
   async bulkSaveCompanyPermissions(companyId, permissions = []) {
     if (!companyId) throw new Error("يجب اختيار الشركة أولاً");
-    const rows = mergeWithDefaultCompanyPermissions(permissions, companyId).map((row) => toDb(row, companyId));
+    const rows = mergeWithDefaultCompanyPermissions(permissions, companyId)
+      .map((row, index) => toDb(row, companyId, index));
     const safeRows = dedupePermissionRows(rows);
     let { data, error } = await supabase.from("company_permissions").upsert(safeRows, { onConflict: "company_id,permission_key" }).select();
     let schemaCompatibilityWarning = false;
@@ -346,7 +366,9 @@ export const companyPermissionsService = {
         .filter(([permissionKey]) => !existingKeys.has(permissionKey))
         .map((item) => defaultRow(companyId, item, false, { enableSensitive: true }));
       if (!missing.length) return { insertedCount: 0, existingCount: existing.length, totalCount: existing.length, duplicateCount: 0, rows: existing };
-      const safeMissingRows = dedupePermissionRows(missing.map((row) => toDb(row, companyId)));
+      const safeMissingRows = dedupePermissionRows(
+        missing.map((row, index) => toDb(row, companyId, index)),
+      );
       const { data, error } = await supabase.from("company_permissions").upsert(safeMissingRows, { onConflict: "company_id,permission_key" }).select();
       if (error) throw error;
       const rows = mergeWithDefaultCompanyPermissions([...(existing || []), ...(data || safeMissingRows)], companyId, { enableSensitive: true });
