@@ -2,7 +2,7 @@ import { pageRegistry, permissionKeyForPage, validateUniquePermissionKeys } from
 import { supabase } from "./supabase";
 
 export const companyPermissionActions = [
-  ["can_access", "تفعيل"],
+  ["is_enabled", "تفعيل"],
   ["can_view", "عرض"],
   ["can_create", "إضافة"],
   ["can_edit", "تعديل"],
@@ -19,6 +19,30 @@ export const companyPermissionActions = [
   ["can_view_sensitive", "بيانات حساسة"],
   ["can_view_financial", "بيانات مالية"],
 ];
+
+export const companyPermissionChildActionKeys = companyPermissionActions
+  .map(([key]) => key)
+  .filter((key) => !["is_enabled", "can_view"].includes(key));
+
+export const applyCompanyPermissionActionToggle = (row = {}, actionKey, checked) => {
+  const value = checked === true;
+  if (actionKey === "can_view") {
+    if (value) {
+      return { ...row, is_enabled: true, can_access: true, can_view: true };
+    }
+    return {
+      ...row,
+      can_view: false,
+      ...Object.fromEntries(companyPermissionChildActionKeys.map((key) => [key, false])),
+    };
+  }
+  if (companyPermissionChildActionKeys.includes(actionKey)) {
+    return value
+      ? { ...row, is_enabled: true, can_access: true, can_view: true, [actionKey]: true }
+      : { ...row, [actionKey]: false };
+  }
+  return { ...row, [actionKey]: value };
+};
 
 validateUniquePermissionKeys(pageRegistry);
 
@@ -72,7 +96,9 @@ const moduleMeta = (permissionKey) => {
 export const normalizeCompanyPermission = (row = {}, companyId = "") => {
   const permissionKey = String(row.permission_key || row.module_key || row.route_key || "").trim();
   const meta = moduleMeta(permissionKey);
-  const enabled = row.is_enabled !== false && row.can_access !== false;
+  const enabled = row.is_enabled === true;
+  const hasEnabledChildAction = companyPermissionChildActionKeys.some((key) => row[key] === true);
+  const canView = enabled && (row.can_view === true || hasEnabledChildAction);
   return {
     id: row.id,
     company_id: String(row.company_id || companyId || "").trim(),
@@ -84,21 +110,21 @@ export const normalizeCompanyPermission = (row = {}, companyId = "") => {
     group_label: row.group_label || meta.group_label,
     route_key: row.route_key || meta.route_key,
     can_access: enabled,
-    can_view: row.can_view !== false && enabled,
-    can_create: row.can_create === true,
-    can_edit: row.can_edit === true,
-    can_delete: row.can_delete === true,
-    can_approve: row.can_approve === true,
-    can_reject: row.can_reject === true,
-    can_cancel: row.can_cancel === true,
-    can_export: row.can_export === true,
-    can_import: row.can_import === true,
-    can_print: row.can_print === true,
-    can_manage: row.can_manage === true,
-    can_configure: row.can_configure === true,
-    can_reset_user_password: row.can_reset_user_password === true,
-    can_view_sensitive: row.can_view_sensitive === true,
-    can_view_financial: row.can_view_financial === true,
+    can_view: canView,
+    can_create: enabled && row.can_create === true,
+    can_edit: enabled && row.can_edit === true,
+    can_delete: enabled && row.can_delete === true,
+    can_approve: enabled && row.can_approve === true,
+    can_reject: enabled && row.can_reject === true,
+    can_cancel: enabled && row.can_cancel === true,
+    can_export: enabled && row.can_export === true,
+    can_import: enabled && row.can_import === true,
+    can_print: enabled && row.can_print === true,
+    can_manage: enabled && row.can_manage === true,
+    can_configure: enabled && row.can_configure === true,
+    can_reset_user_password: enabled && row.can_reset_user_password === true,
+    can_view_sensitive: enabled && row.can_view_sensitive === true,
+    can_view_financial: enabled && row.can_view_financial === true,
     is_enabled: enabled,
     is_official_page: row.is_official_page !== false,
     is_duplicate_allowed: meta.is_duplicate_allowed === true,

@@ -103,7 +103,7 @@ import { recruitmentService, recruitmentTabs, generateWelcomeMessage } from "./s
 import { generateRecruitmentReports } from "./services/recruitmentReports";
 import { backupService } from "./services/backup";
 import { companiesService } from "./services/companies";
-import { companyPermissionActions, companyPermissionModules, companyPermissionsService, companyCanAccessFromRows, companyCanModuleFromRows, companyCanPageFromRows, mergeWithDefaultCompanyPermissions } from "./services/companyPermissions";
+import { applyCompanyPermissionActionToggle, companyPermissionActions, companyPermissionChildActionKeys, companyPermissionModules, companyPermissionsService, companyCanAccessFromRows, companyCanModuleFromRows, companyCanPageFromRows, mergeWithDefaultCompanyPermissions } from "./services/companyPermissions";
 import { applyCompanyTheme, applyThemeForCurrentCompany, getDefaultTheme, normalizeThemePayload, themePresets, themeService } from "./services/theme";
 import { clearTenantSession, getCurrentCompany, getCurrentUser, isPlatformAdminUser, isProtectedPlatformRole, isProtectedPlatformUser, loadTenantSession, setTenantSession } from "./services/tenant";
 import { assistantModes, pageRegistryByKey } from "./constants/pageRegistry";
@@ -1791,7 +1791,7 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
   const [expandedGroups, setExpandedGroups] = useState([]);
   const [loading, setLoading] = useState(false);
   const selectedCompany = companies.find((company) => company.company_id === selectedCompanyId);
-  const childActionKeys = companyPermissionActions.map(([key]) => key).filter((key) => key !== "can_access");
+  const pagePermissionKeys = ["can_view", ...companyPermissionChildActionKeys];
   const load = async () => {
     if (!selectedCompanyId) return setRows([]);
     setLoading(true);
@@ -1807,13 +1807,16 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
   const updateAction = (permissionKey, key, value) => {
     setRows((list) => {
       const merged = mergeWithDefaultCompanyPermissions(list, selectedCompanyId);
-      return merged.map((row) => row.permission_key === permissionKey ? { ...row, [key]: value } : row);
+      return merged.map((row) => row.permission_key === permissionKey
+        ? applyCompanyPermissionActionToggle(row, key, value)
+        : row);
     });
   };
   const setPermissionTreeValue = (row, value) => ({
     ...row,
     ...Object.fromEntries(companyPermissionActions.map(([key]) => [key, value])),
     is_enabled: value,
+    can_access: value,
   });
   const togglePage = (permissionKey, value) => {
     setRows((list) => mergeWithDefaultCompanyPermissions(list, selectedCompanyId)
@@ -1914,7 +1917,7 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
     return acc;
   }, {})).map(([, group]) => ({ ...group, rows: group.rows.sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0)) }));
   const pageCheckboxState = (row) => {
-    const values = childActionKeys.map((key) => row[key] === true);
+    const values = pagePermissionKeys.map((key) => row[key] === true);
     const checked = row.is_enabled === true && row.can_access === true && values.every(Boolean);
     const hasAny = row.is_enabled === true || row.can_access === true || values.some(Boolean);
     return { checked, indeterminate: hasAny && !checked };
@@ -2001,7 +2004,7 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
                       <td className="font-mono text-xs">{row.permission_key}</td>
                       {companyPermissionActions.map(([key]) => {
                         const pageState = pageCheckboxState(row);
-                        const isPageCheckbox = key === "can_access";
+                        const isPageCheckbox = key === "is_enabled";
                         return (
                         <td key={key} className="text-center">
                           <input
