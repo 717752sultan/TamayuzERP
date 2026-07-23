@@ -111,6 +111,7 @@ import { APP_BRAND_NAME, APP_DESCRIPTION, APP_OFFICIAL_NAME, APP_REPORT_SUBTITLE
 import { buildReportBrandingHtml } from "./services/reportBranding";
 import { ERP_MODULES, ERP_PAGE_BY_KEY, ERP_PAGE_BY_ROUTE, buildGroupedNavigation, getModuleForPage, getModulePages, isPlaceholderPage } from "./constants/moduleRegistry";
 import HRFoundationPage from "./components/hr/HRFoundationPage";
+import HRExecutiveDashboard from "./components/hr/HRExecutiveDashboard";
 import SystemSettingsPage from "./components/settings/SystemSettingsPage";
 import GroupedSidebarNav from "./components/navigation/GroupedSidebarNav";
 const icons = {
@@ -1315,7 +1316,8 @@ export default function App() {
 	          {activePage === "reports" && <EnhancedReports {...p} />}{" "}
 	          {activePage === "settings" && <SettingsPage {...p} />}
           {activePage === "system_settings" && <SystemSettingsPage {...p} />}
-          {["hr_home", "hr_org_chart", "hr_settings"].includes(activePage) && <HRFoundationPage {...p} pageKey={activePage} />}
+          {activePage === "hr_home" && <HRExecutiveDashboard {...p} />}
+          {["hr_org_chart", "hr_settings"].includes(activePage) && <HRFoundationPage {...p} pageKey={activePage} />}
           {genericHrPageKeys.has(activePage) && <HRModulePage pageKey={activePage} currentCompany={company} can={p.can} />}
           </>
           )}
