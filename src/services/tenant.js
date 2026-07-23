@@ -63,7 +63,7 @@ export const normalizeTenantUser = (row = {}, company = {}) => {
   const inheritCompanyContext = !platformAdmin;
   return ({
   user_id: row.user_id || row.id || row.username || "",
-  id: row.user_id || row.id || row.username || "",
+  id: row.id || row.user_id || row.username || "",
   name: row.name || row.employee_name || row.username || "",
   username: row.username || "",
   role: row.role || "الموظف",

@@ -73,6 +73,15 @@ export const settingsUsersService = {
         }
         throw new Error("هذا المستخدم محمي ولا يمكن تعديله من إعدادات الشركة");
       }
+      if (mode !== "add") {
+        const targetRows = await supabase.select(
+          "app_users",
+          `user_id=eq.${encodeURIComponent(payload.user_id)}&select=id,is_platform_admin&limit=1`,
+        );
+        if (targetRows?.[0]?.is_platform_admin === true) {
+          throw new Error("حساب مشرف المنصة محمي ولا يمكن تعديله من إعدادات الشركة");
+        }
+      }
       if (mode !== "add" && !payload.password) delete payload.password;
       const { data, error } = await supabase.from("app_users").upsert(payload, { onConflict: "user_id" }).select().single();
       if (error) throw error;

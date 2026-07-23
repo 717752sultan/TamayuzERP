@@ -1448,7 +1448,7 @@ function PlatformAdminSettingsPage({ currentUser, currentCompany, setCurrentUser
     e.preventDefault();
     setMessage("");
     if (!form.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
-      setMessage("يرجى إدخال بريد إلكتروني صحيح");
+      setMessage("البريد الإلكتروني غير صحيح");
       return;
     }
     if ((form.newPassword || form.confirmPassword || form.currentPassword) && form.newPassword.length < 8) {
@@ -1461,12 +1461,24 @@ function PlatformAdminSettingsPage({ currentUser, currentCompany, setCurrentUser
     }
     try {
       setSaving(true);
-      const saved = await adminService.updatePlatformAdminAccount(currentUser, form);
-      const nextUser = { ...currentUser, ...saved, password: "" };
-      setTenantSession({ company: currentCompany || null, user: nextUser });
+      const result = await adminService.updatePlatformAdminAccount(currentUser, form);
+      const session = setTenantSession({
+        company: currentCompany?.company_id ? currentCompany : null,
+        user: result.user,
+      });
+      const nextUser = session.currentUser || result.user;
       setCurrentUserState?.(nextUser);
-      setForm((prev) => ({ ...prev, currentPassword: "", newPassword: "", confirmPassword: "" }));
-      setMessage("تم حفظ إعدادات مشرف المنصة");
+      setForm({
+        name: nextUser.name || "",
+        username: nextUser.username || "",
+        email: nextUser.email || "",
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+      });
+      setMessage(result.passwordChanged
+        ? "تم تحديث بيانات مشرف المنصة بنجاح\nتم تغيير كلمة المرور بنجاح"
+        : "تم تحديث بيانات مشرف المنصة بنجاح");
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -1501,7 +1513,7 @@ function PlatformAdminSettingsPage({ currentUser, currentCompany, setCurrentUser
         </div>
         {/* Future: implement email verification and secure password reset via Supabase Auth or Edge Function. */}
         <p className="text-xs text-slate-500">سيتم ربط التحقق من البريد واستعادة كلمة المرور بمزود حقيقي لاحقًا.</p>
-        {message && <div className="rounded-xl bg-slate-50 p-3 text-sm font-bold text-slate-700">{message}</div>}
+        {message && <div className="whitespace-pre-line rounded-xl bg-slate-50 p-3 text-sm font-bold text-slate-700">{message}</div>}
         <button disabled={saving} className="btn-primary disabled:cursor-not-allowed disabled:opacity-60"><Save size={17} /> {saving ? "جاري الحفظ..." : "حفظ إعدادات مشرف المنصة"}</button>
       </form>
     </div>

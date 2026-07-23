@@ -86,6 +86,59 @@ const userFromDb = (row = {}, employee = null) => {
   };
 };
 
+const platformUserSelect = [
+  "id",
+  "user_id",
+  "name",
+  "username",
+  "email",
+  "role",
+  "employee_id",
+  "company_id",
+  "company_code",
+  "is_platform_admin",
+  "is_active",
+  "created_at",
+  "updated_at",
+].join(",");
+
+const rpcUser = (result) => {
+  const first = Array.isArray(result) ? result[0] || null : result;
+  if (!first) return null;
+  const payload = first.user || first.user_data || first.data || first;
+  return Array.isArray(payload) ? payload[0] || null : payload;
+};
+
+const platformAccountFromDb = (row = {}, currentUser = {}) => ({
+  ...currentUser,
+  id: row.id || currentUser.id || "",
+  user_id: row.user_id || currentUser.user_id || row.id || "",
+  name: row.name || row.username || "",
+  username: row.username || "",
+  email: row.email || "",
+  role: row.role || currentUser.role || "مشرف النظام العام",
+  employeeId: row.employee_id || currentUser.employeeId || "",
+  employee_id: row.employee_id || currentUser.employee_id || "",
+  company_id: row.company_id || currentUser.company_id || "",
+  company_code: row.company_code || currentUser.company_code || "",
+  is_platform_admin: row.is_platform_admin === true,
+  is_active: row.is_active !== false,
+  created_at: row.created_at || currentUser.created_at || "",
+  updated_at: row.updated_at || "",
+});
+
+const platformSettingsMessages = new Set([
+  "كلمة المرور الحالية غير صحيحة",
+  "البريد الإلكتروني غير صحيح",
+  "اسم المستخدم مستخدم مسبقًا",
+  "اسم المستخدم مطلوب",
+  "البريد الإلكتروني مطلوب",
+  "كلمة المرور الحالية مطلوبة",
+  "كلمة المرور الجديدة مطلوبة",
+  "كلمة المرور الجديدة يجب ألا تقل عن 8 أحرف",
+  "تأكيد كلمة المرور غير مطابق",
+]);
+
 export const normalizeAppUserForDb = (user = {}, selectedEmployee = null) => {
   const role = String(user.role || "ط§ظ„ظ…ظˆط¸ظپ").trim();
   const admin = isAdminRole(role);
@@ -304,6 +357,15 @@ export const adminService = {
       if (isProtectedPlatformUser(payload) || isProtectedPlatformRole(payload.role)) {
         throw new Error("ظ„ط§ ظٹظ…ظƒظ† ط­ظپط¸ ظ‡ط°ط§ ط§ظ„ظ…ط³طھط®ط¯ظ… ظ…ظ† ط¯ط§ط®ظ„ ط¥ط¹ط¯ط§ط¯ط§طھ ط§ظ„ط´ط±ظƒط©");
       }
+      if (!isNewUser) {
+        const targetRows = await supabase.select(
+          "app_users",
+          `user_id=eq.${encodeURIComponent(payload.user_id)}&select=id,is_platform_admin&limit=1`,
+        );
+        if (targetRows?.[0]?.is_platform_admin === true) {
+          throw new Error("حساب مشرف المنصة محمي ولا يمكن تعديله من إدارة مستخدمي الشركة");
+        }
+      }
 
       const existing = await this.listUsers().catch(() => []);
       const sameUser = (row) => String(row.user_id || row.id) === String(payload.user_id);
@@ -342,8 +404,19 @@ export const adminService = {
   async updatePlatformAdminAccount(currentUser = {}, changes = {}) {
     try {
       if (!isPlatformAdminUser(currentUser)) throw new Error("هذه الصفحة مخصصة لمشرف المنصة فقط");
-      const userId = String(currentUser.user_id || currentUser.id || "").trim();
-      if (!userId) throw new Error("لم يتم تحديد حساب مشرف المنصة");
+
+      const platformRows = await supabase.request(
+        `/rest/v1/app_users?is_platform_admin=eq.true&select=${platformUserSelect}`,
+        { skipTenantScope: true },
+      );
+      const currentId = String(currentUser.id || "").trim();
+      const currentUserId = String(currentUser.user_id || "").trim();
+      const account = (platformRows || []).find((row) => String(row.id || "") === currentId)
+        || (platformRows || []).find((row) => String(row.user_id || "") === currentUserId)
+        || (platformRows || []).find((row) => String(row.username || "") === String(currentUser.username || ""));
+      const databaseId = String(account?.id || "").trim();
+      if (!databaseId || !account?.is_platform_admin) throw new Error("لم يتم تحديد حساب مشرف المنصة");
+
       const nextUsername = String(changes.username || currentUser.username || "").trim();
       const nextEmail = String(changes.email || "").trim();
       const nextName = String(changes.name || currentUser.name || "").trim();
@@ -352,44 +425,79 @@ export const adminService = {
       const confirmPassword = String(changes.confirmPassword || "");
       if (!nextUsername) throw new Error("اسم المستخدم مطلوب");
       if (!nextEmail) throw new Error("البريد الإلكتروني مطلوب");
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) throw new Error("صيغة البريد الإلكتروني غير صحيحة");
-      const payload = {
-        username: nextUsername,
-        email: nextEmail,
-        name: nextName,
-        employee_name: nextName,
-        is_platform_admin: true,
-        is_protected: true,
-        updated_at: new Date().toISOString(),
-      };
-      if (newPassword || confirmPassword || currentPassword) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) throw new Error("البريد الإلكتروني غير صحيح");
+
+      const duplicateRows = await supabase.request(
+        `/rest/v1/app_users?username=eq.${encodeURIComponent(nextUsername)}&id=neq.${encodeURIComponent(databaseId)}&select=id&limit=1`,
+        { skipTenantScope: true },
+      );
+      if (duplicateRows?.length) throw new Error("اسم المستخدم مستخدم مسبقًا");
+
+      const passwordChanged = Boolean(newPassword || confirmPassword || currentPassword);
+      if (passwordChanged) {
         if (!currentPassword) throw new Error("كلمة المرور الحالية مطلوبة");
         if (!newPassword) throw new Error("كلمة المرور الجديدة مطلوبة");
         if (newPassword.length < 8) throw new Error("كلمة المرور الجديدة يجب ألا تقل عن 8 أحرف");
         if (newPassword !== confirmPassword) throw new Error("تأكيد كلمة المرور غير مطابق");
         const verified = await supabase.rpc("verify_app_login", {
           p_company_code: "PLATFORM",
-          p_login: currentUser.username || "platform",
+          p_login: account.username,
           p_password: currentPassword,
         });
-        if (!verified?.length) throw new Error("كلمة المرور الحالية غير صحيحة");
+        const verifiedAccount = rpcUser(verified);
+        if (
+          !verifiedAccount
+          || String(verifiedAccount.id || "") !== databaseId
+          || !isPlatformAdminUser(verifiedAccount)
+        ) {
+          throw new Error("كلمة المرور الحالية غير صحيحة");
+        }
       }
-      await supabase.request(`/rest/v1/app_users?user_id=eq.${encodeURIComponent(userId)}&is_platform_admin=eq.true`, {
+
+      const now = new Date().toISOString();
+      const rowScope = `id=eq.${encodeURIComponent(databaseId)}&company_id=eq.${encodeURIComponent(account.company_id)}&is_platform_admin=eq.true`;
+      const profileRows = await supabase.request(`/rest/v1/app_users?${rowScope}&select=${platformUserSelect}`, {
         method: "PATCH",
-        prefer: "return=minimal",
-        body: JSON.stringify(payload),
+        prefer: "return=representation",
+        body: JSON.stringify({
+          name: nextName,
+          username: nextUsername,
+          email: nextEmail,
+          updated_at: now,
+        }),
       });
-      if (newPassword) {
-        await supabase.request(`/rest/v1/app_users?user_id=eq.${encodeURIComponent(userId)}&is_platform_admin=eq.true`, {
+      if (!profileRows?.length) throw new Error("لم يتم تحديث حساب مشرف المنصة");
+
+      if (passwordChanged) {
+        const passwordRows = await supabase.request(`/rest/v1/app_users?${rowScope}&select=id`, {
           method: "PATCH",
-          prefer: "return=minimal",
-          body: JSON.stringify({ password: newPassword, password_changed_at: new Date().toISOString(), updated_at: new Date().toISOString() }),
+          prefer: "return=representation",
+          body: JSON.stringify({
+            password: newPassword,
+            password_changed_at: now,
+            updated_at: now,
+          }),
         });
+        if (!passwordRows?.length) throw new Error("لم يتم تغيير كلمة مرور مشرف المنصة");
       }
-      return { ...currentUser, ...payload, password: "" };
+
+      const refreshedRows = await supabase.select(
+        "app_users",
+        `id=eq.${encodeURIComponent(databaseId)}&company_id=eq.${encodeURIComponent(account.company_id)}&is_platform_admin=eq.true&select=${platformUserSelect}&limit=1`,
+      );
+      if (!refreshedRows?.length) throw new Error("تعذر إعادة تحميل حساب مشرف المنصة");
+      return {
+        user: platformAccountFromDb(refreshedRows[0], currentUser),
+        passwordChanged,
+      };
     } catch (error) {
       console.error("Platform admin settings error:", { message: error.message });
-      throw new Error("تعذر حفظ إعدادات مشرف المنصة: " + error.message);
+      const message = String(error.message || "");
+      if (platformSettingsMessages.has(message)) throw new Error(message);
+      if (message.toLowerCase().includes("duplicate") || message.includes("app_users_username")) {
+        throw new Error("اسم المستخدم مستخدم مسبقًا");
+      }
+      throw new Error("تعذر حفظ إعدادات مشرف المنصة: " + message);
     }
   },
   async listPermissions() {

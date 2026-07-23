@@ -51,10 +51,13 @@ export const supabase = {
   config: getConfig,
   async request(path, options = {}) {
     const { url } = assertConfig();
-    const scopedPath = appendTenantFilterToPath(path, options.method || "GET");
+    const { skipTenantScope = false, ...requestOptions } = options;
+    const scopedPath = skipTenantScope
+      ? path
+      : appendTenantFilterToPath(path, requestOptions.method || "GET");
     const res = await fetch(`${url}${scopedPath}`, {
-      ...options,
-      headers: { ...headers(options.prefer), ...(options.headers || {}) },
+      ...requestOptions,
+      headers: { ...headers(requestOptions.prefer), ...(requestOptions.headers || {}) },
     });
     const text = await res.text();
     const data = text ? JSON.parse(text) : null;
