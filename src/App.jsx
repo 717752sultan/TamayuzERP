@@ -95,7 +95,7 @@ import { kpiCalculationService } from "./services/kpiCalculation";
 import { aiAssistantService } from "./services/aiAssistant";
 import { settingsBranchesService } from "./services/settingsBranches";
 import { settingsCurrenciesService } from "./services/settingsCurrencies";
-import { settingsUsersService } from "./services/settingsUsers";
+import { settingsUsersService, settingsUserFromDb } from "./services/settingsUsers";
 import { systemSettingsService } from "./services/systemSettings";
 import { hrRecordsService } from "./services/hrRecords";
 import { treePermissionsService, permissionActions, dataScopes, departmentOptions, flattenPermissionTree, normalizeTreePermission } from "./services/treePermissions";
@@ -5268,6 +5268,7 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations, settings, 
         <EmployeeDetailsModal
           employee={detailsEmployee}
           close={() => setDetailsEmployee(null)}
+          setEmployees={setEmployees}
           onEdit={() => {
             setEditing(detailsEmployee);
             setDetailsEmployee(null);
@@ -5283,12 +5284,22 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations, settings, 
 	  );
 	}
 	
-function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCompany, can }) {
-  const platformAdmin = isPlatformAdminUser() || currentUser?.is_platform_admin === true;
+function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCompany, can, setEmployees }) {
+  const [activePanel, setActivePanel] = useState("profile");
+  const [panelRows, setPanelRows] = useState([]);
+  const [panelLoading, setPanelLoading] = useState(false);
+  const [panelMessage, setPanelMessage] = useState("");
+  const [users, setUsers] = useState([]);
+  const [linkForm, setLinkForm] = useState({ user_id: "", username: "", role: "الموظف" });
+  const [passwordForm, setPasswordForm] = useState({ user_id: "", password: "", confirm: "" });
+  const platformAdmin = isPlatformAdminUser(currentUser) || currentUser?.is_platform_admin === true;
   const sameCompany = platformAdmin || !currentCompany?.company_id || !employee?.company_id || employee.company_id === currentCompany.company_id;
   const canEditEmployee = sameCompany && (platformAdmin || can?.("employees", "can_edit") !== false);
+  const canDeactivateEmployee = sameCompany && (platformAdmin || can?.("employees", "can_delete") === true || can?.("employees", "can_manage") === true || can?.("employees", "can_edit") === true);
   const canViewFinancial = platformAdmin || can?.("employees", "can_view_financial") === true || can?.("hr_salary", "can_view_financial") === true;
   const canResetPassword = sameCompany && (platformAdmin || can?.("users_permissions", "can_reset_user_password") === true || can?.("system_users", "can_reset_user_password") === true);
+  const companyId = currentCompany?.company_id || employee?.company_id || currentUser?.company_id || "";
+  const linkedUsers = users.filter((user) => String(user.employee_id || "") === String(employee.id || ""));
   const details = [
     ["الرقم الوظيفي", employee.id],
     ["الاسم", employee.name],
@@ -5302,18 +5313,187 @@ function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCom
     ...(canViewFinancial ? [["الراتب", money(employee.salary || 0)]] : []),
     ["الحالة", employee.status],
   ];
-  const disabledAction = !sameCompany;
+
+  const openPanel = async (panel) => {
+    setPanelMessage("");
+    setPanelRows([]);
+    if (!sameCompany && panel !== "profile") {
+      setActivePanel(panel);
+      setPanelMessage("لا يمكنك إدارة موظف تابع لشركة أخرى");
+      return;
+    }
+    if (panel === "financial" && !canViewFinancial) {
+      setActivePanel(panel);
+      setPanelMessage("لا تملك صلاحية عرض البيانات المالية");
+      return;
+    }
+    if (panel === "password" && !canResetPassword) {
+      setActivePanel(panel);
+      setPanelMessage("لا تملك صلاحية تغيير كلمة المرور");
+      return;
+    }
+    setActivePanel(panel);
+    if (panel === "documents") await loadHrPanel("hr_files", "لا توجد وثائق مرفقة لهذا الموظف");
+    if (panel === "movements") setPanelMessage("لا توجد حركات مسجلة لهذا الموظف");
+    if (panel === "dependents") setPanelMessage("لا توجد بيانات تابعين لهذا الموظف");
+    if (panel === "link" || panel === "password") await loadEmployeeUsers(panel);
+  };
+
+  const loadHrPanel = async (pageKey, emptyMessage) => {
+    setPanelLoading(true);
+    try {
+      const result = await hrRecordsService.load(pageKey, companyId);
+      const rows = (result.rows || []).filter((row) =>
+        String(row.employee_id || row.employeeId || "") === String(employee.id || "") ||
+        String(row.employee_name || row.name || "") === String(employee.name || "")
+      );
+      setPanelRows(rows);
+      setPanelMessage(rows.length ? "" : emptyMessage);
+    } catch (error) {
+      setPanelMessage(error.message || emptyMessage);
+    } finally {
+      setPanelLoading(false);
+    }
+  };
+
+  const loadEmployeeUsers = async (panel) => {
+    setPanelLoading(true);
+    try {
+      const rows = platformAdmin
+        ? await supabase.select("app_users", `company_id=eq.${encodeURIComponent(companyId)}&is_platform_admin=eq.false&select=*&order=username.asc`)
+        : await settingsUsersService.loadUsers(companyId);
+      const normalized = (rows || []).map(settingsUserFromDb ? settingsUserFromDb : (row) => row);
+      setUsers(normalized);
+      const linked = normalized.find((user) => String(user.employee_id || "") === String(employee.id || ""));
+      setLinkForm({
+        user_id: linked?.user_id || "",
+        username: linked?.username || "",
+        role: linked?.role || "الموظف",
+      });
+      setPasswordForm((form) => ({ ...form, user_id: linked?.user_id || "" }));
+      if (panel === "password" && !linked) setPanelMessage("لا يوجد حساب مستخدم مرتبط بهذا الموظف");
+    } catch (error) {
+      setPanelMessage(error.message || "تعذر تحميل حسابات المستخدمين");
+    } finally {
+      setPanelLoading(false);
+    }
+  };
+
+  const saveUserLink = async (event) => {
+    event.preventDefault();
+    if (!sameCompany) return setPanelMessage("لا يمكنك إدارة موظف تابع لشركة أخرى");
+    if (!linkForm.user_id && !linkForm.username.trim()) return setPanelMessage("اختر حساباً أو أدخل اسم مستخدم جديد");
+    setPanelLoading(true);
+    try {
+      const existing = users.find((user) => user.user_id === linkForm.user_id);
+      if (existing) {
+        await settingsUsersService.updateUser(companyId, existing.user_id, {
+          ...existing,
+          employee_id: employee.id,
+          employee_name: employee.name,
+          name: employee.name,
+          branch: employee.branch,
+          job: employee.job,
+          phone: employee.phone,
+        });
+      } else {
+        const payload = {
+          user_id: `USR-${Date.now()}`,
+          company_id: companyId,
+          name: employee.name,
+          username: linkForm.username.trim(),
+          role: linkForm.role || "الموظف",
+          employee_id: employee.id,
+          employee_name: employee.name,
+          branch: employee.branch || "",
+          job: employee.job || "",
+          phone: employee.phone || "",
+          is_active: true,
+          is_platform_admin: false,
+          updated_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+        };
+        const { error } = await supabase.from("app_users").upsert(payload, { onConflict: "user_id" }).select().single();
+        if (error) throw error;
+      }
+      setPanelMessage("تم ربط حساب المستخدم بالموظف بنجاح");
+      await loadEmployeeUsers("link");
+    } catch (error) {
+      setPanelMessage(error.message || "تعذر ربط حساب المستخدم");
+    } finally {
+      setPanelLoading(false);
+    }
+  };
+
+  const resetPassword = async (event) => {
+    event.preventDefault();
+    if (!canResetPassword) return setPanelMessage("لا تملك صلاحية تغيير كلمة المرور");
+    if (!passwordForm.user_id) return setPanelMessage("اختر حساب المستخدم أولاً");
+    if (passwordForm.password.length < 8) return setPanelMessage("كلمة المرور يجب ألا تقل عن 8 أحرف");
+    if (passwordForm.password !== passwordForm.confirm) return setPanelMessage("تأكيد كلمة المرور غير مطابق");
+    setPanelLoading(true);
+    try {
+      await settingsUsersService.resetUserPassword(companyId, passwordForm.user_id, passwordForm.password);
+      setPasswordForm({ user_id: passwordForm.user_id, password: "", confirm: "" });
+      setPanelMessage("تم تغيير كلمة المرور بنجاح");
+    } catch (error) {
+      setPanelMessage(error.message || "تعذر تغيير كلمة المرور");
+    } finally {
+      setPanelLoading(false);
+    }
+  };
+
+  const startTermination = async () => {
+    if (!canEditEmployee) return setPanelMessage("لا تملك صلاحية تعديل بيانات الموظف");
+    if (!confirm("هل أنت متأكد من بدء إجراء إنهاء خدمة هذا الموظف؟")) return;
+    setActivePanel("termination");
+    setPanelLoading(true);
+    try {
+      await hrRecordsService.save("hr_termination", companyId, {
+        employee_name: employee.name,
+        branch: employee.branch,
+        termination_type: "إنهاء خدمة",
+        last_working_day: new Date().toISOString().slice(0, 10),
+        reason: "",
+        settlement_amount: 0,
+        clearance_status: "قيد الإجراء",
+        status: "قيد الإجراء",
+        notes: `تم بدء الإجراء من ملف الموظف ${employee.id}`,
+      });
+      setPanelMessage("تم بدء إجراء إنهاء الخدمة بنجاح");
+    } catch (error) {
+      setPanelMessage(error.message || "تعذر بدء إجراء إنهاء الخدمة");
+    } finally {
+      setPanelLoading(false);
+    }
+  };
+
+  const deactivateEmployee = async () => {
+    if (!canDeactivateEmployee) return setPanelMessage("لا تملك صلاحية إلغاء تفعيل الموظف");
+    if (!confirm("هل تريد إلغاء تفعيل هذا الموظف؟")) return;
+    setPanelLoading(true);
+    try {
+      const next = { ...employee, status: "غير نشط", is_active: false };
+      setEmployees?.((list) => list.map((item) => item.id === employee.id ? next : item));
+      setPanelMessage("تم إلغاء تفعيل الموظف بنجاح");
+    } catch (error) {
+      setPanelMessage(error.message || "تعذر إلغاء تفعيل الموظف");
+    } finally {
+      setPanelLoading(false);
+    }
+  };
+
   const actions = [
-    ["عرض", false, () => {}],
+    ["عرض", false, () => openPanel("profile")],
     ["تعديل", !canEditEmployee, onEdit],
-    ["بيانات مالية", !canViewFinancial, () => {}],
-    ["الحركات", disabledAction, () => {}],
-    ["وثائق الموظف", disabledAction, () => {}],
-    ["إنهاء الخدمة", !canEditEmployee, () => {}],
-    ["التابعين", disabledAction, () => {}],
-    ["ربط حساب المستخدم", !canEditEmployee, () => {}],
-    ["تغيير كلمة المرور", !canResetPassword, () => {}],
-    ["إلغاء التفعيل", !canEditEmployee, () => {}],
+    ["بيانات مالية", false, () => openPanel("financial")],
+    ["الحركات", false, () => openPanel("movements")],
+    ["وثائق الموظف", false, () => openPanel("documents")],
+    ["إنهاء الخدمة", !canEditEmployee, startTermination],
+    ["التابعين", false, () => openPanel("dependents")],
+    ["ربط حساب المستخدم", !canEditEmployee, () => openPanel("link")],
+    ["تغيير كلمة المرور", false, () => openPanel("password")],
+    ["إلغاء التفعيل", !canDeactivateEmployee, deactivateEmployee],
   ];
 
   return (
@@ -5351,6 +5531,87 @@ function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCom
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <h4 className="font-extrabold">
+                  {activePanel === "profile" && "عرض ملف الموظف"}
+                  {activePanel === "financial" && "البيانات المالية"}
+                  {activePanel === "movements" && "حركات الموظف"}
+                  {activePanel === "documents" && "وثائق الموظف"}
+                  {activePanel === "termination" && "إنهاء الخدمة"}
+                  {activePanel === "dependents" && "التابعين"}
+                  {activePanel === "link" && "ربط حساب المستخدم"}
+                  {activePanel === "password" && "تغيير كلمة المرور"}
+                </h4>
+                {panelLoading && <span className="mr-auto text-xs font-bold text-slate-400">جاري المعالجة...</span>}
+              </div>
+              {panelMessage && <div className="mb-3 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-700">{panelMessage}</div>}
+              {activePanel === "profile" && (
+                <div className="grid gap-3 text-sm md:grid-cols-3">
+                  <Info t="الموظف" v={employee.name} />
+                  <Info t="الوظيفة" v={employee.job || "غير محدد"} />
+                  <Info t="الفرع" v={employee.branch || "غير محدد"} />
+                </div>
+              )}
+              {activePanel === "financial" && canViewFinancial && (
+                <div className="grid gap-3 md:grid-cols-3">
+                  <Mini label="الراتب الحالي" value={money(employee.salary || 0)} I={Wallet} />
+                  <Mini label="الحالة" value={employee.status || "غير محدد"} I={BadgeCheck} />
+                  <Mini label="تاريخ التوظيف" value={employee.hireDate || employee.hire_date || "غير محدد"} I={CalendarCheck} />
+                </div>
+              )}
+              {(activePanel === "movements" || activePanel === "dependents") && !panelRows.length && !panelLoading && !panelMessage && (
+                <p className="text-sm font-bold text-slate-500">{activePanel === "movements" ? "لا توجد حركات مسجلة لهذا الموظف" : "لا توجد بيانات تابعين لهذا الموظف"}</p>
+              )}
+              {activePanel === "documents" && panelRows.length > 0 && (
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr><th>نوع الوثيقة</th><th>رقم الوثيقة</th><th>تاريخ الإصدار</th><th>تاريخ الانتهاء</th><th>الحالة</th></tr></thead>
+                    <tbody>{panelRows.map((row, index) => <tr key={row.id || row.document_number || index}><td>{row.document_type}</td><td>{row.document_number}</td><td>{row.issue_date}</td><td>{row.expiry_date}</td><td><Status>{row.status || "غير محدد"}</Status></td></tr>)}</tbody>
+                  </table>
+                </div>
+              )}
+              {activePanel === "link" && (
+                <form onSubmit={saveUserLink} className="grid gap-3 md:grid-cols-3">
+                  <Label t="حساب موجود">
+                    <select value={linkForm.user_id} onChange={(e) => setLinkForm({ ...linkForm, user_id: e.target.value, username: "" })} className="field mt-2">
+                      <option value="">إنشاء/اختيار لاحق</option>
+                      {users.map((user) => <option key={user.user_id} value={user.user_id}>{user.username} - {user.employee_name || "غير مرتبط"}</option>)}
+                    </select>
+                  </Label>
+                  <Label t="اسم مستخدم جديد">
+                    <input disabled={!!linkForm.user_id} value={linkForm.username} onChange={(e) => setLinkForm({ ...linkForm, username: e.target.value })} className="field mt-2" />
+                  </Label>
+                  <Label t="الدور">
+                    <select disabled={!!linkForm.user_id} value={linkForm.role} onChange={(e) => setLinkForm({ ...linkForm, role: e.target.value })} className="field mt-2">
+                      {jobs.map((job) => <option key={job}>{job}</option>)}
+                    </select>
+                  </Label>
+                  <div className="md:col-span-3 flex justify-end">
+                    <button disabled={panelLoading} className="btn-primary">ربط الحساب</button>
+                  </div>
+                </form>
+              )}
+              {activePanel === "password" && (
+                <form onSubmit={resetPassword} className="grid gap-3 md:grid-cols-3">
+                  <Label t="حساب المستخدم">
+                    <select value={passwordForm.user_id} onChange={(e) => setPasswordForm({ ...passwordForm, user_id: e.target.value })} className="field mt-2">
+                      <option value="">اختر الحساب</option>
+                      {(linkedUsers.length ? linkedUsers : users).map((user) => <option key={user.user_id} value={user.user_id}>{user.username}</option>)}
+                    </select>
+                  </Label>
+                  <Label t="كلمة المرور الجديدة">
+                    <input type="password" value={passwordForm.password} onChange={(e) => setPasswordForm({ ...passwordForm, password: e.target.value })} className="field mt-2" />
+                  </Label>
+                  <Label t="تأكيد كلمة المرور">
+                    <input type="password" value={passwordForm.confirm} onChange={(e) => setPasswordForm({ ...passwordForm, confirm: e.target.value })} className="field mt-2" />
+                  </Label>
+                  <div className="md:col-span-3 flex justify-end">
+                    <button disabled={panelLoading} className="btn-primary">تغيير كلمة المرور</button>
+                  </div>
+                </form>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               {actions.map(([label, disabled, action]) => (
