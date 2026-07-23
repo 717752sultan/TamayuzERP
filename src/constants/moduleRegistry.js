@@ -76,6 +76,9 @@ const ERP_MODULE_DEFINITIONS = [
 const CANONICAL_HR_PAGE_KEYS = [
   "hr_home",
   "employees",
+  "employees_grid",
+  "employee_effectiveness",
+  "user_activity_logs",
   "hr_org_chart",
   "hr_settings",
   "users_permissions",

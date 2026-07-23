@@ -79,6 +79,7 @@ import { adminService, defaultInventoryPermissions, permissionPages, systemRoles
 import { approvalService, approvalStatuses } from "./services/workflow";
 import { notificationsService } from "./services/notifications";
 import { auditService } from "./services/audit";
+import { activityLogsService } from "./services/activityLogs";
 import { shiftsService, shiftPeriods, calculateShiftHours } from "./services/shifts";
 import { shiftScenariosService, scenarioTypes } from "./services/shiftScenarios";
 import { shiftAssignmentsService, shiftAssignmentStatuses } from "./services/shiftAssignments";
@@ -112,11 +113,15 @@ import { buildReportBrandingHtml } from "./services/reportBranding";
 import { ERP_MODULES, ERP_PAGE_BY_KEY, ERP_PAGE_BY_ROUTE, buildGroupedNavigation, getModuleForPage, getModulePages, isPlaceholderPage } from "./constants/moduleRegistry";
 import HRFoundationPage from "./components/hr/HRFoundationPage";
 import HRExecutiveDashboard from "./components/hr/HRExecutiveDashboard";
+import { EmployeeEffectivenessPage, EmployeesGridPage, UserActivityLogsPage } from "./components/hr/EmployeeSubPages";
 import SystemSettingsPage from "./components/settings/SystemSettingsPage";
 import GroupedSidebarNav from "./components/navigation/GroupedSidebarNav";
 const icons = {
   dashboard: LayoutDashboard,
   employees: Users,
+  employees_grid: Users,
+  employee_effectiveness: UserCheck,
+  user_activity_logs: ClipboardList,
   templates: ClipboardList,
   evaluations: BadgeCheck,
   productivity: Gauge,
@@ -173,6 +178,9 @@ const icons = {
 const fullHrNavItems = [
   ["hr_home", "لوحة الموارد البشرية"],
   ["employees", "قائمة الموظفين"],
+  ["employees_grid", "قائمة الموظفين شبكي"],
+  ["employee_effectiveness", "الموظفون المتعاونون وغير الفعالون"],
+  ["user_activity_logs", "سجلات المستخدمين"],
   ["hr_org_chart", "الهيكل التنظيمي"],
   ["hr_settings", "إعدادات الموارد البشرية"],
   ["users_permissions", "المستخدمون والصلاحيات"],
@@ -654,6 +662,9 @@ const permissionNodeGroups = {
   recruitment: ["recruitment_job_postings", "recruitment_applications", "recruitment_candidate_evaluations", "recruitment_offer_templates", "recruitment_job_offers", "recruitment_contracts", "recruitment_manpower_plans", "recruitment_tests", "recruitment_probation_employees", "recruitment_welcome_messages", "recruitment_reports", "recruitment_settings"],
   settings: ["settings_branches", "settings_currencies", "settings_jobs", "settings_evaluations", "settings_incentives", "system_backup"],
   employees: ["employees_list", "employee_profile", "guarantees"],
+  employees_grid: ["employees_list", "employee_profile"],
+  employee_effectiveness: ["employees_list", "employee_profile", "evaluations"],
+  user_activity_logs: ["audit_logs", "user_activity"],
   reports: ["reports_center", "reports_financial"],
   reports_center: ["reports_center"],
   shifts: ["shift_types", "shift_assignments", "shift_conflicts"],
@@ -738,6 +749,30 @@ export default function App() {
   useEffect(() => {
     syncSettings(settings);
   }, [settings]);
+  useEffect(() => {
+    if (!logged || !page) return;
+    const user = currentUserState || getCurrentUser() || {};
+    const pageMeta = pageRegistryByKey[page] || ERP_PAGE_BY_KEY[page] || ERP_PAGE_BY_ROUTE[page] || {};
+    const financialPage = ["hr_salary", "incentives", "hr_financial_setup"].includes(page);
+    const timer = setTimeout(() => {
+      activityLogsService.logUserActivity({
+        company_id: currentCompany?.company_id || user.company_id,
+        user_id: user.id || user.user_id,
+        username: user.username,
+        user_name: user.name,
+        user_role: user.role,
+        module_key: pageMeta.moduleKey || activeModuleKey,
+        module_name: pageMeta.moduleLabel || "",
+        page_key: page,
+        page_name: pageMeta.label || page,
+        action_type: financialPage ? "financial_view" : "navigation",
+        action_label: financialPage ? "عرض صفحة مالية" : "تنقل بين الصفحات",
+        description: `فتح صفحة ${pageMeta.label || page}`,
+        severity: financialPage ? "حساس" : "منخفض",
+      });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [logged, page, activeModuleKey, currentCompany?.company_id, currentUserState?.id, currentUserState?.user_id, currentUserState?.username]);
   useEffect(() => {
     const canonical = canonicalHrPageAliases[page];
     if (activeModuleKey === "hr" && canonical && canonical !== page) {
@@ -920,6 +955,21 @@ export default function App() {
           localStorage.setItem("ep_role", user.role);
           localStorage.setItem("ep_employee_id", user.employeeId || "");
           localStorage.setItem("ep_logged", "1");
+          activityLogsService.logUserActivity({
+            company_id: user.company_id,
+            user_id: user.id || user.user_id,
+            username: user.username,
+            user_name: user.name,
+            user_role: user.role,
+            module_key: "platform",
+            module_name: "إدارة المنصة",
+            page_key: "platform_login",
+            page_name: "دخول مشرف المنصة",
+            action_type: "login",
+            action_label: "تسجيل دخول ناجح",
+            description: "تم تسجيل دخول مشرف المنصة بنجاح",
+            severity: "متوسط",
+          });
           setLogged(true);
         }}
       />
@@ -943,6 +993,21 @@ export default function App() {
           localStorage.setItem("ep_role", user.role);
           localStorage.setItem("ep_employee_id", user.employeeId || "");
           localStorage.setItem("ep_logged", "1");
+          activityLogsService.logUserActivity({
+            company_id: company?.company_id || user.company_id,
+            user_id: user.id || user.user_id,
+            username: user.username,
+            user_name: user.name,
+            user_role: user.role,
+            module_key: "auth",
+            module_name: "تسجيل الدخول",
+            page_key: "login",
+            page_name: "تسجيل الدخول",
+            action_type: "login",
+            action_label: "تسجيل دخول ناجح",
+            description: "تم تسجيل الدخول إلى النظام بنجاح",
+            severity: "متوسط",
+          });
           setLogged(true);
         }}
       />
@@ -967,6 +1032,13 @@ export default function App() {
         settings={settings}
         setSettings={setSettings}
         onLogout={() => {
+          activityLogsService.logUserActivity({
+            company_id: currentCompany?.company_id,
+            action_type: "logout",
+            action_label: "تسجيل الخروج",
+            description: "تم تسجيل خروج المستخدم",
+            severity: "منخفض",
+          });
           localStorage.removeItem("ep_logged");
           localStorage.removeItem("ep_role");
           localStorage.removeItem("ep_employee_id");
@@ -988,7 +1060,16 @@ export default function App() {
         if (pageKey === "companies_admin" || pageKey === "platform_admin_settings") return platformAdmin;
         if (platformAdmin) return hasSelectedCompany;
         if (!hasSelectedCompany) return false;
-        return companyCanPageFromRows(companyPermissions, pageKey, action);
+        if (["employees_grid", "employee_effectiveness", "user_activity_logs"].includes(pageKey)
+          && !companyCanPageFromRows(companyPermissions, "employees", "can_view")) return false;
+        if (pageKey === "employee_effectiveness"
+          && !companyCanPageFromRows(companyPermissions, "evaluations", "can_view")) return false;
+        const pageAllowed = companyCanPageFromRows(companyPermissions, pageKey, action);
+        if (pageKey !== "user_activity_logs") return pageAllowed;
+        if (action === "can_view_sensitive" || action === "can_manage") return pageAllowed;
+        if (!pageAllowed) return false;
+        return companyCanPageFromRows(companyPermissions, pageKey, "can_view_sensitive")
+          || companyCanPageFromRows(companyPermissions, pageKey, "can_manage");
       },
       companyCanModule = (moduleKey) =>
         platformAdmin ? hasSelectedCompany || moduleKey === "platform" : hasSelectedCompany && companyCanModuleFromRows(companyPermissions, moduleKey),
@@ -1089,7 +1170,7 @@ export default function App() {
   }
   if (permissionsLoading || companyPermissionsLoading) return <LoadingScreen message="جاري تحميل الصلاحيات..." />;
   if (!visibleNavItems.length) {
-    return <div className="grid min-h-screen place-items-center bg-slate-50 p-5" dir="rtl"><div className="panel max-w-xl p-6 text-center"><ShieldCheck className="mx-auto mb-3 text-brand-700" /><h2 className="text-xl font-extrabold">لا توجد صلاحيات مفعلة لهذا المستخدم</h2><button onClick={() => { localStorage.removeItem("ep_logged"); localStorage.removeItem("ep_role"); clearTenantSession(); setCurrentCompany(null); setCurrentUserState(null); setLogged(false); }} className="btn-primary mt-5">تسجيل الخروج</button></div></div>;
+    return <div className="grid min-h-screen place-items-center bg-slate-50 p-5" dir="rtl"><div className="panel max-w-xl p-6 text-center"><ShieldCheck className="mx-auto mb-3 text-brand-700" /><h2 className="text-xl font-extrabold">لا توجد صلاحيات مفعلة لهذا المستخدم</h2><button onClick={() => { activityLogsService.logUserActivity({ company_id: currentCompany?.company_id, action_type: "logout", action_label: "تسجيل الخروج", description: "تم تسجيل خروج المستخدم", severity: "منخفض" }); localStorage.removeItem("ep_logged"); localStorage.removeItem("ep_role"); clearTenantSession(); setCurrentCompany(null); setCurrentUserState(null); setLogged(false); }} className="btn-primary mt-5">تسجيل الخروج</button></div></div>;
   }
   const availableModulePages = (moduleKey) =>
     (moduleKey === "platform" && !platformAdmin) || !companyCanModule(moduleKey) ? [] : getModulePages(moduleKey).filter((item) => {
@@ -1164,6 +1245,13 @@ export default function App() {
           </div>
           <button
             onClick={() => {
+              activityLogsService.logUserActivity({
+                company_id: currentCompany?.company_id,
+                action_type: "logout",
+                action_label: "تسجيل الخروج",
+                description: "تم تسجيل خروج المستخدم",
+                severity: "منخفض",
+              });
               localStorage.removeItem("ep_logged");
               localStorage.removeItem("ep_role");
               localStorage.removeItem("ep_employee_id");
@@ -1295,6 +1383,32 @@ export default function App() {
           {activePage === "platform_admin_settings" && <PlatformAdminSettingsPage {...p} />}{" "}
           {activePage === "dashboard" && <Dashboard {...p} />}{" "}
           {activePage === "employees" && <EnhancedEmployees {...p} />}{" "}
+          {activePage === "employees_grid" && (
+            <EmployeesGridPage
+              {...p}
+              EmployeeDetailsModal={EmployeeDetailsModal}
+              EmployeeModal={EmployeeModal}
+              onEmployeeSaved={(saved, previous) => activityLogsService.logUserActivity({
+                company_id: company.company_id,
+                user_id: currentUser.id || currentUser.user_id,
+                username: currentUser.username,
+                user_name: currentUser.name,
+                user_role: currentUser.role,
+                module_key: "hr",
+                module_name: "الموارد البشرية",
+                page_key: "employees_grid",
+                page_name: "قائمة الموظفين شبكي",
+                action_type: previous ? "update" : "create",
+                action_label: previous ? "تعديل موظف" : "إضافة موظف",
+                description: `${previous ? "تم تعديل" : "تمت إضافة"} سجل الموظف ${saved?.name || saved?.id || ""}`,
+                entity_type: "employee",
+                entity_id: saved?.id,
+                severity: "متوسط",
+              })}
+            />
+          )}{" "}
+          {activePage === "employee_effectiveness" && <EmployeeEffectivenessPage {...p} EmployeeDetailsModal={EmployeeDetailsModal} />}{" "}
+          {activePage === "user_activity_logs" && <UserActivityLogsPage {...p} />}{" "}
           {activePage === "templates" && <EnhancedTemplates {...p} />}{" "}
           {activePage === "evaluations" && <EnhancedEvaluations {...p} />}{" "}
           {activePage === "productivity" && <EnhancedProductivity {...p} />}{" "}
@@ -1474,6 +1588,23 @@ function PlatformAdminSettingsPage({ currentUser, currentCompany, setCurrentUser
       });
       const nextUser = session.currentUser || result.user;
       setCurrentUserState?.(nextUser);
+      activityLogsService.logUserActivity({
+        company_id: currentCompany?.company_id || nextUser.company_id,
+        user_id: nextUser.id || nextUser.user_id,
+        username: nextUser.username,
+        user_name: nextUser.name,
+        user_role: nextUser.role,
+        module_key: "platform",
+        module_name: "إدارة المنصة",
+        page_key: "platform_admin_settings",
+        page_name: "إعدادات مشرف المنصة",
+        action_type: "platform_setting_update",
+        action_label: "تحديث إعدادات مشرف المنصة",
+        description: result.passwordChanged ? "تم تحديث ملف مشرف المنصة وتغيير كلمة المرور" : "تم تحديث ملف مشرف المنصة",
+        entity_type: "platform_admin",
+        entity_id: nextUser.id || nextUser.user_id,
+        severity: result.passwordChanged ? "حساس" : "مرتفع",
+      });
       setForm({
         name: nextUser.name || "",
         username: nextUser.username || "",
@@ -1836,6 +1967,20 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
       setLoading(true);
       const saved = await companyPermissionsService.bulkSaveCompanyPermissions(selectedCompanyId, rows);
       setRows(saved);
+      activityLogsService.logUserActivity({
+        company_id: selectedCompanyId,
+        module_key: "platform",
+        module_name: "إدارة المنصة",
+        page_key: "companies_admin",
+        page_name: "صلاحيات الشركات",
+        action_type: "permission_change",
+        action_label: "حفظ صلاحيات شركة",
+        description: `تم حفظ صلاحيات الشركة ${selectedCompany?.company_name || selectedCompanyId}`,
+        entity_type: "company",
+        entity_id: selectedCompanyId,
+        severity: "حساس",
+        metadata: { permission_rows_count: rows.length },
+      });
       if (saved.schemaCompatibilityWarning) {
         alert("تم حفظ تفعيل الوحدات والصفحات. بعض صلاحيات الإجراءات الإضافية تحتاج تطبيق مسودة أعمدة company_permissions.");
       } else {
@@ -2519,7 +2664,7 @@ function Employees({ employees, setEmployees }) {
     </div>
   );
 }
-function EmployeeModal({ employee, editing, close, save, setEmployees, branchOptions = branches, jobOptions = jobs, managerOptions = [], canViewFinancial = true }) {
+function EmployeeModal({ employee, editing, close, save, setEmployees, branchOptions = branches, jobOptions = jobs, managerOptions = [], canViewFinancial = true, onSaved }) {
   const currentEmployee = employee || editing;
   const availableBranches = [...new Set([currentEmployee?.branch, ...(branchOptions || []), ...branches].filter(Boolean))];
   const availableJobs = [...new Set([currentEmployee?.job, ...(jobOptions || []), ...jobs].filter(Boolean))];
@@ -2589,7 +2734,8 @@ function EmployeeModal({ employee, editing, close, save, setEmployees, branchOpt
                   : [savedEmployee, ...list];
               });
               close();
-          }
+            }
+            onSaved?.(savedEmployee, currentEmployee || null);
         } catch (error) {
             console.error("Supabase employees load/save error:", error);
             alert(error.message || "تعذر حفظ بيانات الموظف");
@@ -5341,13 +5487,38 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations, settings, 
           can={can}
         />
       )}
-      {modal && <EmployeeModal editing={editing} close={() => setModal(false)} setEmployees={setEmployees} branchOptions={employeeBranchOptions} jobOptions={employeeJobOptions} managerOptions={employeeManagerOptions} canViewFinancial={canViewFinancial} />}
+      {modal && <EmployeeModal
+        editing={editing}
+        close={() => setModal(false)}
+        setEmployees={setEmployees}
+        branchOptions={employeeBranchOptions}
+        jobOptions={employeeJobOptions}
+        managerOptions={employeeManagerOptions}
+        canViewFinancial={canViewFinancial}
+        onSaved={(saved, previous) => activityLogsService.logUserActivity({
+          company_id: currentCompany?.company_id,
+          user_id: currentUser?.id || currentUser?.user_id,
+          username: currentUser?.username,
+          user_name: currentUser?.name,
+          user_role: currentUser?.role,
+          module_key: "hr",
+          module_name: "الموارد البشرية",
+          page_key: "employees",
+          page_name: "قائمة الموظفين",
+          action_type: previous ? "update" : "create",
+          action_label: previous ? "تعديل موظف" : "إضافة موظف",
+          description: `${previous ? "تم تعديل" : "تمت إضافة"} سجل الموظف ${saved?.name || saved?.id || ""}`,
+          entity_type: "employee",
+          entity_id: saved?.id,
+          severity: "متوسط",
+        })}
+      />}
     </div>
 	  );
 	}
 	
-function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCompany, can, setEmployees }) {
-  const [activePanel, setActivePanel] = useState("profile");
+function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCompany, can, setEmployees, initialPanel = "profile" }) {
+  const [activePanel, setActivePanel] = useState(initialPanel || "profile");
   const [panelRows, setPanelRows] = useState([]);
   const [panelLoading, setPanelLoading] = useState(false);
   const [panelMessage, setPanelMessage] = useState("");
@@ -5395,6 +5566,25 @@ function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCom
       return;
     }
     setActivePanel(panel);
+    if (panel === "financial") {
+      activityLogsService.logUserActivity({
+        company_id: companyId,
+        user_id: currentUser?.id || currentUser?.user_id,
+        username: currentUser?.username,
+        user_name: currentUser?.name,
+        user_role: currentUser?.role,
+        module_key: "hr",
+        module_name: "الموارد البشرية",
+        page_key: "employees",
+        page_name: "ملف الموظف",
+        action_type: "financial_view",
+        action_label: "عرض بيانات مالية",
+        description: `تم فتح البيانات المالية للموظف ${employee.id}`,
+        entity_type: "employee",
+        entity_id: employee.id,
+        severity: "حساس",
+      });
+    }
     if (panel === "documents") await loadHrPanel("hr_files", "لا توجد وثائق مرفقة لهذا الموظف");
     if (panel === "movements") setPanelMessage("لا توجد حركات مسجلة لهذا الموظف");
     if (panel === "dependents") setPanelMessage("لا توجد بيانات تابعين لهذا الموظف");
@@ -5440,6 +5630,10 @@ function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCom
       setPanelLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (initialPanel && initialPanel !== "profile") openPanel(initialPanel);
+  }, [initialPanel, employee?.id]);
 
   const saveUserLink = async (event) => {
     event.preventDefault();
@@ -5496,6 +5690,23 @@ function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCom
     setPanelLoading(true);
     try {
       await settingsUsersService.resetUserPassword(companyId, passwordForm.user_id, passwordForm.password);
+      activityLogsService.logUserActivity({
+        company_id: companyId,
+        user_id: currentUser?.id || currentUser?.user_id,
+        username: currentUser?.username,
+        user_name: currentUser?.name,
+        user_role: currentUser?.role,
+        module_key: "hr",
+        module_name: "الموارد البشرية",
+        page_key: "employees",
+        page_name: "ملف الموظف",
+        action_type: "password_reset",
+        action_label: "تغيير كلمة مرور مستخدم",
+        description: `تم تغيير كلمة مرور الحساب المرتبط بالموظف ${employee.id}`,
+        entity_type: "employee",
+        entity_id: employee.id,
+        severity: "حساس",
+      });
       setPasswordForm({ user_id: passwordForm.user_id, password: "", confirm: "" });
       setPanelMessage("تم تغيير كلمة المرور بنجاح");
     } catch (error) {
@@ -5537,6 +5748,23 @@ function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCom
     try {
       const next = { ...employee, status: "غير نشط", is_active: false };
       setEmployees?.((list) => list.map((item) => item.id === employee.id ? next : item));
+      activityLogsService.logUserActivity({
+        company_id: companyId,
+        user_id: currentUser?.id || currentUser?.user_id,
+        username: currentUser?.username,
+        user_name: currentUser?.name,
+        user_role: currentUser?.role,
+        module_key: "hr",
+        module_name: "الموارد البشرية",
+        page_key: "employees",
+        page_name: "ملف الموظف",
+        action_type: "employee_status_change",
+        action_label: "إلغاء تفعيل موظف",
+        description: `تم إلغاء تفعيل الموظف ${employee.id}`,
+        entity_type: "employee",
+        entity_id: employee.id,
+        severity: "مرتفع",
+      });
       setPanelMessage("تم إلغاء تفعيل الموظف بنجاح");
     } catch (error) {
       setPanelMessage(error.message || "تعذر إلغاء تفعيل الموظف");

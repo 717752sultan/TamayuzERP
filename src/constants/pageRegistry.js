@@ -24,6 +24,8 @@ export const permissionActionLabels = {
   can_export: "تصدير",
   can_print: "طباعة",
   can_configure: "إدارة",
+  can_manage: "إدارة متقدمة",
+  can_reset_user_password: "إعادة كلمة المرور",
   can_override: "تجاوز",
   can_view_financial: "مالي",
   can_view_sensitive: "حساس",
@@ -43,7 +45,7 @@ const moduleOverrides = {
 };
 
 const hrPageKeys = new Set([
-  "dashboard", "employees", "templates", "evaluations", "productivity", "discipline", "incentives", "top", "plans", "reports", "settings",
+  "dashboard", "employees", "employees_grid", "employee_effectiveness", "user_activity_logs", "templates", "evaluations", "productivity", "discipline", "incentives", "top", "plans", "reports", "settings",
   "guarantees", "overtime", "shifts", "daily_operations", "performance_criteria", "performance_kpi_scores", "users_permissions", "recruitment",
   "reports_center", "audit_logs", "hr_home", "hr_employees_full", "hr_reports", "hr_reports_full", "hr_requests_approvals", "hr_requests", "hr_performance_full", "hr_incentives_full",
   "hr_attendance_payroll", "hr_salary", "hr_disciplinary", "hr_recruitment_full", "hr_leaves", "hr_complaints", "hr_circulars", "hr_termination",
@@ -54,6 +56,9 @@ const hrPageKeys = new Set([
 const pageActionOverrides = {
   dashboard: ["can_view", "can_export", "can_print"],
   employees: commonActions,
+  employees_grid: ["can_view"],
+  employee_effectiveness: ["can_view"],
+  user_activity_logs: ["can_view", "can_export", "can_print"],
   hr_employees_full: commonActions,
   discipline: approvalActions,
   hr_attendance_payroll: approvalActions,
@@ -82,11 +87,14 @@ const pageActionOverrides = {
 const navigationMetadata = {
   hr_home: { navGroupKey: "hr_dashboard", navGroupLabel: "لوحة الموارد البشرية", navGroupOrder: 1, navItemOrder: 1 },
   employees: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 1 },
-  hr_org_chart: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 2 },
-  hr_contracts: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 3 },
-  hr_files: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 4 },
-  guarantees: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 5 },
-  hr_custodies: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 6 },
+  employees_grid: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 2 },
+  employee_effectiveness: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 3 },
+  user_activity_logs: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 4 },
+  hr_org_chart: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 5 },
+  hr_contracts: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 6 },
+  hr_files: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 7 },
+  guarantees: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 8 },
+  hr_custodies: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 9 },
   daily_operations: { navGroupKey: "hr_attendance", navGroupLabel: "الحضور والدوام", navGroupOrder: 3, navItemOrder: 1 },
   discipline: { navGroupKey: "hr_attendance", navGroupLabel: "الحضور والدوام", navGroupOrder: 3, navItemOrder: 2 },
   shifts: { navGroupKey: "hr_attendance", navGroupLabel: "الحضور والدوام", navGroupOrder: 3, navItemOrder: 3 },
@@ -187,6 +195,9 @@ const erpRegistryPages = [
 export const pageRegistry = [
   { key: "dashboard", label: "الرئيسية", aliases: ["لوحة التحكم", "الداشبورد"], icon: "LayoutDashboard", group: "core", groupLabel: "أساسية", permissionKey: "dashboard", moduleKey: "dashboard", order: 1, isOfficialPage: true, isDuplicateAllowed: false },
   { key: "employees", label: "قائمة الموظفين", aliases: ["الموظفون", "سجل الموظفين"], icon: "Users", group: "hr", groupLabel: "موارد بشرية", permissionKey: "employees", moduleKey: "employees", order: 2, isOfficialPage: true, isDuplicateAllowed: false },
+  { key: "employees_grid", label: "قائمة الموظفين شبكي", aliases: ["بطاقات الموظفين"], icon: "Users", group: "hr", groupLabel: "موارد بشرية", permissionKey: "employees_grid", moduleKey: "employees_grid", order: 2.1, isOfficialPage: true, isDuplicateAllowed: false },
+  { key: "employee_effectiveness", label: "الموظفون المتعاونون وغير الفعالون", aliases: ["فعالية الموظفين"], icon: "UserCheck", group: "hr", groupLabel: "موارد بشرية", permissionKey: "employee_effectiveness", moduleKey: "employee_effectiveness", order: 2.2, isOfficialPage: true, isDuplicateAllowed: false },
+  { key: "user_activity_logs", label: "سجلات المستخدمين", aliases: ["نشاط المستخدمين"], icon: "ClipboardList", group: "hr", groupLabel: "موارد بشرية", permissionKey: "user_activity_logs", moduleKey: "user_activity_logs", order: 2.3, isOfficialPage: true, isDuplicateAllowed: false, defaultEnabled: false },
   { key: "templates", label: "نماذج التقييم", aliases: ["القوالب القديمة"], icon: "ClipboardList", group: "performance", groupLabel: "الأداء", permissionKey: "templates", moduleKey: "templates", order: 3, isOfficialPage: true, isDuplicateAllowed: false },
   { key: "evaluations", label: "تقييم الموظفين", aliases: ["تقييم أداء الموظفين"], icon: "BadgeCheck", group: "performance", groupLabel: "الأداء", permissionKey: "employee_evaluation", moduleKey: "employee_evaluation", order: 4, isOfficialPage: true, isDuplicateAllowed: false },
   { key: "productivity", label: "الإنتاجية", aliases: ["مؤشرات الإنتاجية"], icon: "Gauge", group: "performance", groupLabel: "الأداء", permissionKey: "productivity", moduleKey: "productivity", order: 5, isOfficialPage: true, isDuplicateAllowed: false },

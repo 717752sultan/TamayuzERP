@@ -239,6 +239,7 @@ export const tenantAwareTables = new Set([
   "ai_chat_sessions",
   "ai_chat_messages",
   "audit_logs",
+  "user_activity_logs",
   "system_backups",
   "hrms_settings",
   "hrms_snapshots",
