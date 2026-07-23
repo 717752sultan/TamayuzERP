@@ -23,7 +23,7 @@ export const companyPermissionActions = [
 validateUniquePermissionKeys(pageRegistry);
 
 export const companyPermissionModules = pageRegistry
-  .filter((page) => page.isOfficialPage !== false && page.status !== "alias")
+  .filter((page) => page.status !== "alias" && page.canonical !== false)
   .map((page) => [
     page.permissionKey,
     page.label,
@@ -59,7 +59,7 @@ const moduleMeta = (permissionKey) => {
     permission_key: page.permissionKey,
     permission_label: page.label,
     module_key: page.moduleKey || page.permissionKey,
-    module_label: page.label,
+    module_label: page.moduleLabel || page.groupLabel || page.label,
     group_key: page.group || "legacy",
     group_label: page.groupLabel || "صلاحيات قديمة / غير مستخدمة",
     route_key: page.routeKey || page.key,
@@ -109,24 +109,33 @@ export const normalizeCompanyPermission = (row = {}, companyId = "") => {
 const defaultRow = (companyId, [, , group, page], enableAll = false, options = {}) => {
   const enableSensitiveByDefault = options.enableSensitive === true;
   const enabled = enableAll || page.defaultEnabled === true || enableSensitiveByDefault || !sensitiveGroups.has(group);
+  const pageActions = new Set(page.actions || []);
+  const actionEnabled = (key) => enabled && (enableAll || pageActions.has(key));
   return normalizeCompanyPermission({
     company_id: companyId,
     permission_key: page.permissionKey,
     permission_label: page.label,
     module_key: page.moduleKey || page.permissionKey,
-    module_label: page.label,
+    module_label: page.moduleLabel || page.groupLabel || page.label,
     group_key: page.group,
     group_label: page.groupLabel,
     route_key: page.routeKey || page.key,
     can_access: enabled,
     can_view: enabled,
-    can_create: enabled,
-    can_edit: enabled,
-    can_delete: enableAll ? enabled : false,
-    can_approve: enabled,
-    can_export: enabled,
-    can_print: enabled,
-    can_manage: enabled,
+    can_create: actionEnabled("can_create"),
+    can_edit: actionEnabled("can_edit"),
+    can_delete: actionEnabled("can_delete"),
+    can_approve: actionEnabled("can_approve"),
+    can_reject: actionEnabled("can_reject"),
+    can_cancel: actionEnabled("can_cancel"),
+    can_export: actionEnabled("can_export"),
+    can_import: actionEnabled("can_import"),
+    can_print: actionEnabled("can_print"),
+    can_manage: actionEnabled("can_manage"),
+    can_configure: actionEnabled("can_configure"),
+    can_reset_user_password: actionEnabled("can_reset_user_password"),
+    can_view_sensitive: actionEnabled("can_view_sensitive"),
+    can_view_financial: actionEnabled("can_view_financial"),
     is_enabled: enabled,
     is_official_page: page.isOfficialPage !== false,
     is_duplicate_allowed: page.isDuplicateAllowed === true,
@@ -169,6 +178,26 @@ const toDb = (row, companyId) => {
   };
 };
 
+const extendedCompanyPermissionColumns = new Set([
+  "can_reject",
+  "can_cancel",
+  "can_import",
+  "can_configure",
+  "can_reset_user_password",
+  "can_view_sensitive",
+  "can_view_financial",
+]);
+
+const toLegacyCompatibleDb = (row) =>
+  Object.fromEntries(Object.entries(row).filter(([key]) => !extendedCompanyPermissionColumns.has(key)));
+
+const isMissingExtendedPermissionColumn = (error) => {
+  const message = String(error?.message || "").toLowerCase();
+  return message.includes("company_permissions")
+    && message.includes("column")
+    && [...extendedCompanyPermissionColumns].some((column) => message.includes(column));
+};
+
 export function dedupePermissionRows(rows = []) {
   const map = new Map();
   for (const row of rows || []) {
@@ -196,11 +225,29 @@ export const mergeWithDefaultCompanyPermissions = (rows = [], companyId = "", op
 
 export const companyCanAccessFromRows = (rows = [], pageKey = "", action = "can_view") => {
   const permissionKey = pageToCompanyPermissionKey(pageKey);
-  const row = rows.find((item) => item.permission_key === permissionKey || item.route_key === pageKey || item.module_key === permissionKey);
+  const row = rows.find((item) => item.permission_key === permissionKey || item.route_key === pageKey);
   if (!row) return false;
   if (row.is_enabled === false || row.can_access === false) return false;
-  return action === "can_access" ? true : row[action] !== false;
+  return action === "can_access" ? true : row[action] === true;
 };
+
+export const companyCanPageFromRows = (rows = [], pageKey = "", action = "can_view") =>
+  companyCanAccessFromRows(rows, pageKey, action);
+
+export const companyCanModuleFromRows = (rows = [], moduleKey = "") => {
+  const modulePages = companyPermissionModules
+    .map(([, , , page]) => page)
+    .filter((page) => page.moduleKey === moduleKey);
+  return modulePages.some((page) => companyCanPageFromRows(rows, page.key, "can_view"));
+};
+
+export const getAllowedCompanyPagesFromRows = (rows = []) =>
+  companyPermissionModules
+    .map(([, , , page]) => page)
+    .filter((page) => companyCanPageFromRows(rows, page.key, "can_view"));
+
+export const getAllowedCompanyModulesFromRows = (rows = []) =>
+  [...new Set(getAllowedCompanyPagesFromRows(rows).map((page) => page.moduleKey))];
 
 export const companyPermissionsService = {
   async loadCompanyPermissions(companyId) {
@@ -218,25 +265,37 @@ export const companyPermissionsService = {
 
   async saveCompanyPermission(companyId, permissionKey, payload = {}) {
     const row = dedupePermissionRows([toDb({ ...payload, permission_key: permissionKey }, companyId)])[0];
-    const { data, error } = await supabase.from("company_permissions").upsert(row, { onConflict: "company_id,permission_key" }).select().single();
+    let { data, error } = await supabase.from("company_permissions").upsert(row, { onConflict: "company_id,permission_key" }).select().single();
+    let schemaCompatibilityWarning = false;
+    if (error && isMissingExtendedPermissionColumn(error)) {
+      schemaCompatibilityWarning = true;
+      ({ data, error } = await supabase.from("company_permissions").upsert(toLegacyCompatibleDb(row), { onConflict: "company_id,permission_key" }).select().single());
+    }
     if (error) {
       console.error("Company permissions save error:", error);
       throw new Error("فشل حفظ صلاحيات الشركة");
     }
-    return normalizeCompanyPermission(data, companyId);
+    return { ...normalizeCompanyPermission(data, companyId), schemaCompatibilityWarning };
   },
 
   async bulkSaveCompanyPermissions(companyId, permissions = []) {
     if (!companyId) throw new Error("يجب اختيار الشركة أولاً");
     const rows = mergeWithDefaultCompanyPermissions(permissions, companyId).map((row) => toDb(row, companyId));
     const safeRows = dedupePermissionRows(rows);
-    const { data, error } = await supabase.from("company_permissions").upsert(safeRows, { onConflict: "company_id,permission_key" }).select();
+    let { data, error } = await supabase.from("company_permissions").upsert(safeRows, { onConflict: "company_id,permission_key" }).select();
+    let schemaCompatibilityWarning = false;
+    if (error && isMissingExtendedPermissionColumn(error)) {
+      schemaCompatibilityWarning = true;
+      const legacyRows = safeRows.map(toLegacyCompatibleDb);
+      ({ data, error } = await supabase.from("company_permissions").upsert(legacyRows, { onConflict: "company_id,permission_key" }).select());
+    }
     if (error) {
       console.error("Company permissions save error:", error);
       throw new Error("فشل حفظ صلاحيات الشركة");
     }
     const normalized = mergeWithDefaultCompanyPermissions(data || safeRows, companyId);
     normalized.duplicateCount = rows.length - safeRows.length;
+    normalized.schemaCompatibilityWarning = schemaCompatibilityWarning;
     currentCompanyPermissionCache = normalized;
     return normalized;
   },
@@ -285,12 +344,24 @@ export const companyPermissionsService = {
     return companyCanAccessFromRows(currentCompanyPermissionCache, permissionKey, action);
   },
 
-  getAllowedCompanyPages(companyId) {
-    return this.loadCompanyPermissions(companyId).then((rows) => rows.filter((row) => row.is_enabled && row.can_access && row.can_view));
+  async companyCanPage(companyId, pageKey, action = "can_view") {
+    const rows = await this.loadCompanyPermissions(companyId);
+    return companyCanPageFromRows(rows, pageKey, action);
   },
 
-  getAllowedCompanyModules(companyId) {
-    return this.getAllowedCompanyPages(companyId);
+  async companyCanModule(companyId, moduleKey) {
+    const rows = await this.loadCompanyPermissions(companyId);
+    return companyCanModuleFromRows(rows, moduleKey);
+  },
+
+  async getAllowedCompanyPages(companyId) {
+    const rows = await this.loadCompanyPermissions(companyId);
+    return getAllowedCompanyPagesFromRows(rows);
+  },
+
+  async getAllowedCompanyModules(companyId) {
+    const rows = await this.loadCompanyPermissions(companyId);
+    return getAllowedCompanyModulesFromRows(rows);
   },
 
   async seedDefaultCompanyPermissions(companyId, options = {}) {

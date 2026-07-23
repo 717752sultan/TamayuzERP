@@ -103,7 +103,7 @@ import { recruitmentService, recruitmentTabs, generateWelcomeMessage } from "./s
 import { generateRecruitmentReports } from "./services/recruitmentReports";
 import { backupService } from "./services/backup";
 import { companiesService } from "./services/companies";
-import { companyPermissionActions, companyPermissionModules, companyPermissionsService, companyCanAccessFromRows, mergeWithDefaultCompanyPermissions } from "./services/companyPermissions";
+import { companyPermissionActions, companyPermissionModules, companyPermissionsService, companyCanAccessFromRows, companyCanModuleFromRows, companyCanPageFromRows, mergeWithDefaultCompanyPermissions } from "./services/companyPermissions";
 import { applyCompanyTheme, applyThemeForCurrentCompany, getDefaultTheme, normalizeThemePayload, themePresets, themeService } from "./services/theme";
 import { clearTenantSession, getCurrentCompany, getCurrentUser, isPlatformAdminUser, isProtectedPlatformRole, isProtectedPlatformUser, loadTenantSession, setTenantSession } from "./services/tenant";
 import { assistantModes, pageRegistryByKey } from "./constants/pageRegistry";
@@ -985,21 +985,23 @@ export default function App() {
 	    canNode = (nodeKey, action = "can_view") => hasTreePermission(treeRolePermissions, role, nodeKey, action),
       companyCanPage = (pageKey, action = "can_view") => {
         if (pageKey === "companies_admin" || pageKey === "platform_admin_settings") return platformAdmin;
+        if (platformAdmin) return hasSelectedCompany;
         if (!hasSelectedCompany) return false;
-        if (isAdministrativeUser) return true;
-        return companyCanAccessFromRows(companyPermissions, pageKey, action);
+        return companyCanPageFromRows(companyPermissions, pageKey, action);
       },
+      companyCanModule = (moduleKey) =>
+        platformAdmin ? hasSelectedCompany || moduleKey === "platform" : hasSelectedCompany && companyCanModuleFromRows(companyPermissions, moduleKey),
 	    canPage = (pageKey, action = "can_view") => {
-        if (platformAdmin) return pageKey === "companies_admin" ? true : companyCanPage(pageKey, action);
-        if (isAdministrativeUser) return true;
+        if (platformAdmin) return companyCanPage(pageKey, action);
         if (!companyCanPage(pageKey, action)) return false;
+        if (isAdministrativeUser) return true;
         return pageAllowedByTree(treeRolePermissions, role, pageKey, action) || canByPermission(appPermissions, role, pageKey, action);
       },
 	    rawVisibleNavItems = navItems.filter(([id]) => {
         if (platformAdmin) return hasSelectedCompany ? true : ["companies_admin", "platform_admin_settings"].includes(id);
         if (id === "companies_admin" || id === "platform_admin_settings") return false;
-        if (isAdministrativeUser && hasSelectedCompany) return true;
         if (!companyCanPage(id, "can_view")) return false;
+        if (isAdministrativeUser) return true;
 	      if (id === "dashboard") return hasAnyPermission(treeRolePermissions, role, dashboardPermissionNodes, "can_view");
 	      if (treeRolePermissions.length) return pageAllowedByTree(treeRolePermissions, role, id, "can_view");
 	      if (appPermissions.length) return canByPermission(appPermissions, role, id === "reports" ? "reports" : id, "can_view");
@@ -1011,6 +1013,7 @@ export default function App() {
       moduleVisibleNavItems = platformAdmin && !hasSelectedCompany
         ? rawVisibleNavItems
         : getModulePages(selectedModuleKey).filter((item) => {
+            if (!platformAdmin && !companyCanPage(item.key, "can_view")) return false;
             if (isAdministrativeUser) return item.status !== "placeholder" || isAdminLikeRole(role) || platformAdmin;
             if (item.status === "placeholder") return isAdminLikeRole(role) || platformAdmin;
             return rawVisibleIds.has(item.routeKey) || rawVisibleIds.has(item.key);
@@ -1088,7 +1091,8 @@ export default function App() {
     return <div className="grid min-h-screen place-items-center bg-slate-50 p-5" dir="rtl"><div className="panel max-w-xl p-6 text-center"><ShieldCheck className="mx-auto mb-3 text-brand-700" /><h2 className="text-xl font-extrabold">لا توجد صلاحيات مفعلة لهذا المستخدم</h2><button onClick={() => { localStorage.removeItem("ep_logged"); localStorage.removeItem("ep_role"); clearTenantSession(); setCurrentCompany(null); setCurrentUserState(null); setLogged(false); }} className="btn-primary mt-5">تسجيل الخروج</button></div></div>;
   }
   const availableModulePages = (moduleKey) =>
-    moduleKey === "platform" && !platformAdmin ? [] : getModulePages(moduleKey).filter((item) => {
+    (moduleKey === "platform" && !platformAdmin) || !companyCanModule(moduleKey) ? [] : getModulePages(moduleKey).filter((item) => {
+      if (!platformAdmin && !companyCanPage(item.key, "can_view")) return false;
       if (isAdministrativeUser) return item.status !== "placeholder" || isAdminLikeRole(role) || platformAdmin;
       return item.status === "placeholder"
         ? isAdminLikeRole(role) || platformAdmin
@@ -1787,6 +1791,7 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
   const [expandedGroups, setExpandedGroups] = useState([]);
   const [loading, setLoading] = useState(false);
   const selectedCompany = companies.find((company) => company.company_id === selectedCompanyId);
+  const childActionKeys = companyPermissionActions.map(([key]) => key).filter((key) => key !== "can_access");
   const load = async () => {
     if (!selectedCompanyId) return setRows([]);
     setLoading(true);
@@ -1799,30 +1804,38 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
     }
   };
   useEffect(() => { load(); }, [selectedCompanyId]);
-  const updateRow = (permissionKey, key, value) => {
+  const updateAction = (permissionKey, key, value) => {
     setRows((list) => {
       const merged = mergeWithDefaultCompanyPermissions(list, selectedCompanyId);
-      return merged.map((row) => row.permission_key === permissionKey ? { ...row, [key]: value, is_enabled: key === "can_access" ? value : row.is_enabled, can_view: key === "can_access" && !value ? false : row.can_view } : row);
+      return merged.map((row) => row.permission_key === permissionKey ? { ...row, [key]: value } : row);
     });
   };
+  const setPermissionTreeValue = (row, value) => ({
+    ...row,
+    ...Object.fromEntries(companyPermissionActions.map(([key]) => [key, value])),
+    is_enabled: value,
+  });
+  const togglePage = (permissionKey, value) => {
+    setRows((list) => mergeWithDefaultCompanyPermissions(list, selectedCompanyId)
+      .map((row) => row.permission_key === permissionKey ? setPermissionTreeValue(row, value) : row));
+  };
+  const toggleModule = (moduleKey, value) => {
+    setRows((list) => mergeWithDefaultCompanyPermissions(list, selectedCompanyId)
+      .map((row) => row.module_key === moduleKey ? setPermissionTreeValue(row, value) : row));
+  };
   const setAll = (value) => {
-    const actionValues = Object.fromEntries(companyPermissionActions.map(([key]) => [key, value]));
-    setRows(companyPermissionModules.map(([key, label]) => ({
-      company_id: selectedCompanyId,
-      permission_key: key,
-      permission_label: label,
-      module_key: key,
-      module_label: label,
-      ...actionValues,
-      is_enabled: value,
-    })));
+    setRows(mergeWithDefaultCompanyPermissions(rows, selectedCompanyId).map((row) => setPermissionTreeValue(row, value)));
   };
   const save = async () => {
     try {
       setLoading(true);
       const saved = await companyPermissionsService.bulkSaveCompanyPermissions(selectedCompanyId, rows);
       setRows(saved);
-      alert(saved.duplicateCount > 0 ? "تم حفظ صلاحيات الشركة بنجاح. تم تجاهل الصلاحيات المكررة أثناء الحفظ" : "تم حفظ صلاحيات الشركة بنجاح");
+      if (saved.schemaCompatibilityWarning) {
+        alert("تم حفظ تفعيل الوحدات والصفحات. بعض صلاحيات الإجراءات الإضافية تحتاج تطبيق مسودة أعمدة company_permissions.");
+      } else {
+        alert(saved.duplicateCount > 0 ? "تم حفظ صلاحيات الشركة بنجاح. تم تجاهل الصلاحيات المكررة أثناء الحفظ" : "تم حفظ صلاحيات الشركة بنجاح");
+      }
     } catch (error) {
       console.error("Company permissions save error:", error);
       alert("فشل حفظ صلاحيات الشركة");
@@ -1881,7 +1894,8 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
     ["inventory", "مخزون"],
     ["settings", "إعدادات"],
   ];
-  const visibleRows = mergeWithDefaultCompanyPermissions(rows, selectedCompanyId).filter((row) => {
+  const allRows = mergeWithDefaultCompanyPermissions(rows, selectedCompanyId);
+  const visibleRows = allRows.filter((row) => {
     const text = `${row.permission_label} ${row.module_label} ${row.permission_key} ${row.group_label}`.toLowerCase();
     const matchesQuery = !query || text.includes(query.toLowerCase());
     const matchesFilter =
@@ -1893,11 +1907,25 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
     return matchesQuery && matchesFilter;
   });
   const groupedRows = Object.entries(visibleRows.reduce((acc, row) => {
-    const key = row.group_key || row.module_key || "general";
-    if (!acc[key]) acc[key] = { key, label: row.group_label || row.module_label || key, rows: [] };
+    const key = row.module_key || "general";
+    const module = ERP_MODULES.find((item) => item.key === key);
+    if (!acc[key]) acc[key] = { key, label: module?.label || row.module_label || row.group_label || key, rows: [] };
     acc[key].rows.push(row);
     return acc;
   }, {})).map(([, group]) => ({ ...group, rows: group.rows.sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0)) }));
+  const pageCheckboxState = (row) => {
+    const values = childActionKeys.map((key) => row[key] === true);
+    const checked = row.is_enabled === true && row.can_access === true && values.every(Boolean);
+    const hasAny = row.is_enabled === true || row.can_access === true || values.some(Boolean);
+    return { checked, indeterminate: hasAny && !checked };
+  };
+  const moduleCheckboxState = (moduleKey) => {
+    const moduleRows = allRows.filter((row) => row.module_key === moduleKey);
+    const states = moduleRows.map(pageCheckboxState);
+    const checked = states.length > 0 && states.every((state) => state.checked);
+    const hasAny = states.some((state) => state.checked || state.indeterminate);
+    return { checked, indeterminate: hasAny && !checked };
+  };
   useEffect(() => {
     if (!expandedGroups.length && groupedRows.length) setExpandedGroups(groupedRows.map((group) => group.key));
   }, [visibleRows.length]);
@@ -1922,7 +1950,7 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
         <button onClick={() => setExpandedGroups(groupedRows.map((group) => group.key))} disabled={!selectedCompanyId || loading} className="btn-secondary">توسيع الكل</button>
         <button onClick={() => setExpandedGroups([])} disabled={!selectedCompanyId || loading} className="btn-secondary">طي الكل</button>
         <button onClick={() => setAll(true)} disabled={!selectedCompanyId || loading} className="btn-secondary">تحديد الكل</button>
-        <button onClick={() => setAll(false)} disabled={!selectedCompanyId || loading} className="btn-secondary">مسح الكل</button>
+        <button onClick={() => setAll(false)} disabled={!selectedCompanyId || loading} className="btn-secondary">إلغاء الكل</button>
         <button onClick={reset} disabled={!selectedCompanyId || loading} className="btn-secondary">إعادة الافتراضي</button>
         <button onClick={save} disabled={!selectedCompanyId || loading} className="btn-primary"><Save size={17} /> حفظ الصلاحيات</button>
       </div>
@@ -1950,27 +1978,44 @@ function CompanyPermissionsAdminPanel({ companies, selectedCompanyId, onSelectCo
                 <React.Fragment key={group.key}>
                   <tr className="bg-slate-100">
                     <td colSpan={2 + companyPermissionActions.length}>
-                      <button type="button" onClick={() => toggleGroup(group.key)} className="flex w-full items-center gap-2 text-right font-extrabold text-slate-700">
-                        <ChevronLeft size={16} className={isExpanded(group.key) ? "-rotate-90 transition" : "transition"} />
-                        {group.label}
-                        <span className="text-xs font-bold text-slate-400">({group.rows.length})</span>
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <input
+                          ref={(input) => { if (input) input.indeterminate = moduleCheckboxState(group.key).indeterminate; }}
+                          type="checkbox"
+                          checked={moduleCheckboxState(group.key).checked}
+                          onChange={(e) => toggleModule(group.key, e.target.checked)}
+                          aria-label={`تحديد وحدة ${group.label}`}
+                          className="h-5 w-5 accent-red-800"
+                        />
+                        <button type="button" onClick={() => toggleGroup(group.key)} className="flex min-w-0 flex-1 items-center gap-2 text-right font-extrabold text-slate-700">
+                          <ChevronLeft size={16} className={isExpanded(group.key) ? "-rotate-90 shrink-0 transition" : "shrink-0 transition"} />
+                          <span className="truncate">{group.label}</span>
+                          <span className="text-xs font-bold text-slate-400">({group.rows.length})</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                   {isExpanded(group.key) && group.rows.map((row) => (
                     <tr key={row.permission_key}>
                       <td className="min-w-[220px]"><b>{row.module_label || row.permission_label}</b><p className="text-xs text-slate-400">{row.permission_label}</p>{row.is_duplicate_allowed && <p className="text-xs text-amber-600">صفحة مكررة مسموحة</p>}</td>
                       <td className="font-mono text-xs">{row.permission_key}</td>
-                      {companyPermissionActions.map(([key]) => (
+                      {companyPermissionActions.map(([key]) => {
+                        const pageState = pageCheckboxState(row);
+                        const isPageCheckbox = key === "can_access";
+                        return (
                         <td key={key} className="text-center">
                           <input
+                            ref={isPageCheckbox ? (input) => { if (input) input.indeterminate = pageState.indeterminate; } : undefined}
                             type="checkbox"
-                            checked={key === "can_access" ? row.can_access && row.is_enabled : Boolean(row[key])}
-                            onChange={(e) => updateRow(row.permission_key, key, e.target.checked)}
+                            checked={isPageCheckbox ? pageState.checked : Boolean(row[key])}
+                            onChange={(e) => isPageCheckbox
+                              ? togglePage(row.permission_key, e.target.checked)
+                              : updateAction(row.permission_key, key, e.target.checked)}
                             className="h-4 w-4 accent-red-800"
                           />
                         </td>
-                      ))}
+                        );
+                      })}
                     </tr>
                   ))}
                 </React.Fragment>
