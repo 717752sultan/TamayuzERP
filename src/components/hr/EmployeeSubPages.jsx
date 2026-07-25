@@ -51,14 +51,17 @@ const formatDateTime = (value) => {
 };
 
 function Avatar({ employee, size = "lg" }) {
+  const [failed, setFailed] = useState(false);
+  const src = employeeImage(employee);
+  useEffect(() => setFailed(false), [src]);
   const initials = clean(employee?.name)
     .split(/\s+/)
     .slice(0, 2)
     .map((part) => part[0])
     .join("") || "؟";
   const classes = size === "lg" ? "h-20 w-20 text-xl" : "h-11 w-11 text-sm";
-  return employeeImage(employee) ? (
-    <img src={employeeImage(employee)} alt={employee.name || "الموظف"} className={`${classes} rounded-2xl object-cover ring-4 ring-white shadow`} />
+  return src && !failed ? (
+    <img src={src} alt={employee.name || "الموظف"} onError={() => setFailed(true)} className={`${classes} rounded-2xl object-cover ring-4 ring-white shadow`} />
   ) : (
     <span className={`${classes} grid place-items-center rounded-2xl bg-brand-50 font-black text-brand-700 ring-4 ring-white shadow`}>{initials}</span>
   );
@@ -244,6 +247,8 @@ export function EmployeesGridPage({
           jobOptions={jobOptions}
           managerOptions={managerOptions}
           canViewFinancial={canViewFinancial}
+          currentCompany={currentCompany}
+          currentUser={currentUser}
           onSaved={(saved, previous) => {
             onEmployeeSaved?.(saved, previous);
             setEditing(null);

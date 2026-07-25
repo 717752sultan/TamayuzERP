@@ -7,6 +7,7 @@ import {
   BadgeCheck,
   Gauge,
   CalendarCheck,
+   CalendarDays,
   Gift,
   Trophy,
   TrendingUp,
@@ -113,6 +114,7 @@ import { buildReportBrandingHtml } from "./services/reportBranding";
 import { ERP_MODULES, ERP_PAGE_BY_KEY, ERP_PAGE_BY_ROUTE, buildGroupedNavigation, getModuleForPage, getModulePages, isPlaceholderPage } from "./constants/moduleRegistry";
 import HRFoundationPage from "./components/hr/HRFoundationPage";
 import HRExecutiveDashboard from "./components/hr/HRExecutiveDashboard";
+import AttendanceCalculationPage from "./components/hr/AttendanceCalculationPage";
 import { EmployeeEffectivenessPage, EmployeesGridPage, UserActivityLogsPage } from "./components/hr/EmployeeSubPages";
 import SystemSettingsPage from "./components/settings/SystemSettingsPage";
 import GroupedSidebarNav from "./components/navigation/GroupedSidebarNav";
@@ -136,6 +138,14 @@ const icons = {
   shifts: CalendarCheck,
   inventory: Wallet,
   daily_operations: Gauge,
+  attendance_dashboard: Clock3,
+  attendance_records: CalendarCheck,
+  bulk_attendance: Users,
+  attendance_requests: ClipboardList,
+  working_hours_report: FileBarChart,
+  attendance_in_out_report: FileBarChart,
+  monthly_attendance_report: CalendarDays,
+  attendance_period_settings: Settings,
   performance_criteria: ClipboardList,
   performance_kpi_scores: Star,
   users_permissions: UserRoundCog,
@@ -189,6 +199,14 @@ const fullHrNavItems = [
   ["guarantees", "الضمانات"],
   ["hr_custodies", "العهد"],
   ["daily_operations", "العمليات اليومية"],
+  ["attendance_dashboard", "لوحة حساب الدوام"],
+  ["attendance_records", "تسجيل حضور وانصراف"],
+  ["bulk_attendance", "تحضير جماعي"],
+  ["attendance_requests", "معالجة طلبات العمل"],
+  ["working_hours_report", "تقرير ساعات الاشتغال"],
+  ["attendance_in_out_report", "تقرير الحضور والانصراف"],
+  ["monthly_attendance_report", "تقرير الحضور الشهري"],
+  ["attendance_period_settings", "إعدادات فترات الدوام"],
   ["discipline", "الحضور والانصراف"],
   ["shifts", "الشفتات"],
   ["overtime", "العمل الإضافي"],
@@ -212,6 +230,7 @@ const fullHrNavItems = [
   ["hr_reports", "تقارير الموارد البشرية"],
 ];
 const genericHrPageKeys = new Set(["hr_leaves", "hr_salary", "hr_requests_approvals", "hr_disciplinary", "hr_termination", "hr_files", "hr_contracts", "hr_custodies", "hr_performance_full", "hr_training", "hr_circulars", "hr_complaints", "hr_reports"]);
+const attendancePageKeys = new Set(["attendance_dashboard", "attendance_records", "bulk_attendance", "attendance_requests", "working_hours_report", "attendance_in_out_report", "monthly_attendance_report", "attendance_period_settings"]);
 const canonicalHrPageAliases = {
   hr_employees_full: "employees",
   hr_reports_full: "hr_reports",
@@ -223,7 +242,7 @@ const canonicalHrPageAliases = {
   settings: "hr_settings",
   hr_financial_setup: "hr_settings",
   hr_templates_full: "hr_settings",
-  hr_attendance_payroll: "discipline",
+  hr_attendance_payroll: "attendance_dashboard",
   hr_recruitment_full: "recruitment",
   hr_incentives_full: "incentives",
 };
@@ -1421,6 +1440,7 @@ export default function App() {
 	          {activePage === "shifts" && <EmployeeShiftsPage {...p} />}{" "}
 	          {activePage === "inventory" && <InventoryManagementPage {...p} />}{" "}
 	          {activePage === "daily_operations" && <DailyOperationsPageEnhanced {...p} />}{" "}
+	          {attendancePageKeys.has(activePage) && <AttendanceCalculationPage {...p} pageKey={activePage} />}{" "}
 	          {activePage === "performance_criteria" && <PerformanceCriteriaPageEnhanced {...p} />}{" "}
 	          {activePage === "performance_kpi_scores" && <KpiScoresPage {...p} />}{" "}
 	          {activePage === "users_permissions" && <UsersPermissionsPage {...p} />}{" "}
@@ -2664,11 +2684,15 @@ function Employees({ employees, setEmployees }) {
     </div>
   );
 }
-function EmployeeModal({ employee, editing, close, save, setEmployees, branchOptions = branches, jobOptions = jobs, managerOptions = [], canViewFinancial = true, onSaved }) {
+function EmployeeModal({ employee, editing, close, save, setEmployees, branchOptions = branches, jobOptions = jobs, managerOptions = [], canViewFinancial = true, currentCompany, currentUser, onSaved }) {
   const currentEmployee = employee || editing;
   const availableBranches = [...new Set([currentEmployee?.branch, ...(branchOptions || []), ...branches].filter(Boolean))];
   const availableJobs = [...new Set([currentEmployee?.job, ...(jobOptions || []), ...jobs].filter(Boolean))];
   const [saving, setSaving] = useState(false);
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(employeeImageUrl(currentEmployee));
+  const [photoError, setPhotoError] = useState("");
+  const [removePhoto, setRemovePhoto] = useState(false);
   const [f, setF] = useState(
     currentEmployee || {
       id: `EMP-${Date.now().toString().slice(-4)}`,
@@ -2680,9 +2704,43 @@ function EmployeeModal({ employee, editing, close, save, setEmployees, branchOpt
       phone: "05",
       status: "نشط",
       manager: "",
+      gender: "غير محدد",
       profile_image_url: "",
+      profile_image_path: "",
     },
   );
+  useEffect(() => {
+    if (!photoFile) {
+      setPhotoPreview(removePhoto ? "" : employeeImageUrl(f));
+      return undefined;
+    }
+    const objectUrl = URL.createObjectURL(photoFile);
+    setPhotoPreview(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [photoFile, removePhoto, f.profile_image_url, f.profileImageUrl]);
+  const selectPhoto = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    setPhotoError("");
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setPhotoError("نوع الملف غير مدعوم");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setPhotoError("حجم الصورة يجب ألا يتجاوز 2 ميجابايت");
+      return;
+    }
+    setPhotoFile(file);
+    setRemovePhoto(false);
+  };
+  const clearPhoto = () => {
+    setPhotoFile(null);
+    setRemovePhoto(true);
+    setPhotoPreview("");
+    setPhotoError("");
+    setF({ ...f, profile_image_url: "", profileImageUrl: "", profile_image_path: "", profileImagePath: "" });
+  };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
       <form
@@ -2698,10 +2756,27 @@ function EmployeeModal({ employee, editing, close, save, setEmployees, branchOpt
             phone: f.phone,
             status: f.status,
             manager: f.manager,
+            gender: f.gender || "غير محدد",
             profile_image_url: employeeImageUrl(f),
+            profile_image_path: f.profile_image_path || f.profileImagePath || "",
           };
           setSaving(true);
           try {
+            const currentPhotoPath = f.profile_image_path || f.profileImagePath || currentEmployee?.profile_image_path || currentEmployee?.profileImagePath || "";
+            if (photoFile) {
+              const uploaded = await employeesService.uploadEmployeePhoto(photoFile, payload, currentCompany?.company_id || currentUser?.company_id || f.company_id || "");
+              payload.profile_image_url = uploaded.profile_image_url;
+              payload.profile_image_path = uploaded.profile_image_path;
+              if (currentPhotoPath && currentPhotoPath !== uploaded.profile_image_path) {
+                employeesService.removeEmployeePhoto(currentPhotoPath).catch((error) => console.error("Supabase employee photo delete error:", error));
+              }
+            } else if (removePhoto) {
+              payload.profile_image_url = "";
+              payload.profile_image_path = "";
+              if (currentPhotoPath) {
+                employeesService.removeEmployeePhoto(currentPhotoPath).catch((error) => console.error("Supabase employee photo delete error:", error));
+              }
+            }
             const { data, error } = await supabase.from("employees").upsert(payload, { onConflict: "id" }).select().single();
             if (error) {
               console.error("Supabase employees load/save error:", error);
@@ -2721,8 +2796,11 @@ function EmployeeModal({ employee, editing, close, save, setEmployees, branchOpt
               phone: data.phone || "",
               status: data.status || "نشط",
               manager: data.manager || "",
+              gender: data.gender || "غير محدد",
               profile_image_url: data.profile_image_url || data.profile_image || data.avatar_url || data.photo_url || "",
               profileImageUrl: data.profile_image_url || data.profile_image || data.avatar_url || data.photo_url || "",
+              profile_image_path: data.profile_image_path || data.photo_path || "",
+              profileImagePath: data.profile_image_path || data.photo_path || "",
             };
             if (save) {
               save(savedEmployee);
@@ -2754,16 +2832,19 @@ function EmployeeModal({ employee, editing, close, save, setEmployees, branchOpt
           </button>
         </div>
         <div className="mb-5 flex items-center gap-4 rounded-2xl bg-slate-50 p-4">
-          <EmployeeAvatar employee={f} size="lg" />
-          <Label t="رابط صورة الموظف">
-            <input
-              type="url"
-              value={employeeImageUrl(f)}
-              onChange={(e) => setF({ ...f, profile_image_url: e.target.value })}
-              placeholder="https://example.com/photo.jpg"
-              className="field mt-2"
-            />
-          </Label>
+          <EmployeeAvatar employee={{ ...f, profile_image_url: photoPreview }} size="lg" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-extrabold text-slate-700">صورة الموظف</p>
+            <p className="mt-1 text-xs text-slate-500">JPG أو PNG أو WEBP، بحد أقصى 2 ميجابايت.</p>
+            {photoError && <p className="mt-2 text-xs font-bold text-red-600">{photoError}</p>}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <label className="btn-secondary cursor-pointer">
+                <Upload size={17} /> اختيار صورة
+                <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={selectPhoto} />
+              </label>
+              <button type="button" onClick={clearPhoto} className="btn-secondary text-red-600">إزالة الصورة</button>
+            </div>
+          </div>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           {[
@@ -2817,6 +2898,17 @@ function EmployeeModal({ employee, editing, close, save, setEmployees, branchOpt
               <option>نشط</option>
               <option>إجازة</option>
               <option>موقوف</option>
+            </select>
+          </Label>
+          <Label t="النوع">
+            <select
+              value={f.gender || "غير محدد"}
+              onChange={(e) => setF({ ...f, gender: e.target.value })}
+              className="field mt-2"
+            >
+              <option>غير محدد</option>
+              <option>ذكر</option>
+              <option>أنثى</option>
             </select>
           </Label>
         </div>
@@ -5495,6 +5587,8 @@ function EnhancedEmployees({ employees, setEmployees, setEvaluations, settings, 
         jobOptions={employeeJobOptions}
         managerOptions={employeeManagerOptions}
         canViewFinancial={canViewFinancial}
+        currentCompany={currentCompany}
+        currentUser={currentUser}
         onSaved={(saved, previous) => activityLogsService.logUserActivity({
           company_id: currentCompany?.company_id,
           user_id: currentUser?.id || currentUser?.user_id,
@@ -5537,6 +5631,7 @@ function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCom
     ["الرقم الوظيفي", employee.id],
     ["الاسم", employee.name],
     ["الهاتف", employee.phone],
+    ["النوع", employee.gender || "غير محدد"],
     ["الفرع", employee.branch],
     ["الإدارة", employee.department || employee.administration || "غير محدد"],
     ["القسم", employee.department || "غير محدد"],
@@ -9291,11 +9386,18 @@ const employeeImportHeaderMap = {
   status: "status",
   "المدير المباشر": "manager",
   manager: "manager",
+  "النوع": "gender",
+  "الجنس": "gender",
+  gender: "gender",
+  sex: "gender",
   "رابط صورة الموظف": "profile_image_url",
+  "صورة الموظف": "profile_image_url",
   profile_image_url: "profile_image_url",
   profile_image: "profile_image_url",
   avatar_url: "profile_image_url",
   photo_url: "profile_image_url",
+  profile_image_path: "profile_image_path",
+  photo_path: "profile_image_path",
 };
 const normalizeEmployeeImportKey = (key) => String(key || "").trim().replace(/\s+/g, " ");
 const normalizeEmployeeImportValue = (value) => {
@@ -9320,7 +9422,9 @@ function normalizeEmployeeImportRow(row) {
     phone: "",
     status: "نشط",
     manager: "",
+    gender: "غير محدد",
     profile_image_url: "",
+    profile_image_path: "",
   };
   Object.entries(row || {}).forEach(([key, value]) => {
     const cleanKey = normalizeEmployeeImportKey(key);
@@ -9375,6 +9479,11 @@ function importEmployees(event, setEmployees) {
         phone: row.phone || "",
         status: row.status || "نشط",
         manager: row.manager || "",
+        gender: row.gender || "غير محدد",
+        profile_image_url: row.profile_image_url || row.profile_image || row.avatar_url || row.photo_url || "",
+        profileImageUrl: row.profile_image_url || row.profile_image || row.avatar_url || row.photo_url || "",
+        profile_image_path: row.profile_image_path || row.photo_path || "",
+        profileImagePath: row.profile_image_path || row.photo_path || "",
       }));
       setEmployees((list) => {
         const byId = new Map(list.map((employee) => [employee.id, employee]));
