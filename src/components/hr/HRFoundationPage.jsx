@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import {
   BadgeCheck,
   BriefcaseBusiness,
@@ -207,12 +207,9 @@ export default function HRFoundationPage({
   const departmentRows = useMemo(() => normalizeDepartments(settings), [settings.departments]);
   const jobRows = useMemo(() => normalizeJobs(settings), [settings.jobDefinitions, settings.jobs]);
   const jobTitleRows = useMemo(() => normalizeJobTitles(settings, jobRows), [settings.jobTitles, jobRows]);
-  const branchNames = unique([
-    ...branchRows.filter((row) => row.is_active !== false).map((row) => row.branch_name),
-    ...(settings.branches || []),
-    ...employees.map((employee) => employee.branch),
-  ]);
-  const managerNames = unique(employees.filter((employee) => employee.status === "نشط").map((employee) => employee.name));
+  const branchNames = unique(branchRows.filter((row) => row.is_active !== false).map((row) => row.branch_name));
+  const companyEmployees = employees.filter((employee) => !employee.company_id || !companyId || employee.company_id === companyId);
+  const managerNames = unique(companyEmployees.map((employee) => employee.name));
   const canConfigure = can?.("hr_settings", "can_edit") !== false;
   const canCreate = can?.("hr_settings", "can_create") !== false;
   const canManageEmployees = can?.("employees", "can_edit") !== false;
@@ -281,7 +278,7 @@ export default function HRFoundationPage({
         ? branchRows.map((row) => row.id === saved.id ? saved : row)
         : [saved, ...branchRows];
       setBranchRows(next);
-      setSettings({ ...settings, branches: unique([...next.filter((row) => row.is_active !== false).map((row) => row.branch_name), ...employees.map((employee) => employee.branch)]) });
+      setSettings({ ...settings, branches: unique(next.filter((row) => row.is_active !== false).map((row) => row.branch_name)) });
       setDialog(null);
       alert("تم حفظ الفرع بنجاح");
     } catch (error) {
@@ -294,7 +291,7 @@ export default function HRFoundationPage({
 
   const deactivateBranch = async (row) => {
     if (!canConfigure) return alert("لا تملك صلاحية تعديل الفرع");
-    if (employees.some((employee) => employee.branch === row.branch_name)) return alert("الفرع مرتبط بموظفين؛ انقل الموظفين أولًا قبل تعطيله.");
+    if (companyEmployees.some((employee) => employee.branch === row.branch_name)) return alert("الفرع مرتبط بموظفين؛ انقل الموظفين أولًا قبل تعطيله.");
     if (!confirm(`هل تريد تعطيل فرع «${row.branch_name}»؟`)) return;
     try {
       const saved = await settingsBranchesService.deleteBranch(companyId, row.id, row);
@@ -314,7 +311,7 @@ export default function HRFoundationPage({
 
   const saveReportingManager = (event) => {
     event.preventDefault();
-    const employee = employees.find((item) => item.id === dialog.employee_id);
+    const employee = companyEmployees.find((item) => item.id === dialog.employee_id);
     if (!employee) return alert("تعذر العثور على الموظف");
     if (dialog.manager_name === employee.name) return alert("لا يمكن أن يكون الموظف مديرًا مباشرًا لنفسه");
     setEmployees((rows) => rows.map((row) => row.id === employee.id ? { ...row, manager: clean(dialog.manager_name) } : row));
@@ -329,14 +326,14 @@ export default function HRFoundationPage({
   };
 
   const jobDepartmentMap = Object.fromEntries(jobRows.map((job) => [job.name, job.department_name || "غير محدد"]));
-  const organizationBranches = branchNames.length ? branchNames : ["غير محدد"];
-  const assignedManagers = employees.filter((employee) => clean(employee.manager)).length;
+  const organizationBranches = branchNames;
+  const assignedManagers = companyEmployees.filter((employee) => clean(employee.manager)).length;
 
   const renderOverview = () => (
     <div className="space-y-5">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Metric label="إجمالي الموظفين" value={employees.length} icon={Users} />
-        <Metric label="الموظفون النشطون" value={employees.filter((employee) => employee.status === "نشط").length} icon={BadgeCheck} />
+        <Metric label="إجمالي الموظفين" value={companyEmployees.length} icon={Users} />
+        <Metric label="الموظفون النشطون" value={companyEmployees.filter((employee) => employee.status !== "\u0645\u0639\u0637\u0644").length} icon={BadgeCheck} />
         <Metric label="الفروع" value={branchNames.length} icon={Building2} />
         <Metric label="الأقسام" value={departmentRows.filter((row) => row.status !== "معطل").length} icon={Network} />
         <Metric label="الوظائف" value={jobRows.filter((row) => row.status !== "معطل").length} icon={BriefcaseBusiness} />
@@ -348,7 +345,7 @@ export default function HRFoundationPage({
         <h3 className="text-lg font-extrabold">جاهزية أساس الموارد البشرية</h3>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           {[
-            ["سجل الموظفين", employees.length > 0],
+            ["سجل الموظفين", companyEmployees.length > 0],
             ["الفروع", branchNames.length > 0],
             ["الأقسام", departmentRows.length > 0],
             ["الوظائف", jobRows.length > 0],
@@ -363,16 +360,22 @@ export default function HRFoundationPage({
   const renderOrganization = () => (
     <div className="space-y-4">
       <div className="rounded-2xl bg-slate-900 p-5 text-white"><p className="text-xs text-slate-300">الشركة</p><h3 className="mt-1 text-xl font-extrabold">{currentCompany?.company_name || "الشركة الحالية"}</h3></div>
-      <div className="grid gap-4 xl:grid-cols-2">
+      {branchError && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-700">{branchError}</div>}
+      {branchesLoading ? <EmptyState>جاري تحميل الفروع...</EmptyState> : !organizationBranches.length ? (
+        <EmptyState>
+          <div className="font-bold text-slate-500">لا توجد فروع مضافة لهذه الشركة</div>
+          <div className="mt-2 text-xs text-slate-400">يمكنك إضافة الفروع من الإعدادات العامة → الفروع</div>
+        </EmptyState>
+      ) : <div className="grid gap-4 xl:grid-cols-2">
         {organizationBranches.map((branchName) => {
-          const branchEmployees = employees.filter((employee) => (employee.branch || "غير محدد") === branchName);
+          const branchEmployees = companyEmployees.filter((employee) => employee.branch === branchName);
           const branchDepartments = unique([
             ...departmentRows.filter((department) => !department.branch_name || department.branch_name === branchName).map((department) => department.name),
             ...branchEmployees.map((employee) => jobDepartmentMap[employee.job] || "غير محدد"),
           ]);
-          return <div key={branchName} className="panel p-5"><div className="flex items-center gap-3 border-b pb-4"><Building2 className="text-brand-700" /><div><h3 className="font-extrabold">{branchName}</h3><p className="text-xs text-slate-500">{branchEmployees.length} موظف</p></div></div><div className="mt-4 space-y-3">{branchDepartments.map((departmentName) => { const departmentEmployees = branchEmployees.filter((employee) => (jobDepartmentMap[employee.job] || "غير محدد") === departmentName); return <div key={departmentName} className="rounded-xl bg-slate-50 p-3"><div className="flex items-center"><b className="text-sm">{departmentName}</b><span className="mr-auto text-xs text-slate-400">{departmentEmployees.length}</span></div><div className="mt-2 flex flex-wrap gap-2">{departmentEmployees.map((employee) => <span key={employee.id} className="rounded-lg bg-white px-2 py-1 text-xs text-slate-600">{employee.name} · {employee.job}</span>)}</div></div>; })}</div></div>;
+          return <div key={branchName} className="panel p-5"><div className="flex items-center gap-3 border-b pb-4"><Building2 className="text-brand-700" /><div><h3 className="font-extrabold">{branchName}</h3><p className="text-xs text-slate-500">{branchEmployees.length} موظف</p></div></div><div className="mt-4 space-y-3">{branchDepartments.map((departmentName) => { const departmentEmployees = branchEmployees.filter((employee) => (jobDepartmentMap[employee.job] || "غير محدد") === departmentName); return <div key={departmentName} className="rounded-xl bg-slate-50 p-3"><div className="flex items-center"><b className="text-sm">{departmentName}</b><span className="mr-auto text-xs text-slate-400">{departmentEmployees.length}</span></div><div className="mt-2 flex flex-wrap gap-2">{departmentEmployees.map((employee) => <span key={employee.id} className="rounded-lg bg-white px-2 py-1 text-xs text-slate-600">{employee.name} - {employee.job}</span>)}</div></div>; })}</div></div>;
         })}
-      </div>
+      </div>}
     </div>
   );
 
@@ -391,7 +394,7 @@ export default function HRFoundationPage({
   };
 
   const renderManagers = () => (
-    <div className="space-y-4"><div><h3 className="text-lg font-extrabold">خطوط الإشراف والمديرون المباشرون</h3><p className="text-xs text-slate-500">يُحفظ المدير المباشر في سجل الموظف نفسه داخل Supabase.</p></div>{employees.length ? <div className="table-wrap"><table><thead><tr><th>رقم الموظف</th><th>الموظف</th><th>الفرع</th><th>الوظيفة</th><th>المدير المباشر</th><th>الإجراءات</th></tr></thead><tbody>{employees.map((employee) => <tr key={employee.id}><td>{employee.id}</td><td className="font-bold">{employee.name}</td><td>{employee.branch}</td><td>{employee.job}</td><td>{employee.manager || "غير محدد"}</td><td><button disabled={!canManageEmployees} onClick={() => openReportingManager(employee)} className="btn-secondary"><Pencil size={15} /> تعديل</button></td></tr>)}</tbody></table></div> : <EmptyState />}</div>
+    <div className="space-y-4"><div><h3 className="text-lg font-extrabold">خطوط الإشراف والمديرون المباشرون</h3><p className="text-xs text-slate-500">يُحفظ المدير المباشر في سجل الموظف نفسه داخل Supabase.</p></div>{companyEmployees.length ? <div className="table-wrap"><table><thead><tr><th>رقم الموظف</th><th>الموظف</th><th>الفرع</th><th>الوظيفة</th><th>المدير المباشر</th><th>الإجراءات</th></tr></thead><tbody>{companyEmployees.map((employee) => <tr key={employee.id}><td>{employee.id}</td><td className="font-bold">{employee.name}</td><td>{employee.branch}</td><td>{employee.job}</td><td>{employee.manager || "غير محدد"}</td><td><button disabled={!canManageEmployees} onClick={() => openReportingManager(employee)} className="btn-secondary"><Pencil size={15} /> تعديل</button></td></tr>)}</tbody></table></div> : <EmptyState />}</div>
   );
 
   const renderHrSettings = () => (
