@@ -115,7 +115,9 @@ export default function AttendanceCalculationPage({ pageKey = "attendance_dashbo
   const [periods, setPeriods] = useState([]);
   const [requests, setRequests] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
-  const [bulk, setBulk] = useState({ status: "حاضر", check_in: "08:00", check_out: "", note: "" });
+  const [bulk, setBulk] = useState({ status: "\u062d\u0627\u0636\u0631", check_in: "08:00", check_out: "", note: "" });
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkValidationMessage, setBulkValidationMessage] = useState("");
   const [editRecord, setEditRecord] = useState(null);
   const [requestDialog, setRequestDialog] = useState(null);
   const [periodDialog, setPeriodDialog] = useState(null);
@@ -171,6 +173,13 @@ export default function AttendanceCalculationPage({ pageKey = "attendance_dashbo
     if (filters.status !== "all" && (record?.status || "غير مسجل") !== filters.status) return false;
     return true;
   });
+  const selectedEmployees = activeEmployees.filter((employee) => selectedIds.includes(employee.id));
+  const bulkStatus = clean(bulk.status);
+  const canSaveBulkAttendance =
+    selectedEmployees.length > 0 &&
+    Boolean(date) &&
+    Boolean(bulkStatus) &&
+    !bulkSaving;
 
   const reportRows = activeEmployees.map((employee) => {
     const employeeRecords = records.filter((record) => record.employee_id === employee.id && record.attendance_date?.startsWith(month));
@@ -258,37 +267,61 @@ export default function AttendanceCalculationPage({ pageKey = "attendance_dashbo
   };
 
   const saveBulk = async () => {
-    if (!canBulk) return alert("لا تملك صلاحية التحضير الجماعي");
-    if (!selectedIds.length) return alert("اختر موظفين أولاً");
-    if (selectedIds.some((id) => recordsByEmployee.has(id)) && !confirm("توجد سجلات حضور لهذا التاريخ، هل تريد تحديثها؟")) return;
-    const rows = selectedIds.map((id) => {
-      const employee = activeEmployees.find((item) => item.id === id) || {};
-      const existing = recordsByEmployee.get(id) || {};
-      const checkInTime = bulk.check_in ? `${date}T${bulk.check_in}:00` : existing.check_in_time;
-      const checkOutTime = bulk.check_out ? `${date}T${bulk.check_out}:00` : existing.check_out_time;
+    setBulkValidationMessage("");
+    if (!selectedEmployees.length) {
+      setBulkValidationMessage("\u064a\u0631\u062c\u0649 \u0627\u062e\u062a\u064a\u0627\u0631 \u0645\u0648\u0638\u0641 \u0648\u0627\u062d\u062f \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644");
+      return;
+    }
+    if (!date) {
+      setBulkValidationMessage("\u064a\u0631\u062c\u0649 \u0627\u062e\u062a\u064a\u0627\u0631 \u062a\u0627\u0631\u064a\u062e \u0627\u0644\u062a\u062d\u0636\u064a\u0631");
+      return;
+    }
+    if (!bulkStatus) {
+      setBulkValidationMessage("\u064a\u0631\u062c\u0649 \u0627\u062e\u062a\u064a\u0627\u0631 \u062d\u0627\u0644\u0629 \u0627\u0644\u062a\u062d\u0636\u064a\u0631");
+      return;
+    }
+    if (!canBulk) return alert("\u0644\u0627 \u062a\u0645\u0644\u0643 \u0635\u0644\u0627\u062d\u064a\u0629 \u0627\u0644\u062a\u062d\u0636\u064a\u0631 \u0627\u0644\u062c\u0645\u0627\u0639\u064a");
+    if (selectedIds.some((id) => recordsByEmployee.has(id)) && !confirm("\u062a\u0648\u062c\u062f \u0633\u062c\u0644\u0627\u062a \u062d\u0636\u0648\u0631 \u0644\u0647\u0630\u0627 \u0627\u0644\u062a\u0627\u0631\u064a\u062e\u060c \u0647\u0644 \u062a\u0631\u064a\u062f \u062a\u062d\u062f\u064a\u062b\u0647\u0627\u061f")) return;
+    const noTimeStatuses = ["\u063a\u0627\u0626\u0628", "\u0625\u062c\u0627\u0632\u0629", "\u0641\u064a \u0625\u062c\u0627\u0632\u0629", "\u0639\u0637\u0644\u0629 \u0631\u0633\u0645\u064a\u0629", "\u0645\u0647\u0645\u0629 \u0639\u0645\u0644", "\u0641\u064a \u0645\u0647\u0645\u0629 \u0639\u0645\u0644", "\u0627\u0646\u062a\u062f\u0627\u0628", "\u0641\u064a \u0627\u0646\u062a\u062f\u0627\u0628", "\u0627\u0633\u062a\u0626\u0630\u0627\u0646 \u0641\u0642\u0637"];
+    const needsCheckIn = ["\u062d\u0627\u0636\u0631", "\u0645\u062a\u0623\u062e\u0631"].includes(bulkStatus);
+    const effectiveCheckIn = needsCheckIn && !bulk.check_in ? attendanceService.nowTime() : bulk.check_in;
+    const rows = selectedEmployees.map((employee) => {
+      const existing = recordsByEmployee.get(employee.id) || {};
+      const checkInTime = noTimeStatuses.includes(bulkStatus)
+        ? existing.check_in_time || null
+        : effectiveCheckIn ? `${date}T${effectiveCheckIn}:00` : existing.check_in_time;
+      const checkOutTime = noTimeStatuses.includes(bulkStatus)
+        ? existing.check_out_time || null
+        : bulk.check_out ? `${date}T${bulk.check_out}:00` : existing.check_out_time;
       return {
         ...existing,
         company_id: companyId,
-        employee_id: id,
+        employee_id: employee.id,
         employee_name: employee.name,
         attendance_date: date,
         branch: employee.branch,
         department: employeeDepartment(employee),
         check_in_time: checkInTime,
         check_out_time: checkOutTime,
-        status: bulk.status,
+        status: bulkStatus,
         note: bulk.note,
         worked_minutes: attendanceService.calculateWorkedMinutes(checkInTime, checkOutTime, activePeriod),
         updated_by: currentUser?.username || "",
       };
     });
+    setBulkSaving(true);
     try {
-      const saved = await attendanceService.bulkSaveAttendanceRecords(rows);
-      saved.forEach(upsertLocalRecord);
+      await attendanceService.bulkSaveAttendanceRecords(rows);
+      setMessage("\u062a\u0645 \u062d\u0641\u0638 \u0627\u0644\u062a\u062d\u0636\u064a\u0631 \u0628\u0646\u062c\u0627\u062d");
       setSelectedIds([]);
-      log("attendance_bulk_update", "تحضير جماعي", `${saved.length}`);
+      await load();
+      log("attendance_bulk_update", "\u062a\u062d\u0636\u064a\u0631 \u062c\u0645\u0627\u0639\u064a", `${rows.length}`);
     } catch (error) {
-      alert(error.message);
+      console.error("Attendance bulk save error:", error);
+      setBulkValidationMessage("\u062a\u0639\u0630\u0631 \u062d\u0641\u0638 \u0627\u0644\u062a\u062d\u0636\u064a\u0631");
+      alert("\u062a\u0639\u0630\u0631 \u062d\u0641\u0638 \u0627\u0644\u062a\u062d\u0636\u064a\u0631");
+    } finally {
+      setBulkSaving(false);
     }
   };
 
@@ -373,7 +406,7 @@ export default function AttendanceCalculationPage({ pageKey = "attendance_dashbo
 
       {activeTab === "attendance_records" && <div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>الصورة</th><th>الرقم الوظيفي</th><th>الموظف</th><th>الوظيفة</th><th>الإدارة</th><th>الفرع</th><th>جدول العمل</th><th>وقت الحضور</th><th>وقت الانصراف</th><th>الحالة</th><th>التأخير</th><th>ساعات العمل</th><th>ملاحظات</th><th>إجراءات</th></tr></thead><tbody>{loading ? <tr><td colSpan={14}>جاري التحميل...</td></tr> : filteredEmployees.map((employee) => { const record = recordsByEmployee.get(employee.id) || {}; return <tr key={employee.id}><td><Avatar employee={employee} /></td><td>{employee.id}</td><td className="font-bold">{employee.name}</td><td>{employee.job}</td><td>{employeeDepartment(employee)}</td><td>{employee.branch}</td><td>{activePeriod.period_name}</td><td>{timeValue(record.check_in_time) || "—"}</td><td>{timeValue(record.check_out_time) || "—"}</td><td><Status>{record.status || "غير مسجل"}</Status></td><td>{record.late_minutes || 0} د</td><td>{hours(record.worked_minutes)}</td><td>{record.note || "—"}</td><td><div className="flex min-w-44 flex-wrap gap-1"><button disabled={!canSave || record.check_in_time} onClick={() => checkIn(employee)} className="btn-secondary !h-8 !px-2 disabled:opacity-40">حضور</button><button disabled={!canSave || !record.check_in_time || record.check_out_time} onClick={() => checkOut(employee)} className="btn-secondary !h-8 !px-2 disabled:opacity-40">خروج</button><button disabled={!canEdit} onClick={() => setEditRecord({ ...record, employee_id: employee.id, attendance_date: date, check_in: timeValue(record.check_in_time), check_out: timeValue(record.check_out_time), status: record.status || "حاضر", adjustment_reason: "" })} className="btn-secondary !h-8 !px-2 disabled:opacity-40">تعديل</button></div></td></tr>; })}</tbody></table></div></div>}
 
-      {activeTab === "bulk_attendance" && <div className="space-y-4"><div className="panel flex flex-wrap gap-2 p-4"><button onClick={() => setSelectedIds(filteredEmployees.map((employee) => employee.id))} className="btn-secondary">اختيار الكل</button>{branches.map((branch) => <button key={branch} onClick={() => setSelectedIds(activeEmployees.filter((employee) => employee.branch === branch).map((employee) => employee.id))} className="btn-secondary">{branch}</button>)}</div><div className="panel grid gap-3 p-4 md:grid-cols-5"><select value={bulk.status} onChange={(e) => setBulk({ ...bulk, status: e.target.value })} className="field">{["حاضر", "غائب", "إجازة", "مهمة عمل", "عطلة رسمية"].map((value) => <option key={value}>{value}</option>)}</select><input type="time" value={bulk.check_in} onChange={(e) => setBulk({ ...bulk, check_in: e.target.value })} className="field" /><input type="time" value={bulk.check_out} onChange={(e) => setBulk({ ...bulk, check_out: e.target.value })} className="field" /><input value={bulk.note} onChange={(e) => setBulk({ ...bulk, note: e.target.value })} className="field" placeholder="ملاحظة جماعية" /><button onClick={saveBulk} disabled={!canBulk} className="btn-primary disabled:opacity-40">حفظ التحضير ({selectedIds.length})</button></div><div className="panel grid gap-2 p-4 md:grid-cols-3">{filteredEmployees.map((employee) => <label key={employee.id} className="flex items-center gap-2 rounded-xl bg-slate-50 p-2 text-sm"><input type="checkbox" checked={selectedIds.includes(employee.id)} onChange={(e) => setSelectedIds((list) => e.target.checked ? [...list, employee.id] : list.filter((id) => id !== employee.id))} />{employee.name} - {employee.branch}</label>)}</div></div>}
+      {activeTab === "bulk_attendance" && <div className="space-y-4"><div className="panel flex flex-wrap gap-2 p-4"><button onClick={() => setSelectedIds(filteredEmployees.map((employee) => employee.id))} className="btn-secondary">اختيار الكل</button>{branches.map((branch) => <button key={branch} onClick={() => setSelectedIds(activeEmployees.filter((employee) => employee.branch === branch).map((employee) => employee.id))} className="btn-secondary">{branch}</button>)}</div><div className="panel grid gap-3 p-4 md:grid-cols-5"><select value={bulk.status} onChange={(e) => setBulk({ ...bulk, status: e.target.value })} className="field">{["حاضر", "غائب", "إجازة", "مهمة عمل", "عطلة رسمية"].map((value) => <option key={value}>{value}</option>)}</select><input type="time" value={bulk.check_in} onChange={(e) => setBulk({ ...bulk, check_in: e.target.value })} className="field" /><input type="time" value={bulk.check_out} onChange={(e) => setBulk({ ...bulk, check_out: e.target.value })} className="field" /><input value={bulk.note} onChange={(e) => setBulk({ ...bulk, note: e.target.value })} className="field" placeholder="ملاحظة جماعية" /><button onClick={saveBulk} disabled={!canSaveBulkAttendance} className="btn-primary disabled:opacity-40">{selectedEmployees.length > 0 ? `\u062d\u0641\u0638 \u0627\u0644\u062a\u062d\u0636\u064a\u0631 (${selectedEmployees.length})` : "\u0627\u062e\u062a\u0631 \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646 \u0623\u0648\u0644\u064b\u0627"}</button></div>{bulkValidationMessage && <div className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700 md:col-span-5">{bulkValidationMessage}</div>}<div className="panel grid gap-2 p-4 md:grid-cols-3">{filteredEmployees.map((employee) => <label key={employee.id} className="flex items-center gap-2 rounded-xl bg-slate-50 p-2 text-sm"><input type="checkbox" checked={selectedIds.includes(employee.id)} onChange={(e) => setSelectedIds((list) => e.target.checked ? [...list, employee.id] : list.filter((id) => id !== employee.id))} />{employee.name} - {employee.branch}</label>)}</div></div>}
 
       {activeTab === "attendance_requests" && <div className="space-y-4"><div className="flex justify-end"><button onClick={() => setRequestDialog({ id: crypto.randomUUID?.() || `REQ-${Date.now()}`, employee_id: activeEmployees[0]?.id || "", request_type: attendanceRequestTypes[0], request_date: date, from_time: "", to_time: "", reason: "", status: "معلق" })} className="btn-primary"><Plus size={17} /> طلب جديد</button></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>الموظف</th><th>النوع</th><th>التاريخ</th><th>من وقت</th><th>إلى وقت</th><th>السبب</th><th>الحالة</th><th>مقدم الطلب</th><th>تاريخ الطلب</th><th>إجراءات</th></tr></thead><tbody>{requests.length ? requests.map((request) => { const employee = activeEmployees.find((item) => item.id === request.employee_id); return <tr key={request.id}><td>{employee?.name || request.employee_id}</td><td>{request.request_type}</td><td>{request.request_date}</td><td>{request.from_time || "—"}</td><td>{request.to_time || "—"}</td><td>{request.reason}</td><td><Status>{request.status}</Status></td><td>{request.created_by || "—"}</td><td>{String(request.created_at || "").slice(0, 10)}</td><td><button disabled={!canRequests} onClick={() => changeRequestStatus(request, "معتمد")} className="p-2 text-green-700"><BadgeCheck size={16} /></button><button disabled={!canRequests} onClick={() => changeRequestStatus(request, "مرفوض")} className="p-2 text-red-600"><X size={16} /></button><button onClick={() => setRequestDialog(request)} className="p-2 text-blue-600"><Eye size={16} /></button></td></tr>; }) : <tr><td colSpan={10} className="py-8 text-center text-slate-400">لا توجد طلبات عمل حالياً</td></tr>}</tbody></table></div></div></div>}
 
