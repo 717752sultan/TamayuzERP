@@ -27,13 +27,14 @@ export const operationTypes = [...new Set([
 ])];
 
 export const serviceChannels = [...new Set(["مباشر", "واتساب", "هاتف", "تطبيق", "أخرى", "فرع", "إدارة", "نظام داخلي"])];
-export const operationStatuses = ["مستورد", "قيد المراجعة", "معتمد", "مرفوض", "ملغي", "معاد للتعديل"];
+export const operationStatuses = ["قيد المراجعة", "معتمد", "معتمدة", "مسودة", "مرفوض", "ملغي", "معاد للتعديل"];
 export const approvedDailyOperationStatuses = new Set(["معتمد", "معتمدة"]);
 export const pendingDailyOperationStatuses = new Set(["مستورد", "قيد المراجعة", "مسودة"]);
 export const excludedFromKpiStatuses = new Set(["قيد المراجعة", "مستورد", "مرفوض", "مرفوضة", "ملغي", "ملغى", "معاد للتعديل", "مسودة"]);
 export const isApprovedDailyOperation = (row = {}) => row.included_in_kpi === true || approvedDailyOperationStatuses.has(String(row.status || "").trim());
 
 export const DAILY_OPERATIONS_BULK_CHUNK_SIZE = 100;
+export const DAILY_OPERATIONS_DEFAULT_LIMIT = 5000;
 
 const averageServiceTimeMarker = /\n?\[\[average_service_time:([-+]?\d+(?:\.\d+)?)\]\]/g;
 
@@ -61,6 +62,7 @@ const normalizeStatus = (status = "") => {
   const value = String(status || "").trim();
   if (["معتمدة", "معتمد"].includes(value)) return "معتمد";
   if (["مرفوضة", "مرفوض"].includes(value)) return "مرفوض";
+  if (["قيد المراجعة", "مسودة", "مستورد", "ملغي", "ملغى", "معاد للتعديل"].includes(value)) return value === "ملغى" ? "ملغي" : value;
   if (value) return value;
   return "قيد المراجعة";
 };
@@ -254,9 +256,13 @@ export const dailyOperationsService = {
         `company_id=eq.${encodeURIComponent(companyId)}`,
         ...(filters.month ? [`month=eq.${encodeURIComponent(filters.month)}`] : []),
         ...(filters.date ? [`operation_date=eq.${encodeURIComponent(filters.date)}`] : []),
+        ...(filters.fromDate ? [`operation_date=gte.${encodeURIComponent(filters.fromDate)}`] : []),
+        ...(filters.toDate ? [`operation_date=lte.${encodeURIComponent(filters.toDate)}`] : []),
+        ...(filters.status && filters.status !== "all" ? [`status=eq.${encodeURIComponent(filters.status)}`] : []),
         ...(filters.employeeId ? [`employee_id=eq.${encodeURIComponent(filters.employeeId)}`] : []),
         "select=*",
         "order=operation_date.desc",
+        `limit=${Number(filters.limit || DAILY_OPERATIONS_DEFAULT_LIMIT)}`,
       ].join("&");
       const rows = await supabase.select("daily_operations", query);
       const mapped = (Array.isArray(rows) ? rows : []).map(fromDb);

@@ -7642,7 +7642,13 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
     setLoading(true);
     try {
       if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
-      setRows(await dailyOperationsService.loadDailyOperations({ companyId, month: filters.month }));
+      setRows(await dailyOperationsService.loadDailyOperations({
+        companyId,
+        month: (filters.fromDate || filters.toDate || filters.date) ? "" : filters.month,
+        date: filters.date,
+        fromDate: filters.fromDate,
+        toDate: filters.toDate,
+      }));
     } catch (error) {
       console.error("Daily operations page load error:", error);
       alert(error.message || "تعذر تحميل العمليات اليومية");
@@ -7655,7 +7661,7 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
     load();
     const unsubscribe = dailyOperationsService.subscribe(load);
     return () => unsubscribe?.();
-  }, [filters.month, companyId]);
+  }, [filters.month, filters.date, filters.fromDate, filters.toDate, filters.status, companyId]);
 
   const filtered = safeRows.filter((row) =>
     (!filters.date || row.operation_date === filters.date)
@@ -7909,6 +7915,20 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
           errors: invalidRows.map((row) => `الصف ${row.rowNumber}: ${row.validationMessage}`),
         },
       }));
+      const importedDates = importRows
+        .filter((row) => row.valid && row.operation_date)
+        .map((row) => row.operation_date)
+        .sort();
+      if (importedDates.length) {
+        setFilters((current) => ({
+          ...current,
+          month: "",
+          date: "",
+          fromDate: importedDates[0],
+          toDate: importedDates[importedDates.length - 1],
+          status: "all",
+        }));
+      }
       await load();
     } catch (error) {
       console.error("Daily operations Excel import error:", error);
