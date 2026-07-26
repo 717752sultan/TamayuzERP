@@ -1,6 +1,6 @@
 ﻿import { supabase } from "./supabase";
 import { isPlatformAdminUser, isProtectedPlatformRole, isProtectedPlatformUser } from "./tenant";
-import { ROLE_OPTIONS, normalizeRoleName } from "./roles";
+import { ROLE_OPTIONS, isMojibakeText, normalizeRoleName } from "./roles";
 
 export const permissionPages = [
   "dashboard",
@@ -205,6 +205,8 @@ const permissionToDb = (item = {}) => ({
 const roleFromDb = (row = {}) => ({
   role_id: row.role_id || `ROLE-${row.role_name || row.name || Date.now()}`,
   role_name: normalizeRoleName(row.role_name || row.name || ""),
+  raw_role_name: String(row.role_name || row.name || ""),
+  is_corrupted_role: isMojibakeText(row.role_name || row.name || ""),
   role_description: row.role_description || row.description || "",
   is_system_role: row.is_system_role === true,
   is_active: row.is_active !== false,

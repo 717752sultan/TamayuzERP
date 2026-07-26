@@ -108,7 +108,7 @@ import { companiesService } from "./services/companies";
 import { applyCompanyPermissionActionToggle, companyPermissionActions, companyPermissionChildActionKeys, companyPermissionModules, companyPermissionsService, companyCanAccessFromRows, companyCanModuleFromRows, companyCanPageFromRows, mergeWithDefaultCompanyPermissions } from "./services/companyPermissions";
 import { applyCompanyTheme, applyThemeForCurrentCompany, getDefaultTheme, normalizeThemePayload, themePresets, themeService } from "./services/theme";
 import { clearTenantSession, getCurrentCompany, getCurrentUser, isPlatformAdminUser, isPlatformRoute, isProtectedPlatformRole, isProtectedPlatformUser, loadTenantSession, setCompanySession, setPlatformSession } from "./services/tenant";
-import { getRoleOptions, normalizeRoleName } from "./services/roles";
+import { displayRoleName, getRoleOptions, normalizeRoleName } from "./services/roles";
 import { assistantModes, pageRegistryByKey } from "./constants/pageRegistry";
 import { APP_BRAND_NAME, APP_DESCRIPTION, APP_OFFICIAL_NAME, APP_REPORT_SUBTITLE, APP_REPORT_TITLE, APP_SHORT_NAME, APP_SYSTEM_NAME, APP_TAGLINE } from "./constants/branding";
 import { buildReportBrandingHtml } from "./services/reportBranding";
@@ -8611,7 +8611,13 @@ function RoleManagementPanel({ roles, users, canEdit, onSaveRole, onDeleteRole, 
   const [q, setQ] = useState("");
   const [dialog, setDialog] = useState(null);
   const [copySource, setCopySource] = useState("");
-  const filtered = roles.filter((role) => !q || role.role_name.includes(q) || role.role_description.includes(q));
+  const safeRoles = (roles || []).map((role) => ({
+    ...role,
+    display_role_name: displayRoleName(role.raw_role_name || role.role_name),
+    normalized_role_name: normalizeRoleName(role.raw_role_name || role.role_name),
+  }));
+  const visibleRoles = safeRoles.filter((role) => role.display_role_name !== "دور تالف يحتاج معالجة" || !role.is_system_role);
+  const filtered = visibleRoles.filter((role) => !q || role.display_role_name.includes(q) || String(role.role_description || "").includes(q));
   return (
     <div className="panel p-4 xl:col-span-2">
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -8623,8 +8629,10 @@ function RoleManagementPanel({ roles, users, canEdit, onSaveRole, onDeleteRole, 
         <table>
           <thead><tr><th>الدور</th><th>الوصف</th><th>عدد المستخدمين</th><th>الحالة</th><th>نوع الدور</th><th></th></tr></thead>
           <tbody>{filtered.map((role) => {
-            const count = users.filter((u) => u.role === role.role_name).length;
-            return <tr key={role.role_id}><td>{role.role_name}</td><td>{role.role_description}</td><td>{count}</td><td><Status>{role.is_active ? "نشط" : "معطل"}</Status></td><td>{role.is_system_role ? "نظامي" : "مخصص"}</td><td><button disabled={!canEdit} onClick={() => setDialog(role)} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canEdit} onClick={() => onDeleteRole(role)} className="p-2 text-red-600">{count ? "تعطيل" : "حذف"}</button><select value={copySource} onChange={(e) => setCopySource(e.target.value)} className="field mx-1 max-w-[160px]"><option value="">نسخ من...</option>{roles.filter((r) => r.role_name !== role.role_name).map((r) => <option key={r.role_id}>{r.role_name}</option>)}</select><button disabled={!copySource} onClick={() => onCopyPermissions(copySource, role.role_name)} className="btn-secondary">نسخ</button></td></tr>;
+            const count = users.filter((u) => normalizeRoleName(u.role) === role.normalized_role_name).length;
+            const corrupted = role.display_role_name === "دور تالف يحتاج معالجة";
+            const copyOptions = visibleRoles.filter((r) => r.role_id !== role.role_id && r.display_role_name !== "دور تالف يحتاج معالجة");
+            return <tr key={role.role_id} className={corrupted ? "bg-amber-50" : ""}><td>{role.display_role_name}{corrupted && <p className="mt-1 text-xs font-bold text-amber-700">القيمة الأصلية تالفة في قاعدة البيانات</p>}</td><td>{role.role_description}</td><td>{count}</td><td><Status>{role.is_active ? "نشط" : "معطل"}</Status></td><td>{role.is_system_role ? "نظامي" : "مخصص"}</td><td><button disabled={!canEdit || corrupted} onClick={() => setDialog({ ...role, role_name: role.normalized_role_name })} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canEdit || corrupted} onClick={() => onDeleteRole(role)} className="p-2 text-red-600">{count ? "تعطيل" : "حذف"}</button><select value={copySource} onChange={(e) => setCopySource(e.target.value)} className="field mx-1 max-w-[160px]"><option value="">نسخ من...</option>{copyOptions.map((r) => <option key={r.role_id} value={r.normalized_role_name}>{r.display_role_name}</option>)}</select><button disabled={!copySource || corrupted} onClick={() => onCopyPermissions(copySource, role.normalized_role_name)} className="btn-secondary">نسخ</button></td></tr>;
           })}</tbody>
         </table>
       </div>

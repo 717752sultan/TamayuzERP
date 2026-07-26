@@ -17,6 +17,8 @@ export const ROLE_OPTIONS = [
   "خزينة مركزية",
 ];
 
+export const CORRUPTED_ROLE_LABEL = "دور تالف يحتاج معالجة";
+
 const MOJIBAKE_PATTERNS = ["ط§", "ظ„", "ظ…", "ظ†", "╪", "┘", "ي╗┐", "ط¸", "آ"];
 
 const roleAliases = new Map([
@@ -49,6 +51,14 @@ export const normalizeRoleName = (value = "") => {
   if (ROLE_OPTIONS.includes(text)) return text;
   if (isMojibakeText(text)) return "غير محدد";
   return text;
+};
+
+export const displayRoleName = (value = "") => {
+  const text = String(value || "").trim();
+  if (!text) return "غير محدد";
+  const normalized = normalizeRoleName(text);
+  if (normalized !== "غير محدد") return normalized;
+  return isMojibakeText(text) ? CORRUPTED_ROLE_LABEL : "غير محدد";
 };
 
 export const getRoleOptions = (extraRoles = []) => {
