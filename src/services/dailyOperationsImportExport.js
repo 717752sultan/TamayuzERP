@@ -114,19 +114,40 @@ const safeNumber = (value) => {
   return Number.isFinite(number) ? number : Number.NaN;
 };
 
+const pad2 = (value) => String(value).padStart(2, "0");
+
+const formatDateOnly = (year, month, day) => {
+  const y = Number(year);
+  const m = Number(month);
+  const d = Number(day);
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return "";
+  if (y < 1900 || m < 1 || m > 12 || d < 1 || d > 31) return "";
+  return `${y}-${pad2(m)}-${pad2(d)}`;
+};
+
+const formatLocalDateObject = (date) => {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  return formatDateOnly(date.getFullYear(), date.getMonth() + 1, date.getDate());
+};
+
 const excelDateToIso = (value) => {
   if (!value) return "";
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return formatLocalDateObject(value);
   if (typeof value === "number") {
-    const parsed = XLSX.SSF.parse_date_code(value);
+    const parsed = XLSX.SSF.parse_date_code?.(value);
     if (parsed?.y && parsed?.m && parsed?.d) {
-      return `${parsed.y}-${String(parsed.m).padStart(2, "0")}-${String(parsed.d).padStart(2, "0")}`;
+      return formatDateOnly(parsed.y, parsed.m, parsed.d);
     }
   }
   const text = String(value).trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
-  const parsed = new Date(text);
-  return Number.isNaN(parsed.getTime()) ? text : parsed.toISOString().slice(0, 10);
+  const isoMatch = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (isoMatch) return formatDateOnly(isoMatch[1], isoMatch[2], isoMatch[3]);
+  const dmyMatch = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (dmyMatch) {
+    const year = Number(dmyMatch[3]) < 100 ? 2000 + Number(dmyMatch[3]) : Number(dmyMatch[3]);
+    return formatDateOnly(year, dmyMatch[2], dmyMatch[1]);
+  }
+  return text;
 };
 
 const normalizeHeader = (key) => String(key || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
@@ -214,7 +235,7 @@ export function validateDailyOperationsRows(rows = [], employees = [], currentCo
     let employee = null;
 
     if (!currentCompanyId) errors.push("لم يتم تحديد الشركة الحالية");
-    if (!row.operation_date || Number.isNaN(new Date(`${row.operation_date}T12:00:00`).getTime())) errors.push("التاريخ مطلوب أو غير صحيح");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(row.operation_date || ""))) errors.push("التاريخ مطلوب أو غير صحيح");
     if (!row.employee_id && !row.employee_name) errors.push("الرقم الوظيفي أو اسم الموظف مطلوب");
     if (!row.operation_type) errors.push("نوع العملية مطلوب");
     else if (!operationTypes.includes(row.operation_type)) errors.push("نوع العملية غير مدعوم");
@@ -370,7 +391,7 @@ export const exportProductivityOperationsToExcel = (rows = [], fileName = "produ
   writeRows(rows, fileName, "عمليات الإنتاجية", toProductivityExcelRow, [12, 16, 24, 18, 22, 22, 14, 14, 14, 18, 14, 12, 30]);
 
 export function downloadDailyOperationsTemplate() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = formatLocalDateObject(new Date());
   const examples = ["قبض حوالات", "صرف حوالات", "بيع عملة", "شراء عملة"].map((operationType, index) => ({
     operation_date: today,
     employee_id: `EMP-00${index + 1}`,
@@ -393,8 +414,9 @@ export function downloadDailyOperationsTemplate() {
 }
 
 export function downloadProductivityTemplate() {
+  const today = formatLocalDateObject(new Date());
   const example = {
-    operation_date: new Date().toISOString().slice(0, 10),
+    operation_date: today,
     employee_id: "EMP-001",
     employee_name: "اسم الموظف",
     branch: "الفرع الرئيسي",

@@ -69,9 +69,24 @@ const normalizeStatus = (status = "") => {
 
 const resolveCompanyId = (value) => String(value || getCurrentCompanyId() || "").trim();
 
+const normalizeDateOnly = (value = "") => {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+  }
+  const text = String(value || "").trim();
+  const isoMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) return `${isoMatch[1]}-${String(isoMatch[2]).padStart(2, "0")}-${String(isoMatch[3]).padStart(2, "0")}`;
+  const dmyMatch = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (dmyMatch) {
+    const year = Number(dmyMatch[3]) < 100 ? 2000 + Number(dmyMatch[3]) : Number(dmyMatch[3]);
+    return `${year}-${String(dmyMatch[2]).padStart(2, "0")}-${String(dmyMatch[1]).padStart(2, "0")}`;
+  }
+  return text;
+};
+
 export const dailyOperationLogicalKey = (row = {}, companyId = "") => [
   resolveCompanyId(companyId || row.company_id),
-  String(row.operation_date || "").trim(),
+  normalizeDateOnly(row.operation_date || ""),
   String(row.employee_id || row.employeeId || "").trim(),
   String(row.operation_type || "").trim(),
   String(row.service_channel || row.channel || "مباشر").trim(),
@@ -82,11 +97,12 @@ export const stableDailyOperationId = (row = {}, companyId = "") => `OP|${dailyO
 const fromDb = (row = {}) => {
   const noteData = unpackNotes(row.notes);
   const status = normalizeStatus(row.status);
+  const operationDate = normalizeDateOnly(row.operation_date || "");
   return {
     operation_id: row.operation_id || "",
     company_id: row.company_id || "",
-    operation_date: row.operation_date || "",
-    month: row.month || String(row.operation_date || "").slice(0, 7),
+    operation_date: operationDate,
+    month: row.month || operationDate.slice(0, 7),
     branch: row.branch || "",
     department: row.department || "",
     employee_id: row.employee_id || "",
@@ -120,7 +136,7 @@ const fromDb = (row = {}) => {
 const toDb = (row = {}) => {
   const companyId = resolveCompanyId(row.company_id);
   if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
-  const operationDate = String(row.operation_date || "").trim();
+  const operationDate = normalizeDateOnly(row.operation_date);
   const status = normalizeStatus(row.status);
   const normalized = {
     company_id: companyId,
