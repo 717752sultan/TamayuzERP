@@ -74,6 +74,12 @@ const normalizeDateOnly = (value = "") => {
     return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
   }
   const text = String(value || "").trim();
+  if (/[Tt]/.test(text) || /Z$/i.test(text)) {
+    const parsedDateObject = new Date(text);
+    if (!Number.isNaN(parsedDateObject.getTime())) {
+      return `${parsedDateObject.getFullYear()}-${String(parsedDateObject.getMonth() + 1).padStart(2, "0")}-${String(parsedDateObject.getDate()).padStart(2, "0")}`;
+    }
+  }
   const isoMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   if (isoMatch) return `${isoMatch[1]}-${String(isoMatch[2]).padStart(2, "0")}-${String(isoMatch[3]).padStart(2, "0")}`;
   const dmyMatch = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
@@ -137,6 +143,9 @@ const toDb = (row = {}) => {
   const companyId = resolveCompanyId(row.company_id);
   if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
   const operationDate = normalizeDateOnly(row.operation_date);
+  if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
+    console.log("operation_date debug", { rawDate: row.operation_date, parsedDate: operationDate, savedDate: operationDate });
+  }
   const status = normalizeStatus(row.status);
   const normalized = {
     company_id: companyId,

@@ -116,7 +116,7 @@ const safeNumber = (value) => {
 
 const pad2 = (value) => String(value).padStart(2, "0");
 
-const formatDateOnly = (year, month, day) => {
+export const formatDateOnly = (year, month, day) => {
   const y = Number(year);
   const m = Number(month);
   const d = Number(day);
@@ -130,7 +130,7 @@ const formatLocalDateObject = (date) => {
   return formatDateOnly(date.getFullYear(), date.getMonth() + 1, date.getDate());
 };
 
-const excelDateToIso = (value) => {
+export const parseOperationDate = (value) => {
   if (!value) return "";
   if (value instanceof Date && !Number.isNaN(value.getTime())) return formatLocalDateObject(value);
   if (typeof value === "number") {
@@ -140,6 +140,11 @@ const excelDateToIso = (value) => {
     }
   }
   const text = String(value).trim();
+  if (/[Tt]/.test(text) || /Z$/i.test(text)) {
+    const parsedDateObject = new Date(text);
+    const localDate = formatLocalDateObject(parsedDateObject);
+    if (localDate) return localDate;
+  }
   const isoMatch = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
   if (isoMatch) return formatDateOnly(isoMatch[1], isoMatch[2], isoMatch[3]);
   const dmyMatch = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
@@ -148,6 +153,11 @@ const excelDateToIso = (value) => {
     return formatDateOnly(year, dmyMatch[2], dmyMatch[1]);
   }
   return text;
+};
+
+export const getTodayDateOnly = () => {
+  const today = new Date();
+  return formatDateOnly(today.getFullYear(), today.getMonth() + 1, today.getDate());
 };
 
 const normalizeHeader = (key) => String(key || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
@@ -175,7 +185,11 @@ export const mapArabicColumnsToFields = (row = {}) => Object.entries(row || {}).
 
 export const normalizeDailyOperationRow = (row = {}) => {
   const mapped = mapArabicColumnsToFields(row);
-  const operationDate = excelDateToIso(mapped.operation_date);
+  const rawDate = mapped.operation_date;
+  const operationDate = parseOperationDate(rawDate);
+  if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
+    console.log("operation_date debug", { rawDate, parsedDate: operationDate, savedDate: operationDate });
+  }
   const numberFields = [
     "operation_count",
     "completed_count",
@@ -209,7 +223,7 @@ export const normalizeDailyOperationRow = (row = {}) => {
 export async function parseDailyOperationsExcel(file) {
   if (!file) throw new Error("لم يتم اختيار ملف");
   const buffer = await file.arrayBuffer();
-  const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+  const workbook = XLSX.read(buffer, { type: "array", cellDates: false });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   if (!sheet) throw new Error("لا يحتوي الملف على ورقة بيانات");
   const rows = XLSX.utils.sheet_to_json(sheet, { defval: "", blankrows: false });
@@ -301,7 +315,10 @@ export async function importDailyOperationsRows(rows = [], currentCompanyId = ""
   let updated = 0;
 
   for (const row of validRows) {
-    const duplicateKey = dailyOperationLogicalKey(row, currentCompanyId);
+    const parsedDate = parseOperationDate(row.operation_date);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(parsedDate)) throw new Error("التاريخ مطلوب أو غير صحيح");
+    const normalizedRowForKey = { ...row, operation_date: parsedDate, month: parsedDate.slice(0, 7) };
+    const duplicateKey = dailyOperationLogicalKey(normalizedRowForKey, currentCompanyId);
     const existing = existingByKey.get(duplicateKey);
     if (existing && options.duplicateMode === "ignore") {
       skipped += 1;
@@ -309,10 +326,10 @@ export async function importDailyOperationsRows(rows = [], currentCompanyId = ""
     }
     const payload = {
       ...(existing || {}),
-      operation_id: existing?.operation_id || row.operation_id || stableDailyOperationId(row, currentCompanyId),
+      operation_id: existing?.operation_id || row.operation_id || stableDailyOperationId(normalizedRowForKey, currentCompanyId),
       company_id: currentCompanyId,
-      operation_date: row.operation_date,
-      month: row.month,
+      operation_date: parsedDate,
+      month: parsedDate.slice(0, 7),
       employee_id: row.employee_id,
       employee_name: row.employee_name,
       branch: row.branch,
@@ -331,6 +348,9 @@ export async function importDailyOperationsRows(rows = [], currentCompanyId = ""
       notes: row.notes || "",
       status: row.status || "قيد المراجعة",
     };
+    if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
+      console.log("operation_date debug", { rawDate: row.operation_date, parsedDate, savedDate: payload.operation_date });
+    }
     const savedRow = await dailyOperationsService.saveDailyOperation(payload);
     saved.push(savedRow);
     if (existing) updated += 1;
@@ -391,7 +411,7 @@ export const exportProductivityOperationsToExcel = (rows = [], fileName = "produ
   writeRows(rows, fileName, "عمليات الإنتاجية", toProductivityExcelRow, [12, 16, 24, 18, 22, 22, 14, 14, 14, 18, 14, 12, 30]);
 
 export function downloadDailyOperationsTemplate() {
-  const today = formatLocalDateObject(new Date());
+  const today = getTodayDateOnly();
   const examples = ["قبض حوالات", "صرف حوالات", "بيع عملة", "شراء عملة"].map((operationType, index) => ({
     operation_date: today,
     employee_id: `EMP-00${index + 1}`,
@@ -414,7 +434,7 @@ export function downloadDailyOperationsTemplate() {
 }
 
 export function downloadProductivityTemplate() {
-  const today = formatLocalDateObject(new Date());
+  const today = getTodayDateOnly();
   const example = {
     operation_date: today,
     employee_id: "EMP-001",
