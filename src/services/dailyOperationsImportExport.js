@@ -131,6 +131,20 @@ const excelDateToIso = (value) => {
 
 const normalizeHeader = (key) => String(key || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 
+const isMeaningfulExcelValue = (value) => {
+  if (value === null || value === undefined) return false;
+  if (value instanceof Date) return !Number.isNaN(value.getTime());
+  if (typeof value === "string") return value.replace(/\s+/g, "").length > 0;
+  return String(value ?? "").trim() !== "";
+};
+
+export const isBlankExcelRow = (rawRow = {}) => {
+  const values = Object.entries(rawRow || {})
+    .filter(([key]) => !String(key || "").startsWith("__"))
+    .map(([, value]) => value);
+  return values.every((value) => !isMeaningfulExcelValue(value));
+};
+
 export const mapArabicColumnsToFields = (row = {}) => Object.entries(row || {}).reduce((acc, [key, value]) => {
   const normalizedKey = normalizeHeader(key);
   const targetKey = headerMap[String(key || "").trim()] || headerMap[normalizedKey] || headerMap[normalizedKey.replace(/_/g, "")];
@@ -177,8 +191,19 @@ export async function parseDailyOperationsExcel(file) {
   const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   if (!sheet) throw new Error("لا يحتوي الملف على ورقة بيانات");
-  const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-  return rows.map((row, index) => ({ rowNumber: index + 2, ...normalizeDailyOperationRow(row) }));
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: "", blankrows: false });
+  const parsedRows = [];
+  let consecutiveBlankRowsAfterData = 0;
+  for (const [index, row] of rows.entries()) {
+    if (isBlankExcelRow(row)) {
+      if (parsedRows.length > 0) consecutiveBlankRowsAfterData += 1;
+      if (consecutiveBlankRowsAfterData >= 20) break;
+      continue;
+    }
+    consecutiveBlankRowsAfterData = 0;
+    parsedRows.push({ rowNumber: index + 2, ...normalizeDailyOperationRow(row) });
+  }
+  return parsedRows;
 }
 
 export function validateDailyOperationsRows(rows = [], employees = [], currentCompanyId = "") {
