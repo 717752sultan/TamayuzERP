@@ -1,4 +1,4 @@
-export const ROLE_OPTIONS = [
+export const VALID_ROLE_OPTIONS = [
   "مشرف النظام العام",
   "مدير النظام",
   "الإدارة العليا",
@@ -17,11 +17,13 @@ export const ROLE_OPTIONS = [
   "خزينة مركزية",
 ];
 
+export const ROLE_OPTIONS = VALID_ROLE_OPTIONS;
+
 export const CORRUPTED_ROLE_LABEL = "دور تالف يحتاج معالجة";
 
-const MOJIBAKE_PATTERNS = ["ط§", "ظ„", "ظ…", "ظ†", "╪", "┘", "ي╗┐", "ط¸", "آ"];
+const MOJIBAKE_PATTERNS = ["ط§", "ظ„", "ظ…", "ظ†", "╪", "┘", "ي╗"];
 
-const roleAliases = new Map([
+const cleanRoleAliases = new Map([
   ["مدير عام النظام", "مشرف النظام العام"],
   ["مشرف المنصة", "مشرف النظام العام"],
   ["Platform Admin", "مشرف النظام العام"],
@@ -29,6 +31,9 @@ const roleAliases = new Map([
   ["مسؤول المخازن", "مسؤول المخزون"],
   ["عداد ومراسلات", "عداد ومراسل"],
   ["عمليات مصرفية", "العمليات المصرفية"],
+]);
+
+const mojibakeRoleAliases = new Map([
   ["ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…", "مدير النظام"],
   ["ظ…ط¯ظٹط± ط¹ط§ظ… ط§ظ„ظ†ط¸ط§ظ…", "مشرف النظام العام"],
   ["ظ…ط´ط±ظپ ط§ظ„ظ†ط¸ط§ظ… ط§ظ„ط¹ط§ظ…", "مشرف النظام العام"],
@@ -46,10 +51,10 @@ export const isMojibakeText = (value = "") => {
 
 export const normalizeRoleName = (value = "") => {
   const text = String(value || "").trim();
-  if (!text) return "غير محدد";
-  if (roleAliases.has(text)) return roleAliases.get(text);
-  if (ROLE_OPTIONS.includes(text)) return text;
-  if (isMojibakeText(text)) return "غير محدد";
+  if (!text) return null;
+  if (cleanRoleAliases.has(text)) return cleanRoleAliases.get(text);
+  if (VALID_ROLE_OPTIONS.includes(text)) return text;
+  if (isMojibakeText(text)) return mojibakeRoleAliases.get(text) || null;
   return text;
 };
 
@@ -57,13 +62,15 @@ export const displayRoleName = (value = "") => {
   const text = String(value || "").trim();
   if (!text) return "غير محدد";
   const normalized = normalizeRoleName(text);
-  if (normalized !== "غير محدد") return normalized;
+  if (normalized) return normalized;
   return isMojibakeText(text) ? CORRUPTED_ROLE_LABEL : "غير محدد";
 };
 
-export const getRoleOptions = (extraRoles = []) => {
-  const extras = (extraRoles || [])
+export const getCleanRoleOptions = (values = []) => {
+  const extras = (values || [])
     .map((role) => normalizeRoleName(typeof role === "string" ? role : role?.role_name || role?.role || role?.name))
-    .filter((role) => role && role !== "غير محدد");
-  return [...new Set([...ROLE_OPTIONS, ...extras])];
+    .filter((role) => role && !isMojibakeText(role));
+  return [...new Set([...VALID_ROLE_OPTIONS, ...extras])].filter((role) => role && !isMojibakeText(role));
 };
+
+export const getRoleOptions = getCleanRoleOptions;

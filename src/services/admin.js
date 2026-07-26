@@ -43,7 +43,10 @@ export const permissionPages = [
 
 export const systemRoles = ROLE_OPTIONS;
 
-const isAdminRole = (role = "") => ["مدير النظام", "مشرف النظام العام", "مدير عام النظام"].some((name) => normalizeRoleName(role).includes(name));
+const isAdminRole = (role = "") => {
+  const normalized = normalizeRoleName(role) || "";
+  return ["مدير النظام", "مشرف النظام العام", "مدير عام النظام"].some((name) => normalized.includes(name));
+};
 
 const employeeFromDb = (row = {}) => ({
   id: row.id || row.employee_id || row.employeeId || "",
@@ -67,7 +70,7 @@ const userFromDb = (row = {}, employee = null) => {
     employee_name: employeeName,
     username: row.username || "",
     password: "",
-    role: normalizeRoleName(row.role || "الموظف"),
+    role: normalizeRoleName(row.role || "الموظف") || "الموظف",
     branch: row.branch || employee?.branch || "",
     job: row.job || employee?.job || "",
     email: row.email || employee?.email || "",
