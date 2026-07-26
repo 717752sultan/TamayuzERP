@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import { dailyOperationsService } from "./dailyOperations";
+import { dailyOperationsService, isApprovedDailyOperation } from "./dailyOperations";
 import { performanceCriteriaService } from "./performanceCriteria";
 
 const scoreByThreshold = (actual, criterion) => {
@@ -30,14 +30,15 @@ const scoreFromDb = (row = {}) => ({
 export const kpiCalculationService = {
   async calculateEmployeeKpiScores(employee, month) {
     try {
-      const operations = await dailyOperationsService.loadDailyOperations({ month });
-      const employeeOps = operations.filter((op) => op.employee_id === employee.id && op.status === "معتمدة");
+      const operations = await dailyOperationsService.loadDailyOperations({ month, approvedOnly: true });
+      const employeeOps = operations.filter((op) => op.employee_id === employee.id && isApprovedDailyOperation(op));
       const criteria = await performanceCriteriaService.loadKpiCriteria(employee.job);
       const scores = criteria.filter((c) => c.is_active).map((criterion) => {
         const actual = employeeOps.reduce((sum, op) => {
-          if (criterion.criterion_name.includes("خطأ") || criterion.criterion_name.includes("الأخطاء")) return sum + Number(op.error_count || 0);
-          if (criterion.criterion_name.includes("شكوى")) return sum + Number(op.customer_complaints || 0);
-          if (criterion.criterion_name.includes("منجزة") || criterion.criterion_name.includes("مغلقة")) return sum + Number(op.completed_count || 0);
+          const criterionName = String(criterion.criterion_name || "");
+          if (criterionName.includes("خطأ") || criterionName.includes("الأخطاء")) return sum + Number(op.error_count || 0);
+          if (criterionName.includes("شكوى")) return sum + Number(op.customer_complaints || 0);
+          if (criterionName.includes("منجزة") || criterionName.includes("مغلقة")) return sum + Number(op.completed_count || 0);
           return sum + Number(op.operation_count || 0);
         }, 0);
         const score = scoreByThreshold(actual, criterion);

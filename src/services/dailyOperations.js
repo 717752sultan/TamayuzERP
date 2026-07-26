@@ -27,7 +27,13 @@ export const operationTypes = [...new Set([
 ])];
 
 export const serviceChannels = [...new Set(["مباشر", "واتساب", "هاتف", "تطبيق", "أخرى", "فرع", "إدارة", "نظام داخلي"])];
-export const operationStatuses = ["مسودة", "قيد المراجعة", "معتمدة", "مرفوضة"];
+export const operationStatuses = ["مستورد", "قيد المراجعة", "معتمد", "مرفوض", "ملغي", "معاد للتعديل"];
+export const approvedDailyOperationStatuses = new Set(["معتمد", "معتمدة"]);
+export const pendingDailyOperationStatuses = new Set(["مستورد", "قيد المراجعة", "مسودة"]);
+export const excludedFromKpiStatuses = new Set(["قيد المراجعة", "مستورد", "مرفوض", "مرفوضة", "ملغي", "ملغى", "معاد للتعديل", "مسودة"]);
+export const isApprovedDailyOperation = (row = {}) => row.included_in_kpi === true || approvedDailyOperationStatuses.has(String(row.status || "").trim());
+
+export const DAILY_OPERATIONS_BULK_CHUNK_SIZE = 100;
 
 const averageServiceTimeMarker = /\n?\[\[average_service_time:([-+]?\d+(?:\.\d+)?)\]\]/g;
 
@@ -51,6 +57,14 @@ const safeNumber = (value) => {
   return Number.isFinite(number) ? number : 0;
 };
 
+const normalizeStatus = (status = "") => {
+  const value = String(status || "").trim();
+  if (["معتمدة", "معتمد"].includes(value)) return "معتمد";
+  if (["مرفوضة", "مرفوض"].includes(value)) return "مرفوض";
+  if (value) return value;
+  return "قيد المراجعة";
+};
+
 const resolveCompanyId = (value) => String(value || getCurrentCompanyId() || "").trim();
 
 export const dailyOperationLogicalKey = (row = {}, companyId = "") => [
@@ -65,30 +79,37 @@ export const stableDailyOperationId = (row = {}, companyId = "") => `OP|${dailyO
 
 const fromDb = (row = {}) => {
   const noteData = unpackNotes(row.notes);
+  const status = normalizeStatus(row.status);
   return {
     operation_id: row.operation_id || "",
     company_id: row.company_id || "",
     operation_date: row.operation_date || "",
     month: row.month || String(row.operation_date || "").slice(0, 7),
     branch: row.branch || "",
+    department: row.department || "",
     employee_id: row.employee_id || "",
     employee_name: row.employee_name || "",
     job_name: row.job_name || "",
     operation_type: row.operation_type || "",
     service_channel: row.service_channel || "مباشر",
     currency: row.currency || "",
-    operation_count: safeNumber(row.operation_count),
+    operation_count: safeNumber(row.operation_count ?? row.operations_count),
     amount: safeNumber(row.amount),
-    error_count: safeNumber(row.error_count),
+    error_count: safeNumber(row.error_count ?? row.errors_count),
     returned_count: safeNumber(row.returned_count),
     completed_count: safeNumber(row.completed_count),
     pending_count: safeNumber(row.pending_count),
-    customer_complaints: safeNumber(row.customer_complaints),
+    customer_complaints: safeNumber(row.customer_complaints ?? row.complaints_count),
     average_service_time: noteData.average_service_time,
     notes: noteData.notes,
     entered_by: row.entered_by || "",
     approved_by: row.approved_by || "",
-    status: row.status || "مسودة",
+    approved_at: row.approved_at || "",
+    rejected_by: row.rejected_by || "",
+    rejected_at: row.rejected_at || "",
+    rejection_reason: row.rejection_reason || "",
+    included_in_kpi: row.included_in_kpi === true || approvedDailyOperationStatuses.has(status),
+    status,
     created_at: row.created_at || "",
     updated_at: row.updated_at || "",
   };
@@ -98,20 +119,22 @@ const toDb = (row = {}) => {
   const companyId = resolveCompanyId(row.company_id);
   if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
   const operationDate = String(row.operation_date || "").trim();
+  const status = normalizeStatus(row.status);
   const normalized = {
     company_id: companyId,
     operation_date: operationDate,
     month: row.month || operationDate.slice(0, 7),
     branch: String(row.branch || ""),
+    department: String(row.department || ""),
     employee_id: String(row.employee_id || row.employeeId || "").trim(),
     employee_name: String(row.employee_name || row.employeeName || ""),
     job_name: String(row.job_name || row.job || ""),
     operation_type: String(row.operation_type || "").trim(),
     service_channel: String(row.service_channel || row.channel || "مباشر").trim(),
     currency: String(row.currency || row.currency_code || ""),
-    operation_count: safeNumber(row.operation_count),
+    operation_count: safeNumber(row.operation_count ?? row.operations_count),
     amount: safeNumber(row.amount),
-    error_count: safeNumber(row.error_count),
+    error_count: safeNumber(row.error_count ?? row.errors_count),
     returned_count: safeNumber(row.returned_count),
     completed_count: safeNumber(row.completed_count),
     pending_count: safeNumber(row.pending_count),
@@ -119,7 +142,12 @@ const toDb = (row = {}) => {
     notes: packNotes(row.notes, row.average_service_time),
     entered_by: String(row.entered_by || ""),
     approved_by: String(row.approved_by || ""),
-    status: String(row.status || "مسودة"),
+    approved_at: row.approved_at || null,
+    rejected_by: String(row.rejected_by || ""),
+    rejected_at: row.rejected_at || null,
+    rejection_reason: String(row.rejection_reason || ""),
+    included_in_kpi: row.included_in_kpi === true || approvedDailyOperationStatuses.has(status),
+    status,
     updated_at: new Date().toISOString(),
   };
   return {
@@ -142,6 +170,81 @@ const findLogicalDuplicate = async (payload) => {
   return Array.isArray(rows) ? rows[0] || null : null;
 };
 
+const actorName = (currentUser = "") => typeof currentUser === "string"
+  ? currentUser
+  : (currentUser?.username || currentUser?.id || currentUser?.user_id || "");
+
+const uniqueIds = (ids = []) => [...new Set((Array.isArray(ids) ? ids : [ids]).map((id) => String(id || "").trim()).filter(Boolean))];
+
+const idsFilter = (ids = []) => `operation_id=in.(${uniqueIds(ids).map((id) => encodeURIComponent(id)).join(",")})`;
+
+const chunkArray = (items = [], size = DAILY_OPERATIONS_BULK_CHUNK_SIZE) => {
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) chunks.push(items.slice(index, index + size));
+  return chunks;
+};
+
+const patchOperationsByIds = async (ids = [], patch = {}) => {
+  const cleanIds = uniqueIds(ids);
+  if (!cleanIds.length) return [];
+  return supabase.request(`/rest/v1/daily_operations?${idsFilter(cleanIds)}&select=*`, {
+    method: "PATCH",
+    prefer: "return=representation",
+    body: JSON.stringify(patch),
+  });
+};
+
+const patchOperationsByIdsChunked = async (ids = [], patch = {}, options = {}) => {
+  const cleanIds = uniqueIds(ids);
+  if (!cleanIds.length) return [];
+  const chunks = chunkArray(cleanIds);
+  const saved = [];
+  const errors = [];
+  let processed = 0;
+  options.onProgress?.({ processed, total: cleanIds.length, chunkSize: DAILY_OPERATIONS_BULK_CHUNK_SIZE });
+  for (const [index, chunk] of chunks.entries()) {
+    try {
+      const rows = await patchOperationsByIds(chunk, patch);
+      saved.push(...(Array.isArray(rows) ? rows : []));
+      processed += chunk.length;
+      options.onProgress?.({ processed, total: cleanIds.length, chunkIndex: index + 1, chunks: chunks.length, chunkSize: DAILY_OPERATIONS_BULK_CHUNK_SIZE });
+    } catch (error) {
+      console.error("Supabase daily_operations bulk chunk error:", { chunkIndex: index + 1, chunkSize: chunk.length, error });
+      errors.push({ chunkIndex: index + 1, message: error.message || "Failed to update chunk" });
+      options.onProgress?.({ processed, total: cleanIds.length, chunkIndex: index + 1, chunks: chunks.length, failed: errors.length, chunkSize: DAILY_OPERATIONS_BULK_CHUNK_SIZE });
+    }
+  }
+  if (errors.length) {
+    const message = saved.length
+      ? `تم تحديث جزء من العمليات وفشل جزء آخر. الناجح: ${saved.length}، الفاشل: ${cleanIds.length - saved.length}`
+      : "تعذر اعتماد بعض العمليات. يرجى المحاولة مرة أخرى.";
+    const error = new Error(message);
+    error.details = errors;
+    error.successCount = saved.length;
+    error.errorCount = cleanIds.length - saved.length;
+    throw error;
+  }
+  return saved;
+};
+
+const approvalFilterPredicate = (filters = {}, companyId = resolveCompanyId(filters.companyId || filters.company_id)) => (row = {}) => {
+  if (companyId && row.company_id !== companyId) return false;
+  if (!pendingDailyOperationStatuses.has(String(row.status || "").trim())) return false;
+  if (filters.date && row.operation_date !== filters.date) return false;
+  if (filters.fromDate && row.operation_date < filters.fromDate) return false;
+  if (filters.toDate && row.operation_date > filters.toDate) return false;
+  if (filters.month && !(row.month === filters.month || String(row.operation_date || "").startsWith(filters.month))) return false;
+  if (filters.year && String(row.operation_date || "").slice(0, 4) !== String(filters.year)) return false;
+  if (filters.branch && filters.branch !== "all" && row.branch !== filters.branch) return false;
+  if (filters.department && filters.department !== "all" && row.department !== filters.department) return false;
+  if (filters.employeeId && filters.employeeId !== "all" && row.employee_id !== filters.employeeId) return false;
+  if (filters.employee && filters.employee !== "all" && row.employee_id !== filters.employee) return false;
+  if (filters.operationType && filters.operationType !== "all" && row.operation_type !== filters.operationType) return false;
+  if (filters.channel && filters.channel !== "all" && row.service_channel !== filters.channel) return false;
+  if (filters.status && filters.status !== "all" && row.status !== filters.status) return false;
+  return true;
+};
+
 export const dailyOperationsService = {
   async loadDailyOperations(filters = {}) {
     try {
@@ -156,7 +259,8 @@ export const dailyOperationsService = {
         "order=operation_date.desc",
       ].join("&");
       const rows = await supabase.select("daily_operations", query);
-      return (Array.isArray(rows) ? rows : []).map(fromDb);
+      const mapped = (Array.isArray(rows) ? rows : []).map(fromDb);
+      return filters.approvedOnly ? mapped.filter(isApprovedDailyOperation) : mapped;
     } catch (error) {
       console.error("Supabase daily_operations load error:", error);
       throw new Error("فشل تحميل العمليات اليومية: " + error.message);
@@ -193,13 +297,77 @@ export const dailyOperationsService = {
     }
   },
 
-  async approveDailyOperation(row, user = "") {
-    if (!row.employee_id || !row.operation_type) throw new Error("لا يمكن اعتماد عملية ناقصة");
-    return this.saveDailyOperation({ ...row, status: "معتمدة", approved_by: user });
+  async approveDailyOperation(rowOrId, user = "") {
+    const id = typeof rowOrId === "string" ? rowOrId : rowOrId?.operation_id;
+    if (!id) throw new Error("لا يمكن اعتماد عملية غير محددة");
+    const rows = await patchOperationsByIds([id], {
+      status: "معتمد",
+      approved_by: actorName(user),
+      approved_at: new Date().toISOString(),
+      included_in_kpi: true,
+      updated_at: new Date().toISOString(),
+    });
+    return fromDb(rows?.[0] || {});
   },
 
   async rejectDailyOperation(row, user = "") {
-    return this.saveDailyOperation({ ...row, status: "مرفوضة", approved_by: user });
+    return this.rejectSelectedDailyOperations([row?.operation_id || row], "رفض العملية", user);
+  },
+
+  async approveSelectedDailyOperations(ids = [], currentUser = "", options = {}) {
+    const rows = await patchOperationsByIdsChunked(ids, {
+      status: "معتمد",
+      approved_by: actorName(currentUser),
+      approved_at: new Date().toISOString(),
+      included_in_kpi: true,
+      updated_at: new Date().toISOString(),
+    }, options);
+    return (rows || []).map(fromDb);
+  },
+
+  async approveDailyOperationsByFilter(filters = {}, currentUser = "", options = {}) {
+    const companyId = resolveCompanyId(filters.companyId || filters.company_id);
+    if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
+    const rows = await this.loadDailyOperations({ companyId, month: filters.month || "" });
+    const ids = rows.filter(approvalFilterPredicate(filters, companyId)).map((row) => row.operation_id);
+    return this.approveSelectedDailyOperations(ids, currentUser, options);
+  },
+
+  async rejectSelectedDailyOperations(ids = [], reason = "", currentUser = "", options = {}) {
+    if (!String(reason || "").trim()) throw new Error("سبب الرفض مطلوب");
+    const rows = await patchOperationsByIdsChunked(ids, {
+      status: "مرفوض",
+      rejected_by: actorName(currentUser),
+      rejected_at: new Date().toISOString(),
+      rejection_reason: String(reason || "").trim(),
+      included_in_kpi: false,
+      updated_at: new Date().toISOString(),
+    }, options);
+    return (rows || []).map(fromDb);
+  },
+
+  async returnDailyOperationsForEdit(ids = [], reason = "", currentUser = "", options = {}) {
+    if (!String(reason || "").trim()) throw new Error("سبب الإرجاع للتعديل مطلوب");
+    const rows = await patchOperationsByIdsChunked(ids, {
+      status: "معاد للتعديل",
+      rejected_by: actorName(currentUser),
+      rejected_at: new Date().toISOString(),
+      rejection_reason: String(reason || "").trim(),
+      included_in_kpi: false,
+      updated_at: new Date().toISOString(),
+    }, options);
+    return (rows || []).map(fromDb);
+  },
+
+  async loadDailyOperationApprovalStats(filters = {}) {
+    const rows = await this.loadDailyOperations(filters);
+    return {
+      imported: rows.length,
+      pending: rows.filter((row) => pendingDailyOperationStatuses.has(String(row.status || "").trim())).length,
+      approved: rows.filter(isApprovedDailyOperation).length,
+      rejected: rows.filter((row) => ["مرفوض", "مرفوضة"].includes(String(row.status || "").trim())).length,
+      includedInKpi: rows.filter(isApprovedDailyOperation).length,
+    };
   },
 
   subscribe(onChange) {

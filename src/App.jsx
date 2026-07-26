@@ -90,7 +90,7 @@ import { calculateInventoryDashboardTotals, generateInventoryReports, inventoryR
 import { generateBranchForecast } from "./services/inventoryForecast";
 import { canInventory } from "./services/inventoryPermissions";
 import { inventorySettingsService, defaultInventorySettings, defaultDocumentNumbering } from "./services/inventorySettings";
-import { dailyOperationsService, operationTypes, serviceChannels, operationStatuses } from "./services/dailyOperations";
+import { dailyOperationsService, isApprovedDailyOperation, operationTypes, serviceChannels, operationStatuses, pendingDailyOperationStatuses } from "./services/dailyOperations";
 import { downloadDailyOperationsTemplate, downloadProductivityTemplate, exportDailyOperationsToExcel, exportProductivityOperationsToExcel, importDailyOperationsRows, parseDailyOperationsExcel, validateDailyOperationsRows } from "./services/dailyOperationsImportExport";
 import { performanceCriteriaService, scoringTypes, defaultJobKpis } from "./services/performanceCriteria";
 import { kpiCalculationService } from "./services/kpiCalculation";
@@ -107,7 +107,7 @@ import { backupService } from "./services/backup";
 import { companiesService } from "./services/companies";
 import { applyCompanyPermissionActionToggle, companyPermissionActions, companyPermissionChildActionKeys, companyPermissionModules, companyPermissionsService, companyCanAccessFromRows, companyCanModuleFromRows, companyCanPageFromRows, mergeWithDefaultCompanyPermissions } from "./services/companyPermissions";
 import { applyCompanyTheme, applyThemeForCurrentCompany, getDefaultTheme, normalizeThemePayload, themePresets, themeService } from "./services/theme";
-import { clearTenantSession, getCurrentCompany, getCurrentUser, isPlatformAdminUser, isProtectedPlatformRole, isProtectedPlatformUser, loadTenantSession, setTenantSession } from "./services/tenant";
+import { clearTenantSession, getCurrentCompany, getCurrentUser, isPlatformAdminUser, isPlatformRoute, isProtectedPlatformRole, isProtectedPlatformUser, loadTenantSession, setCompanySession, setPlatformSession } from "./services/tenant";
 import { assistantModes, pageRegistryByKey } from "./constants/pageRegistry";
 import { APP_BRAND_NAME, APP_DESCRIPTION, APP_OFFICIAL_NAME, APP_REPORT_SUBTITLE, APP_REPORT_TITLE, APP_SHORT_NAME, APP_SYSTEM_NAME, APP_TAGLINE } from "./constants/branding";
 import { buildReportBrandingHtml } from "./services/reportBranding";
@@ -715,15 +715,16 @@ const getFirstAllowedPageForUser = (currentUser, treeRows = [], legacyRows = [],
   return allowed || "";
 };
 export default function App() {
-  const restoredTenant = loadTenantSession();
+  const initialPortalType = isPlatformRoute() ? "platform" : "company";
+  const restoredTenant = loadTenantSession(initialPortalType);
   const [logged, setLogged] = useState(
-      () => localStorage.getItem("ep_logged") === "1",
+      () => Boolean(restoredTenant.currentUser),
     ),
     [page, setPage] = useState("dashboard"),
     [activeModuleKey, setActiveModuleKey] = useState("hr"),
     [sidebar, setSidebar] = useState(false),
     [role, setRole] = useState(
-      () => localStorage.getItem("ep_role") || "مدير النظام",
+      () => restoredTenant.currentUser?.role || "مدير النظام",
     ),
     [employees, setEmployeesState] = useState([]),
     [evaluations, setEvaluationsState] = useState([]),
@@ -963,11 +964,11 @@ export default function App() {
         onLogin={(user) => {
           const isPlatformLogin = isPlatformAdminUser(user);
           if (!isPlatformLogin) {
-            clearTenantSession();
+            clearTenantSession("platform");
             return;
           }
           const identityUser = user;
-          setTenantSession({ company: null, user: identityUser });
+          setPlatformSession(identityUser);
           setCurrentCompany(null);
           setCurrentUserState(identityUser);
           setRole(user.role);
@@ -997,6 +998,10 @@ export default function App() {
         settings={settings}
         onLogin={(user) => {
           const isPlatformLogin = isPlatformAdminUser(user);
+          if (isPlatformLogin) {
+            clearTenantSession("company");
+            return;
+          }
           const identityUser = user;
           const company = isPlatformLogin ? null : (getCurrentCompany() || {
             company_id: user.company_id,
@@ -1005,7 +1010,7 @@ export default function App() {
             logo_url: user.logo_url,
             primary_color: user.primary_color,
           });
-          setTenantSession({ company, user: identityUser });
+          setCompanySession(identityUser, company);
           setCurrentCompany(company);
           setCurrentUserState(identityUser);
           setRole(user.role);
@@ -1031,6 +1036,48 @@ export default function App() {
         }}
       />
     );
+  const activePortalType = isPlatformRoute() ? "platform" : "company";
+  const sessionUserForGuard = currentUserState || getCurrentUser() || {};
+  const sessionCompanyForGuard = currentCompany || getCurrentCompany() || null;
+  const invalidPlatformSession = activePortalType === "platform" && !isPlatformAdminUser(sessionUserForGuard);
+  const invalidCompanySession = activePortalType === "company"
+    && (isPlatformAdminUser(sessionUserForGuard) || sessionCompanyForGuard?.company_code === "PLATFORM" || !sessionCompanyForGuard?.company_id);
+  if (invalidPlatformSession || invalidCompanySession) {
+    const portalToClear = activePortalType;
+    setTimeout(() => {
+      activityLogsService.logUserActivity({
+        company_id: sessionCompanyForGuard?.company_id || sessionUserForGuard?.company_id,
+        user_id: sessionUserForGuard?.id || sessionUserForGuard?.user_id,
+        username: sessionUserForGuard?.username,
+        user_name: sessionUserForGuard?.name,
+        user_role: sessionUserForGuard?.role,
+        module_key: activePortalType,
+        module_name: activePortalType === "platform" ? "إدارة المنصة" : "بوابة الشركة",
+        action_type: "invalid_session_detected",
+        action_label: "جلسة غير صالحة",
+        description: "تم اكتشاف خلط بين جلسة الشركة وجلسة المنصة",
+        severity: "مرتفع",
+      }).catch(() => {});
+      clearTenantSession(portalToClear);
+      setCurrentCompany(null);
+      setCurrentUserState(null);
+      setLogged(false);
+      if (portalToClear === "platform" && window.location.pathname !== "/platform-login") {
+        window.location.href = "/platform-login";
+      }
+    }, 0);
+    if (activePortalType === "company") {
+      return (
+        <div className="grid min-h-screen place-items-center bg-slate-50 p-5" dir="rtl">
+          <div className="panel max-w-xl p-6 text-center">
+            <ShieldCheck className="mx-auto mb-3 text-brand-700" />
+            <h2 className="text-xl font-extrabold">انتهت جلسة الشركة، يرجى تسجيل الدخول مرة أخرى</h2>
+          </div>
+        </div>
+      );
+    }
+    return <LoadingScreen message="جاري التحقق من جلسة المنصة..." />;
+  }
   if (dataLoading) return <LoadingScreen />;
   if (dataError)
     return (
@@ -1061,7 +1108,7 @@ export default function App() {
           localStorage.removeItem("ep_logged");
           localStorage.removeItem("ep_role");
           localStorage.removeItem("ep_employee_id");
-          clearTenantSession();
+          clearTenantSession("company");
           setCurrentCompany(null);
           setCurrentUserState(null);
           setLogged(false);
@@ -1170,7 +1217,7 @@ export default function App() {
       ...currentUser,
       is_platform_admin: true,
     };
-    setTenantSession({ company: selected, user: identityUser });
+    setPlatformSession(identityUser, selected);
     setCurrentCompany(selected);
     setCurrentUserState(identityUser);
     setEmployeesState([]);
@@ -1189,7 +1236,7 @@ export default function App() {
   }
   if (permissionsLoading || companyPermissionsLoading) return <LoadingScreen message="جاري تحميل الصلاحيات..." />;
   if (!visibleNavItems.length) {
-    return <div className="grid min-h-screen place-items-center bg-slate-50 p-5" dir="rtl"><div className="panel max-w-xl p-6 text-center"><ShieldCheck className="mx-auto mb-3 text-brand-700" /><h2 className="text-xl font-extrabold">لا توجد صلاحيات مفعلة لهذا المستخدم</h2><button onClick={() => { activityLogsService.logUserActivity({ company_id: currentCompany?.company_id, action_type: "logout", action_label: "تسجيل الخروج", description: "تم تسجيل خروج المستخدم", severity: "منخفض" }); localStorage.removeItem("ep_logged"); localStorage.removeItem("ep_role"); clearTenantSession(); setCurrentCompany(null); setCurrentUserState(null); setLogged(false); }} className="btn-primary mt-5">تسجيل الخروج</button></div></div>;
+    return <div className="grid min-h-screen place-items-center bg-slate-50 p-5" dir="rtl"><div className="panel max-w-xl p-6 text-center"><ShieldCheck className="mx-auto mb-3 text-brand-700" /><h2 className="text-xl font-extrabold">لا توجد صلاحيات مفعلة لهذا المستخدم</h2><button onClick={() => { activityLogsService.logUserActivity({ company_id: currentCompany?.company_id, action_type: platformAdmin ? "platform_logout" : "company_logout", action_label: "تسجيل الخروج", description: "تم تسجيل خروج المستخدم", severity: "منخفض" }); localStorage.removeItem("ep_logged"); localStorage.removeItem("ep_role"); clearTenantSession(platformAdmin ? "platform" : "company"); setCurrentCompany(null); setCurrentUserState(null); setLogged(false); }} className="btn-primary mt-5">تسجيل الخروج</button></div></div>;
   }
   const availableModulePages = (moduleKey) =>
     (moduleKey === "platform" && !platformAdmin) || !companyCanModule(moduleKey) ? [] : getModulePages(moduleKey).filter((item) => {
@@ -1266,7 +1313,7 @@ export default function App() {
             onClick={() => {
               activityLogsService.logUserActivity({
                 company_id: currentCompany?.company_id,
-                action_type: "logout",
+                action_type: platformAdmin ? "platform_logout" : "company_logout",
                 action_label: "تسجيل الخروج",
                 description: "تم تسجيل خروج المستخدم",
                 severity: "منخفض",
@@ -1274,7 +1321,7 @@ export default function App() {
               localStorage.removeItem("ep_logged");
               localStorage.removeItem("ep_role");
               localStorage.removeItem("ep_employee_id");
-              clearTenantSession();
+              clearTenantSession(platformAdmin ? "platform" : "company");
               setCurrentCompany(null);
               setCurrentUserState(null);
               setLogged(false);
@@ -1602,10 +1649,7 @@ function PlatformAdminSettingsPage({ currentUser, currentCompany, setCurrentUser
     try {
       setSaving(true);
       const result = await adminService.updatePlatformAdminAccount(currentUser, form);
-      const session = setTenantSession({
-        company: currentCompany?.company_id ? currentCompany : null,
-        user: result.user,
-      });
+      const session = setPlatformSession(result.user, currentCompany?.company_id ? currentCompany : null);
       const nextUser = session.currentUser || result.user;
       setCurrentUserState?.(nextUser);
       activityLogsService.logUserActivity({
@@ -7563,11 +7607,21 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
   const [filters, setFilters] = useState({
     month: today.slice(0, 7),
     date: "",
+    fromDate: "",
+    toDate: "",
+    year: today.slice(0, 4),
     branch: "all",
+    department: "all",
     employee: "all",
     operationType: "all",
+    channel: "all",
     status: "all",
   });
+  const [selectedOperationIds, setSelectedOperationIds] = useState([]);
+  const [bulkDialog, setBulkDialog] = useState(null);
+  const [bulkReason, setBulkReason] = useState("");
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState(null);
   const [loading, setLoading] = useState(true);
   const safeEmployees = Array.isArray(employees) ? employees : [];
   const safeRows = Array.isArray(rows) ? rows : [];
@@ -7581,6 +7635,8 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
   const statusOptions = [...new Set([...operationStatuses, ...safeRows.map((row) => row.status)].filter(Boolean))];
   const branchOptions = [...new Set([...safeEmployees.map((employee) => employee.branch), ...safeRows.map((row) => row.branch)].filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "ar"));
   const operationTypeOptions = [...new Set([...operationTypes, ...safeRows.map((row) => row.operation_type)].filter(Boolean))];
+  const departmentOptions = [...new Set(safeRows.map((row) => row.department).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "ar"));
+  const channelOptions = [...new Set([...serviceChannels, ...safeRows.map((row) => row.service_channel)].filter(Boolean))];
 
   const load = async () => {
     setLoading(true);
@@ -7603,15 +7659,28 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
 
   const filtered = safeRows.filter((row) =>
     (!filters.date || row.operation_date === filters.date)
+    && (!filters.fromDate || row.operation_date >= filters.fromDate)
+    && (!filters.toDate || row.operation_date <= filters.toDate)
+    && (!filters.year || String(row.operation_date || "").slice(0, 4) === String(filters.year))
     && (filters.branch === "all" || row.branch === filters.branch)
+    && (filters.department === "all" || row.department === filters.department)
     && (filters.employee === "all" || row.employee_id === filters.employee)
     && (filters.operationType === "all" || row.operation_type === filters.operationType)
+    && (filters.channel === "all" || row.service_channel === filters.channel)
     && (filters.status === "all" || row.status === filters.status));
 
   const sum = (key) => filtered.reduce((total, row) => total + Number(row[key] || 0), 0);
   const totalOperations = sum("operation_count");
   const totalErrors = sum("error_count");
+  const pendingCount = filtered.filter((row) => pendingDailyOperationStatuses.has(String(row.status || "").trim())).length;
+  const approvedCount = filtered.filter((row) => isApprovedDailyOperation(row)).length;
+  const rejectedCount = filtered.filter((row) => ["مرفوض", "مرفوضة"].includes(String(row.status || "").trim())).length;
   const summaries = [
+    ["إجمالي العمليات المستوردة", filtered.length, Upload],
+    ["قيد المراجعة", pendingCount, Clock3],
+    ["معتمدة", approvedCount, BadgeCheck],
+    ["مرفوضة", rejectedCount, AlertTriangle],
+    ["داخلة في KPI", filtered.filter((row) => isApprovedDailyOperation(row)).length, Gauge],
     ["إجمالي العمليات", totalOperations, Gauge],
     ["العمليات المكتملة", sum("completed_count"), BadgeCheck],
     ["العمليات المعلقة", sum("pending_count"), Clock3],
@@ -7681,10 +7750,120 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
   const approve = async (row) => {
     if (!canApprove) return alert("لا تملك صلاحية اعتماد العملية");
     try {
-      await dailyOperationsService.approveDailyOperation({ ...row, company_id: companyId }, currentUser?.username || "");
+      await dailyOperationsService.approveDailyOperation({ ...row, company_id: companyId }, currentUser);
+      activityLogsService.logUserActivity({
+        company_id: companyId,
+        user_id: currentUser?.id || currentUser?.user_id,
+        username: currentUser?.username,
+        module_key: "daily_operations",
+        page_key: "daily_operations",
+        action_type: "daily_operation_approve",
+        action_label: "اعتماد العملية",
+        description: `تم اعتماد عملية ${row.operation_id}`,
+        metadata: { count: 1, operation_id: row.operation_id },
+      }).catch(() => {});
       await load();
     } catch (error) {
       alert(error.message);
+    }
+  };
+
+  const pendingFilteredRows = filtered.filter((row) => pendingDailyOperationStatuses.has(String(row.status || "").trim()));
+  const selectedRows = filtered.filter((row) => selectedOperationIds.includes(row.operation_id));
+  const allVisibleSelected = filtered.length > 0 && filtered.every((row) => selectedOperationIds.includes(row.operation_id));
+  const setAllVisibleSelected = (checked) => {
+    const visibleIds = filtered.map((row) => row.operation_id);
+    setSelectedOperationIds((ids) => checked
+      ? [...new Set([...ids, ...visibleIds])]
+      : ids.filter((id) => !visibleIds.includes(id)));
+  };
+  const toggleSelectedOperation = (id, checked) => {
+    setSelectedOperationIds((ids) => checked ? [...new Set([...ids, id])] : ids.filter((item) => item !== id));
+  };
+  const buildBulkFilters = (scope = "filtered") => ({
+    companyId,
+    month: scope === "range" ? "" : filters.month,
+    date: scope === "day" ? filters.date : "",
+    fromDate: scope === "range" ? filters.fromDate : "",
+    toDate: scope === "range" ? filters.toDate : "",
+    year: filters.year,
+    branch: filters.branch,
+    department: filters.department,
+    employee: filters.employee,
+    operationType: filters.operationType,
+    channel: filters.channel,
+    status: filters.status,
+  });
+  const rowsForBulkScope = (scope = "filtered") => {
+    if (scope === "selected") return selectedRows;
+    if (scope === "day") return pendingFilteredRows.filter((row) => filters.date && row.operation_date === filters.date);
+    if (scope === "range") return pendingFilteredRows.filter((row) => (!filters.fromDate || row.operation_date >= filters.fromDate) && (!filters.toDate || row.operation_date <= filters.toDate));
+    if (scope === "month") return pendingFilteredRows.filter((row) => filters.month && (row.month === filters.month || String(row.operation_date || "").startsWith(filters.month)));
+    return pendingFilteredRows;
+  };
+  const openBulkDialog = (action, scope = "selected") => {
+    if (action === "approve" && !canApprove) return alert("لا تملك صلاحية اعتماد العمليات");
+    if (action === "reject" && can?.("daily_operations", "can_reject") === false) return alert("لا تملك صلاحية رفض العمليات");
+    if (action === "return" && !canEdit) return alert("لا تملك صلاحية إرجاع العمليات للتعديل");
+    if (scope === "day" && !filters.date) return alert("حدد اليوم أولًا");
+    if (scope === "range" && !filters.fromDate && !filters.toDate) return alert("حدد الفترة أولًا");
+    const rows = rowsForBulkScope(scope);
+    const count = rows.length;
+    if (!count) return alert("لا توجد عمليات قيد المراجعة مطابقة لهذا الإجراء");
+    setBulkReason("");
+    setBulkProgress(null);
+    setBulkDialog({ action, scope, count, ids: rows.map((row) => row.operation_id), filters: buildBulkFilters(scope) });
+  };
+  const runBulkAction = async () => {
+    if (!bulkDialog) return;
+    if (["reject", "return"].includes(bulkDialog.action) && !bulkReason.trim()) return alert("يجب إدخال السبب قبل الحفظ");
+    setBulkSaving(true);
+    setBulkProgress({ processed: 0, total: bulkDialog.count });
+    try {
+      let result = [];
+      const progressOptions = {
+        onProgress: (progress) => setBulkProgress({
+          processed: progress.processed || 0,
+          total: progress.total || bulkDialog.count,
+          failed: progress.failed || 0,
+        }),
+      };
+      if (bulkDialog.action === "approve" && ["day", "range", "month"].includes(bulkDialog.scope)) {
+        result = await dailyOperationsService.approveDailyOperationsByFilter(bulkDialog.filters, currentUser, progressOptions);
+      } else if (bulkDialog.action === "approve") {
+        result = await dailyOperationsService.approveSelectedDailyOperations(bulkDialog.ids, currentUser, progressOptions);
+      } else if (bulkDialog.action === "reject") {
+        result = await dailyOperationsService.rejectSelectedDailyOperations(bulkDialog.ids, bulkReason, currentUser, progressOptions);
+      } else if (bulkDialog.action === "return") {
+        result = await dailyOperationsService.returnDailyOperationsForEdit(bulkDialog.ids, bulkReason, currentUser, progressOptions);
+      }
+      const actionType = bulkDialog.action === "approve"
+        ? "daily_operations_bulk_approve"
+        : bulkDialog.action === "reject"
+          ? "daily_operations_reject"
+          : "daily_operations_return_for_edit";
+      activityLogsService.logUserActivity({
+        company_id: companyId,
+        user_id: currentUser?.id || currentUser?.user_id,
+        username: currentUser?.username,
+        module_key: "daily_operations",
+        page_key: "daily_operations",
+        action_type: actionType,
+        action_label: bulkDialog.action === "approve" ? "اعتماد جماعي" : bulkDialog.action === "reject" ? "رفض جماعي" : "إرجاع للتعديل",
+        description: `تم تنفيذ الإجراء على ${result.length || bulkDialog.count} عملية`,
+        metadata: { count: result.length || bulkDialog.count, filters: bulkDialog.filters, reason: bulkDialog.action === "approve" ? undefined : bulkReason },
+      }).catch(() => {});
+      setSelectedOperationIds([]);
+      setBulkDialog(null);
+      setBulkReason("");
+      setBulkProgress(null);
+      await load();
+      alert(bulkDialog.action === "approve" ? `تم اعتماد عدد (${result.length || bulkDialog.count}) عملية بنجاح` : "تم تنفيذ الإجراء بنجاح");
+    } catch (error) {
+      console.error("Daily operations bulk action error:", error);
+      alert(error.successCount ? "تم اعتماد جزء من العمليات وفشل جزء آخر." : "تعذر اعتماد بعض العمليات. يرجى المحاولة مرة أخرى.");
+    } finally {
+      setBulkSaving(false);
     }
   };
 
@@ -7807,24 +7986,47 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
       <div className="panel flex flex-wrap gap-3 p-4">
         <input type="month" value={filters.month} onChange={(event) => setFilters({ ...filters, month: event.target.value })} className="field max-w-[160px]" />
         <input type="date" value={filters.date} onChange={(event) => setFilters({ ...filters, date: event.target.value, month: event.target.value ? event.target.value.slice(0, 7) : filters.month })} className="field max-w-[170px]" />
+        <input type="date" value={filters.fromDate} onChange={(event) => setFilters({ ...filters, fromDate: event.target.value })} className="field max-w-[170px]" title="من تاريخ" />
+        <input type="date" value={filters.toDate} onChange={(event) => setFilters({ ...filters, toDate: event.target.value })} className="field max-w-[170px]" title="إلى تاريخ" />
+        <input type="number" value={filters.year} onChange={(event) => setFilters({ ...filters, year: event.target.value })} className="field max-w-[120px]" placeholder="السنة" />
         <select value={filters.branch} onChange={(event) => setFilters({ ...filters, branch: event.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branchOptions.map((branch) => <option key={branch} value={branch}>{branch}</option>)}</select>
+        <select value={filters.department} onChange={(event) => setFilters({ ...filters, department: event.target.value })} className="field max-w-[180px]"><option value="all">كل الإدارات</option>{departmentOptions.map((department) => <option key={department} value={department}>{department}</option>)}</select>
         <select value={filters.employee} onChange={(event) => setFilters({ ...filters, employee: event.target.value })} className="field max-w-[230px]"><option value="all">كل الموظفين</option>{safeEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} - {employee.id}</option>)}</select>
         <select value={filters.operationType} onChange={(event) => setFilters({ ...filters, operationType: event.target.value })} className="field max-w-[210px]"><option value="all">كل أنواع العمليات</option>{operationTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}</select>
+        <select value={filters.channel} onChange={(event) => setFilters({ ...filters, channel: event.target.value })} className="field max-w-[160px]"><option value="all">كل القنوات</option>{channelOptions.map((channel) => <option key={channel} value={channel}>{channel}</option>)}</select>
         <select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option>{statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}</select>
+      </div>
+
+      <div className="panel space-y-3 p-4">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-800">
+          العمليات المعتمدة فقط تدخل في الإنتاجية ودرجات KPI والحوافز.
+        </div>
+        {!canApprove && <div className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">لا تملك صلاحية اعتماد العمليات</div>}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-600">المحدد: {selectedRows.length}</span>
+          <span className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-600">قيد المراجعة حسب الفلاتر: {pendingFilteredRows.length}</span>
+          <button disabled={bulkSaving || !canApprove || !selectedRows.length} onClick={() => openBulkDialog("approve", "selected")} className="btn-primary disabled:opacity-50">اعتماد المحدد</button>
+          <button disabled={bulkSaving || !canApprove || !filters.date} onClick={() => openBulkDialog("approve", "day")} className="btn-secondary disabled:opacity-50">اعتماد اليوم</button>
+          <button disabled={bulkSaving || !canApprove || (!filters.fromDate && !filters.toDate)} onClick={() => openBulkDialog("approve", "range")} className="btn-secondary disabled:opacity-50">اعتماد الفترة</button>
+          <button disabled={bulkSaving || !canApprove || !filters.month} onClick={() => openBulkDialog("approve", "month")} className="btn-secondary disabled:opacity-50">اعتماد الشهر</button>
+          <button disabled={bulkSaving || !selectedRows.length || can?.("daily_operations", "can_reject") === false} onClick={() => openBulkDialog("reject", "selected")} className="btn-secondary disabled:opacity-50">رفض المحدد</button>
+          <button disabled={bulkSaving || !selectedRows.length || !canEdit} onClick={() => openBulkDialog("return", "selected")} className="btn-secondary disabled:opacity-50">إرجاع للتعديل</button>
+        </div>
       </div>
 
       <div className="grid gap-5 xl:grid-cols-2">
         <div className="panel p-4">
           <div className="table-wrap">
             <table>
-              <thead><tr><th>التاريخ</th><th>الموظف</th><th>الفرع</th><th>نوع العملية</th><th>القناة</th><th>العدد</th><th>المكتملة</th><th>المعلقة</th><th>المرتجعة</th><th>الأخطاء</th><th>الشكاوى</th><th>الحالة</th><th></th></tr></thead>
+              <thead><tr><th><input type="checkbox" checked={allVisibleSelected} onChange={(event) => setAllVisibleSelected(event.target.checked)} /></th><th>التاريخ</th><th>الموظف</th><th>الفرع</th><th>نوع العملية</th><th>القناة</th><th>العدد</th><th>المكتملة</th><th>المعلقة</th><th>المرتجعة</th><th>الأخطاء</th><th>الشكاوى</th><th>الحالة</th><th></th></tr></thead>
               <tbody>
-                {loading ? <tr><td colSpan="13">جاري التحميل...</td></tr> : filtered.length ? filtered.map((row) => (
+                {loading ? <tr><td colSpan="14">جاري التحميل...</td></tr> : filtered.length ? filtered.map((row) => (
                   <tr key={row.operation_id}>
+                    <td><input type="checkbox" checked={selectedOperationIds.includes(row.operation_id)} onChange={(event) => toggleSelectedOperation(row.operation_id, event.target.checked)} /></td>
                     <td>{row.operation_date}</td><td>{row.employee_name}<p className="text-xs text-slate-400">{row.job_name}</p></td><td>{row.branch}</td><td>{row.operation_type}</td><td>{row.service_channel}</td><td>{row.operation_count}</td><td>{row.completed_count}</td><td>{row.pending_count}</td><td>{row.returned_count}</td><td>{row.error_count}</td><td>{row.customer_complaints}</td><td><Status>{row.status}</Status></td>
                     <td><button disabled={!canEdit} onClick={() => setDialog(row)} className="p-2 text-blue-600 disabled:opacity-40"><Pencil size={16} /></button><button disabled={!canApprove} onClick={() => approve(row)} className="p-2 text-green-700 disabled:opacity-40"><BadgeCheck size={16} /></button><button disabled={!canDelete || row.status !== "مسودة"} onClick={() => remove(row)} className="p-2 text-red-600 disabled:opacity-40"><Trash2 size={16} /></button></td>
                   </tr>
-                )) : <tr><td colSpan="13" className="py-8 text-center text-slate-400">لا توجد عمليات يومية في الفترة المحددة</td></tr>}
+                )) : <tr><td colSpan="14" className="py-8 text-center text-slate-400">لا توجد عمليات يومية في الفترة المحددة</td></tr>}
               </tbody>
             </table>
           </div>
@@ -7848,6 +8050,53 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
             </div>
             <DialogActions close={() => setDialog(null)} />
           </form>
+        </div>
+      )}
+
+      {bulkDialog && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+          <div className="panel w-full max-w-xl p-6">
+            <DialogTitle
+              title={bulkDialog.action === "approve" ? "تأكيد اعتماد العمليات" : bulkDialog.action === "reject" ? "رفض العمليات المحددة" : "إرجاع العمليات للتعديل"}
+              close={() => !bulkSaving && setBulkDialog(null)}
+            />
+            {bulkDialog.action === "approve" ? (
+              <p className="rounded-2xl bg-emerald-50 p-4 text-sm font-bold leading-7 text-emerald-800">
+                سيتم اعتماد عدد ({bulkDialog.count}) عملية. بعد الاعتماد ستدخل هذه العمليات في الإنتاجية ودرجات KPI والحوافز.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                <p className="rounded-2xl bg-amber-50 p-4 text-sm font-bold leading-7 text-amber-800">
+                  سيتم تحديث عدد ({bulkDialog.count}) عملية. يجب إدخال السبب قبل الحفظ.
+                </p>
+                <Label t="السبب">
+                  <textarea value={bulkReason} onChange={(event) => setBulkReason(event.target.value)} className="field mt-2 !h-auto py-3" rows="3" />
+                </Label>
+              </div>
+            )}
+            {bulkProgress && (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="mb-2 flex items-center justify-between text-sm font-extrabold text-slate-700">
+                  <span>
+                    {bulkDialog.action === "approve" ? "جاري اعتماد العمليات" : "جاري تحديث العمليات"}: {bulkProgress.processed} / {bulkProgress.total}
+                  </span>
+                  {bulkProgress.failed > 0 && <span className="text-red-700">فشل: {bulkProgress.failed}</span>}
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                  <div
+                    className="h-full rounded-full bg-brand-700 transition-all"
+                    style={{ width: `${Math.min(100, Math.round((Number(bulkProgress.processed || 0) / Math.max(1, Number(bulkProgress.total || 1))) * 100))}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            <div className="mt-6 flex justify-end gap-2">
+              <button disabled={bulkSaving} onClick={() => setBulkDialog(null)} className="btn-secondary">إلغاء</button>
+              <button disabled={bulkSaving || (["reject", "return"].includes(bulkDialog.action) && !bulkReason.trim())} onClick={runBulkAction} className="btn-primary disabled:opacity-50">
+                {bulkSaving ? "جاري الحفظ..." : bulkDialog.action === "approve" ? "اعتماد العمليات" : "حفظ الإجراء"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -8855,7 +9104,7 @@ function EnhancedProductivity({ employees = [], settings = {}, setSettings, curr
     setOperationError("");
     try {
       if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
-      setOperations(await dailyOperationsService.loadDailyOperations({}));
+      setOperations(await dailyOperationsService.loadDailyOperations({ companyId, approvedOnly: true }));
     } catch (error) {
       console.error("Productivity daily_operations load error:", error);
       setOperationError(error.message || "تعذر تحميل عمليات الإنتاجية");
@@ -9021,10 +9270,10 @@ function EnhancedProductivity({ employees = [], settings = {}, setSettings, curr
 
       <div className="rounded-2xl border border-slate-200 p-4">
         <h3 className="mb-3 text-lg font-extrabold">عمليات الموظف المسجلة</h3>
-        <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>نوع العملية</th><th>عدد العمليات</th><th>الأخطاء</th><th>الشكاوى</th><th>المبلغ</th><th>العملة</th></tr></thead><tbody>
-          {loadingOperations ? <tr><td colSpan="7" className="py-6 text-center">جاري تحميل العمليات...</td></tr>
-            : selectedOperations.length ? selectedOperations.map((row) => <tr key={row.operation_id}><td>{row.operation_date}</td><td>{row.operation_type}</td><td>{row.operation_count}</td><td>{row.error_count}</td><td>{row.customer_complaints}</td><td>{row.amount}</td><td>{row.currency}</td></tr>)
-              : <tr><td colSpan="7" className="py-6 text-center text-slate-400">{selectedEmployeeId ? "لا توجد عمليات مسجلة لهذا الموظف حالياً" : "اختر الموظف لعرض عملياته"}</td></tr>}
+        <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>نوع العملية</th><th>عدد العمليات</th><th>الأخطاء</th><th>الشكاوى</th><th>المبلغ</th><th>العملة</th><th>KPI</th></tr></thead><tbody>
+          {loadingOperations ? <tr><td colSpan="8" className="py-6 text-center">جاري تحميل العمليات...</td></tr>
+            : selectedOperations.length ? selectedOperations.map((row) => <tr key={row.operation_id}><td>{row.operation_date}</td><td>{row.operation_type}</td><td>{row.operation_count}</td><td>{row.error_count}</td><td>{row.customer_complaints}</td><td>{row.amount}</td><td>{row.currency}</td><td>{isApprovedDailyOperation(row) ? "داخل KPI" : "غير داخل"}</td></tr>)
+              : <tr><td colSpan="8" className="py-6 text-center text-slate-400">{selectedEmployeeId ? "لا توجد عمليات معتمدة لهذا الموظف حالياً" : "اختر الموظف لعرض عملياته المعتمدة"}</td></tr>}
         </tbody></table></div>
       </div>
       <button className="btn-primary" disabled={!selectedEmployee}><Save size={17} /> حفظ مؤشرات الشهر</button>
@@ -9051,16 +9300,45 @@ function EnhancedDiscipline({ employees, settings, setSettings }) {
 
 function EnhancedIncentives({ employees, evaluations, setEvaluations }) {
   const [details, setDetails] = useState(null);
+  const [kpiScores, setKpiScores] = useState([]);
+  const [kpiMonth, setKpiMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [kpiLoading, setKpiLoading] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setKpiLoading(true);
+    kpiCalculationService.loadKpiScores(kpiMonth)
+      .then((rows) => {
+        if (alive) setKpiScores(rows || []);
+      })
+      .catch((error) => {
+        console.error("Incentives KPI load error:", error);
+        if (alive) setKpiScores([]);
+      })
+      .finally(() => alive && setKpiLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [kpiMonth]);
+  const kpiByEmployee = kpiScores.reduce((acc, row) => {
+    const key = row.employee_id;
+    if (!key) return acc;
+    acc[key] = acc[key] || { total: 0, count: 0 };
+    acc[key].total += Number(row.weighted_score || row.score || 0);
+    acc[key].count += 1;
+    return acc;
+  }, {});
   const data = evaluations.map((ev) => {
     const employee = employees.find((x) => x.id === ev.employeeId) || {};
-    const total = effectiveEvaluationTotal(ev);
+    const kpi = kpiByEmployee[employee.id];
+    const total = kpi ? Number(kpi.total.toFixed(2)) : null;
     const cat = classify(total);
     const rate = cat === "ممتاز" ? 0.1 : cat === "جيد جدًا" ? 0.07 : cat === "جيد" ? 0.04 : 0;
-    return { ...employee, evaluation: ev, total, rate, amount: (employee.salary || 0) * rate * (total / 100), approval: ev.status };
+    return { ...employee, evaluation: ev, total, rate, amount: total === null ? 0 : (employee.salary || 0) * rate * (total / 100), approval: ev.status, kpiMissing: total === null };
   });
   return (
     <div className="space-y-5">
-      <PageHead title="الحوافز والمكافآت" desc="احتساب آلي مع عرض تفاصيل أهلية كل موظف" action={<button onClick={() => exportExcel(data, "الحوافز")} className="btn-primary"><Download size={17} /> تصدير الكشف</button>} />
+      <PageHead title="الحوافز والمكافآت" desc="احتساب آلي مع عرض تفاصيل أهلية كل موظف" action={<div className="flex flex-wrap gap-2"><input type="month" value={kpiMonth} onChange={(event) => setKpiMonth(event.target.value)} className="field max-w-[160px]" /><button onClick={() => exportExcel(data, "الحوافز")} className="btn-primary"><Download size={17} /> تصدير الكشف</button></div>} />
+      {!kpiLoading && !kpiScores.length && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800">لم يتم احتساب درجات KPI بعد</div>}
       <div className="grid gap-4 sm:grid-cols-3">
         <Mini label="إجمالي الحوافز" value={money(data.reduce((s, x) => s + x.amount, 0))} I={CircleDollarSign} />
         <Mini label="المستحقون" value={data.filter((x) => x.rate > 0).length} I={UserCheck} />
@@ -9074,7 +9352,7 @@ function EnhancedIncentives({ employees, evaluations, setEvaluations }) {
               {data.map((x) => (
                 <tr key={`${x.id}-${x.evaluation?.id}`}>
                   <td className="font-bold">{x.name}</td><td>{x.branch}</td><td>{x.job}</td><td>{money(x.salary)}</td>
-                  <td><Status>{classify(x.total)}</Status> {x.total}%</td><td>{x.rate * 100}%</td><td className="font-bold text-brand-700">{money(x.amount)}</td>
+                  <td>{x.kpiMissing ? <Status>لم يتم احتساب KPI</Status> : <><Status>{classify(x.total)}</Status> {x.total}%</>}</td><td>{x.rate * 100}%</td><td className="font-bold text-brand-700">{money(x.amount)}</td>
                   <td>
                     <select value={x.approval} onChange={(e) => setEvaluations((list) => list.map((ev) => ev.id === x.evaluation.id ? { ...ev, status: e.target.value } : ev))} className="field !h-9">
                       <option>قيد المراجعة</option><option>معتمد</option><option>مرفوض</option>

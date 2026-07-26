@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import { normalizeCompany, normalizeTenantUser, setTenantSession } from "./tenant";
+import { normalizeCompany, normalizeTenantUser, setCompanySession, setPlatformSession } from "./tenant";
 
 export const normalizeCloudUser = (raw = {}, fallbackUsername = "") => {
   const source = Array.isArray(raw) ? raw[0] || {} : raw;
@@ -107,6 +107,7 @@ export async function loginWithSupabase(username, password, employeeNumber = "",
     },
     company || {},
   );
-  setTenantSession({ company, user });
+  if (isPlatformLogin) setPlatformSession(user);
+  else setCompanySession(user, company);
   return user;
 }

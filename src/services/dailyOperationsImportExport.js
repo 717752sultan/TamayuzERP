@@ -99,7 +99,7 @@ const headerMap = {
   notes: "notes",
 };
 
-const validStatuses = ["مسودة", "قيد المراجعة", "معتمدة", "مرفوضة"];
+const validStatuses = ["مستورد", "قيد المراجعة", "معتمد", "معتمدة", "مرفوض", "مرفوضة", "ملغي", "معاد للتعديل"];
 
 export const calculateErrorRate = (totalOperations, errorCount) => {
   const total = Number(totalOperations || 0);
@@ -166,7 +166,7 @@ export const normalizeDailyOperationRow = (row = {}) => {
     operation_count_provided: mapped.operation_count !== "" && mapped.operation_count !== null && mapped.operation_count !== undefined,
     currency: String(mapped.currency || "").trim(),
     error_rate: calculateErrorRate(numbers.operation_count, numbers.error_count),
-    status: String(mapped.status || "مسودة").trim(),
+    status: String(mapped.status || "قيد المراجعة").trim(),
     notes: String(mapped.notes || "").trim(),
   };
 };
@@ -283,7 +283,7 @@ export async function importDailyOperationsRows(rows = [], currentCompanyId = ""
       amount: Number(row.amount || 0),
       currency: row.currency || "",
       notes: row.notes || "",
-      status: row.status || "مسودة",
+      status: row.status || "قيد المراجعة",
     };
     const savedRow = await dailyOperationsService.saveDailyOperation(payload);
     saved.push(savedRow);
