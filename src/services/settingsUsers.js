@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 import { isPlatformAdminUser, isProtectedPlatformRole, isProtectedPlatformUser } from "./tenant";
+import { normalizeRoleName } from "./roles";
 
 const requireCompany = (companyId) => {
   const id = String(companyId || "").trim();
@@ -14,7 +15,7 @@ export const settingsUserFromDb = (row = {}) => ({
   name: row.name || row.employee_name || row.username || "",
   username: row.username || "",
   password: "",
-  role: row.role || "الموظف",
+  role: normalizeRoleName(row.role || "الموظف"),
   employee_id: row.employee_id || "",
   employee_name: row.employee_name || row.name || "",
   branch: row.branch || "",
@@ -33,7 +34,7 @@ const userToDb = (companyId, user = {}) => ({
   name: String(user.name || user.employee_name || user.username || "").trim(),
   username: String(user.username || "").trim(),
   password: user.password === undefined ? undefined : String(user.password || "").trim(),
-  role: String(user.role || "").trim(),
+  role: normalizeRoleName(user.role || ""),
   employee_id: String(user.employee_id || user.employeeId || "").trim(),
   employee_name: String(user.employee_name || user.name || "").trim(),
   branch: String(user.branch || "").trim(),
@@ -47,7 +48,7 @@ const userToDb = (companyId, user = {}) => ({
 
 const assertUser = (payload, mode = "edit") => {
   if (!payload.username) throw new Error("اسم المستخدم مطلوب");
-  if (!payload.role) throw new Error("الدور مطلوب");
+  if (!payload.role || payload.role === "غير محدد") throw new Error("الدور مطلوب");
   if (mode === "add" && !payload.password) throw new Error("كلمة المرور مطلوبة عند الإنشاء");
 };
 

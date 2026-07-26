@@ -108,6 +108,7 @@ import { companiesService } from "./services/companies";
 import { applyCompanyPermissionActionToggle, companyPermissionActions, companyPermissionChildActionKeys, companyPermissionModules, companyPermissionsService, companyCanAccessFromRows, companyCanModuleFromRows, companyCanPageFromRows, mergeWithDefaultCompanyPermissions } from "./services/companyPermissions";
 import { applyCompanyTheme, applyThemeForCurrentCompany, getDefaultTheme, normalizeThemePayload, themePresets, themeService } from "./services/theme";
 import { clearTenantSession, getCurrentCompany, getCurrentUser, isPlatformAdminUser, isPlatformRoute, isProtectedPlatformRole, isProtectedPlatformUser, loadTenantSession, setCompanySession, setPlatformSession } from "./services/tenant";
+import { getRoleOptions, normalizeRoleName } from "./services/roles";
 import { assistantModes, pageRegistryByKey } from "./constants/pageRegistry";
 import { APP_BRAND_NAME, APP_DESCRIPTION, APP_OFFICIAL_NAME, APP_REPORT_SUBTITLE, APP_REPORT_TITLE, APP_SHORT_NAME, APP_SYSTEM_NAME, APP_TAGLINE } from "./constants/branding";
 import { buildReportBrandingHtml } from "./services/reportBranding";
@@ -4574,15 +4575,15 @@ function SettingsPage({
                 </Label>
                 <Label t="الصلاحية">
                   <select
-                    value={dialog.role || "الموظف"}
+                    value={normalizeRoleName(dialog.role || "الموظف")}
                     onChange={(e) =>
                       setDialog({ ...dialog, role: e.target.value })
                     }
                     className="field mt-2"
                   >
-                    {(settings.permissions || defaultSettings.permissions).map(
+                    {getRoleOptions((settings.permissions || defaultSettings.permissions).map((permission) => permission.name)).map(
                       (permission) => (
-                        <option key={permission.name}>{permission.name}</option>
+                        <option key={permission}>{permission}</option>
                       ),
                     )}
                   </select>
@@ -8423,7 +8424,9 @@ function RecruitmentPage({ employees, currentUser, canNode }) {
 }
 
 function UserEditorModal({ dialog, setDialog, saveUser, employeeOptions, selectEmployee, roles = systemRoles }) {
-  const isAdmin = String(dialog.role || "").includes("مدير النظام") || String(dialog.role || "").includes("مدير النظام");
+  const normalizedDialogRole = normalizeRoleName(dialog.role || "الموظف");
+  const roleChoices = getRoleOptions(roles);
+  const isAdmin = String(normalizedDialogRole || "").includes("مدير النظام") || String(normalizedDialogRole || "").includes("مشرف النظام العام");
   const isNewUser = !dialog.user_id && !dialog.id;
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
@@ -8447,7 +8450,7 @@ function UserEditorModal({ dialog, setDialog, saveUser, employeeOptions, selectE
           <Label t="الرقم الوظيفي"><input readOnly value={dialog.employee_id || ""} className="field mt-2 bg-slate-50" /></Label>
           <Label t="اسم المستخدم"><input required value={dialog.username || ""} onChange={(e) => setDialog({ ...dialog, username: e.target.value })} className="field mt-2" /></Label>
           {isNewUser && <Label t="كلمة المرور"><input required type="password" value={dialog.password || ""} onChange={(e) => setDialog({ ...dialog, password: e.target.value })} className="field mt-2" /></Label>}
-          <Label t="الدور"><select value={dialog.role || "الموظف"} onChange={(e) => setDialog({ ...dialog, role: e.target.value })} className="field mt-2">{roles.map((role) => <option key={role}>{role}</option>)}</select></Label>
+          <Label t="الدور"><select value={roleChoices.includes(normalizedDialogRole) ? normalizedDialogRole : "غير محدد"} onChange={(e) => setDialog({ ...dialog, role: e.target.value })} className="field mt-2"><option value="غير محدد" disabled>غير محدد</option>{roleChoices.map((role) => <option key={role}>{role}</option>)}</select></Label>
           <Label t="الفرع"><input readOnly={!isAdmin} value={dialog.branch || ""} onChange={(e) => setDialog({ ...dialog, branch: e.target.value })} className={`field mt-2 ${isAdmin ? "" : "bg-slate-50"}`} /></Label>
           <Label t="الوظيفة"><input readOnly={!isAdmin} value={dialog.job || ""} onChange={(e) => setDialog({ ...dialog, job: e.target.value })} className={`field mt-2 ${isAdmin ? "" : "bg-slate-50"}`} /></Label>
           <Label t="البريد الإلكتروني"><input value={dialog.email || ""} onChange={(e) => setDialog({ ...dialog, email: e.target.value })} className="field mt-2" /></Label>
@@ -8538,12 +8541,13 @@ function TreePermissionsPanel({ selectedRole, setSelectedRole, treeNodes, treePe
       </div>
     );
   };
-  const selectedUserOptions = users.filter((u) => !selectedRole || u.role === selectedRole);
+  const roleChoices = getRoleOptions(roles);
+  const selectedUserOptions = users.filter((u) => !selectedRole || normalizeRoleName(u.role) === selectedRole);
   return (
     <div className="panel p-4 xl:col-span-2">
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <h3 className="text-lg font-extrabold">شجرة الصلاحيات التفصيلية</h3>
-        <select value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)} className="field mr-auto max-w-[220px]">{roles.map((r) => <option key={r}>{r}</option>)}</select>
+        <select value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)} className="field mr-auto max-w-[220px]">{roleChoices.map((r) => <option key={r}>{r}</option>)}</select>
         <select className="field max-w-[220px]"><option>كل مستخدمي الدور</option>{selectedUserOptions.map((u) => <option key={u.user_id}>{u.employee_name || u.username}</option>)}</select>
         <input value={search} onChange={(e) => setSearch(e.target.value)} className="field max-w-[240px]" placeholder="اكتب سبب طلب المراجعة..." />
       </div>
@@ -8552,7 +8556,7 @@ function TreePermissionsPanel({ selectedRole, setSelectedRole, treeNodes, treePe
         <button disabled={!canEdit} onClick={() => setAll(false)} className="btn-secondary">مسح الكل</button>
         <button onClick={() => setExpanded(flatNodes.map((n) => n.node_key))} className="btn-secondary">توسيع الكل</button>
         <button onClick={() => setExpanded([])} className="btn-secondary">طي الكل</button>
-        <select value={copyFromRole} onChange={(e) => setCopyFromRole(e.target.value)} className="field max-w-[200px]"><option value="">نسخ من دور...</option>{roles.filter((r) => r !== selectedRole).map((r) => <option key={r}>{r}</option>)}</select>
+        <select value={copyFromRole} onChange={(e) => setCopyFromRole(e.target.value)} className="field max-w-[200px]"><option value="">نسخ من دور...</option>{roleChoices.filter((r) => r !== selectedRole).map((r) => <option key={r}>{r}</option>)}</select>
         <button disabled={!canEdit || !copyFromRole} onClick={() => onCopy(copyFromRole)} className="btn-secondary">نسخ الصلاحيات</button>
         <button disabled={!canEdit} onClick={onReset} className="btn-secondary">إعادة ضبط الدور</button>
         <button disabled={!canEdit || loading} onClick={onSave} className="btn-primary"><Save size={17} /> حفظ الصلاحيات</button>
@@ -8689,7 +8693,7 @@ function UsersPermissionsPage({ employees, can, companyPermissions }) {
   }, [selectedRole]);
   const branchOptions = [...new Set([...(employeeOptions || []).map((e) => e.branch), ...users.map((u) => u.branch), ...branches].filter(Boolean))];
   const safeRoleRows = isPlatformAdmin ? (roleRows || []) : (roleRows || []).filter((r) => !isProtectedPlatformRole(r.role_name));
-  const roleOptions = [...new Set([...safeRoleRows.filter((r) => r.is_active !== false).map((r) => r.role_name), ...systemRoles])];
+  const roleOptions = getRoleOptions(safeRoleRows.filter((r) => r.is_active !== false).map((r) => r.role_name));
   const filterNodesByCompanyPermissions = (nodes = []) =>
     nodes
       .map((node) => {
@@ -8700,8 +8704,8 @@ function UsersPermissionsPage({ employees, can, companyPermissions }) {
       .filter(Boolean);
   const companyFilteredTreeNodes = filterNodesByCompanyPermissions(treeNodes);
   const filtered = users.filter((u) =>
-    (!filters.q || (u.name || u.employee_name || u.username || "").includes(filters.q) || u.username.includes(filters.q) || u.employee_id.includes(filters.q) || u.branch.includes(filters.q) || u.role.includes(filters.q)) &&
-    (filters.role === "all" || u.role === filters.role) &&
+    (!filters.q || (u.name || u.employee_name || u.username || "").includes(filters.q) || u.username.includes(filters.q) || u.employee_id.includes(filters.q) || u.branch.includes(filters.q) || normalizeRoleName(u.role).includes(filters.q)) &&
+    (filters.role === "all" || normalizeRoleName(u.role) === filters.role) &&
     (filters.branch === "all" || u.branch === filters.branch) &&
     (filters.status === "all" || String(u.is_active) === filters.status)
   );
@@ -8712,13 +8716,14 @@ function UsersPermissionsPage({ employees, can, companyPermissions }) {
   const saveUser = async (e) => {
     e.preventDefault();
     if (!canEdit) return alert("لا تملك صلاحية تنفيذ هذا الإجراء");
-    if (!isPlatformAdmin && isProtectedPlatformRole(dialog.role)) return alert("لا يمكن اختيار هذا الدور من إعدادات الشركة");
-    if (!dialog.employee_id && !String(dialog.role || "").includes("مدير النظام") && !String(dialog.role || "").includes("مدير النظام")) return alert("يجب اختيار الموظف");
+    const dialogRole = normalizeRoleName(dialog.role);
+    if (!isPlatformAdmin && isProtectedPlatformRole(dialogRole)) return alert("لا يمكن اختيار هذا الدور من إعدادات الشركة");
+    if (!dialog.employee_id && !String(dialogRole || "").includes("مدير النظام") && !String(dialogRole || "").includes("مشرف النظام العام")) return alert("يجب اختيار الموظف");
     if (!dialog.username) return alert("يجب إدخال اسم المستخدم");
     if (!dialog.role) return alert("يجب تحديد الدور");
     try {
       const selectedEmployee = employeeOptions.find((employee) => employee.id === dialog.employee_id || employee.employee_id === dialog.employee_id);
-      const saved = await adminService.saveUser(dialog, selectedEmployee);
+      const saved = await adminService.saveUser({ ...dialog, role: dialogRole }, selectedEmployee);
       setUsers((list) => {
         const exists = list.some((x) => x.user_id === saved.user_id);
         return exists ? list.map((x) => (x.user_id === saved.user_id ? saved : x)) : [saved, ...list];
@@ -8869,7 +8874,7 @@ function UsersPermissionsPage({ employees, can, companyPermissions }) {
           <h3 className="mb-3 font-extrabold">المستخدمون</h3>
           {loading ? <p className="text-sm text-slate-400">جاري التحميل...</p> : <div className="table-wrap"><table><thead><tr><th>المستخدم</th><th>الموظف</th><th>الدور</th><th>الفرع</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((u) => {
               const isProtectedUser = !isPlatformAdmin && isProtectedPlatformUser(u);
-              return <tr key={u.user_id}><td>{u.username}</td><td>{u.employee_name}<p className="text-xs text-slate-400">{u.employee_id}</p></td><td>{u.role}</td><td>{u.branch}</td><td><Status>{u.is_active ? "نشط" : "معطل"}</Status></td><td><button disabled={!canEdit || isProtectedUser} onClick={() => setDialog(u)} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canResetPassword || isProtectedUser} onClick={() => resetUserPassword(u)} className="p-2 text-amber-700">إعادة كلمة المرور</button><button disabled={!canEdit || isProtectedUser} onClick={() => adminService.saveUser({ ...u, is_active: !u.is_active }).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600">{u.is_active ? "تعطيل" : "تفعيل"}</button></td></tr>;
+              return <tr key={u.user_id}><td>{u.username}</td><td>{u.employee_name}<p className="text-xs text-slate-400">{u.employee_id}</p></td><td>{normalizeRoleName(u.role)}</td><td>{u.branch}</td><td><Status>{u.is_active ? "نشط" : "معطل"}</Status></td><td><button disabled={!canEdit || isProtectedUser} onClick={() => setDialog({ ...u, role: normalizeRoleName(u.role) })} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canResetPassword || isProtectedUser} onClick={() => resetUserPassword(u)} className="p-2 text-amber-700">إعادة كلمة المرور</button><button disabled={!canEdit || isProtectedUser} onClick={() => adminService.saveUser({ ...u, role: normalizeRoleName(u.role), is_active: !u.is_active }).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600">{u.is_active ? "تعطيل" : "تفعيل"}</button></td></tr>;
             })}</tbody></table></div>}
         </div>
         <TreePermissionsPanel

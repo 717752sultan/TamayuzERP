@@ -1,3 +1,5 @@
+import { normalizeRoleName } from "./roles";
+
 const LEGACY_TENANT_SESSION_KEY = "hrms_tenant_session";
 export const COMPANY_USER_SESSION_KEY = "tamyuz_company_user";
 export const COMPANY_CONTEXT_SESSION_KEY = "tamyuz_company";
@@ -22,7 +24,7 @@ export const platformSuperAdminRole = "مدير عام النظام";
 export const PROTECTED_PLATFORM_ROLES = ["مشرف النظام العام", "مدير عام النظام", "Platform Admin", "platform_admin"];
 export const PROTECTED_PLATFORM_USERNAMES = ["platform"];
 
-export const isProtectedPlatformRole = (role = "") => PROTECTED_PLATFORM_ROLES.includes(String(role || "").trim());
+export const isProtectedPlatformRole = (role = "") => PROTECTED_PLATFORM_ROLES.includes(String(role || "").trim()) || PROTECTED_PLATFORM_ROLES.includes(normalizeRoleName(role));
 export const isProtectedPlatformUser = (user = {}) => {
   if (!user) return false;
   return user?.is_platform_admin === true
@@ -32,7 +34,7 @@ export const isProtectedPlatformUser = (user = {}) => {
 
 export const isPlatformAdminUser = (user = tenantState.currentUser) =>
   user?.is_platform_admin === true
-  || user?.role === "مشرف النظام العام"
+  || normalizeRoleName(user?.role) === "مشرف النظام العام"
   || user?.role === "مدير عام النظام"
   || String(user?.username || "").trim().toLowerCase() === "platform";
 
@@ -116,7 +118,7 @@ export const normalizeTenantUser = (row = {}, company = {}) => {
     id: row.id || row.user_id || row.username || "",
     name: row.name || row.employee_name || row.username || "",
     username: row.username || "",
-    role: row.role || "الموظف",
+    role: normalizeRoleName(row.role || "الموظف"),
     employeeId: row.employee_id || row.employeeId || "",
     employee_id: row.employee_id || row.employeeId || "",
     branch: row.branch || "",
