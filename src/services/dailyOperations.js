@@ -35,6 +35,7 @@ export const isApprovedDailyOperation = (row = {}) => row.included_in_kpi === tr
 
 export const DAILY_OPERATIONS_BULK_CHUNK_SIZE = 100;
 export const DAILY_OPERATIONS_DEFAULT_LIMIT = 10000;
+const DAILY_OPERATIONS_PAGE_SIZE = 1000;
 
 const averageServiceTimeMarker = /\n?\[\[average_service_time:([-+]?\d+(?:\.\d+)?)\]\]/g;
 
@@ -281,7 +282,8 @@ export const dailyOperationsService = {
     try {
       const companyId = resolveCompanyId(filters.companyId || filters.company_id);
       if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
-      const query = [
+      const requestedLimit = Number(filters.limit || DAILY_OPERATIONS_DEFAULT_LIMIT);
+      const queryBase = [
         `company_id=eq.${encodeURIComponent(companyId)}`,
         ...(filters.month ? [`month=eq.${encodeURIComponent(filters.month)}`] : []),
         ...(filters.date ? [`operation_date=eq.${encodeURIComponent(filters.date)}`] : []),
@@ -293,9 +295,16 @@ export const dailyOperationsService = {
         ...(filters.channel && filters.channel !== "all" ? [`service_channel=eq.${encodeURIComponent(filters.channel)}`] : []),
         "select=*",
         "order=operation_date.desc",
-        `limit=${Number(filters.limit || DAILY_OPERATIONS_DEFAULT_LIMIT)}`,
-      ].join("&");
-      const rows = await supabase.select("daily_operations", query);
+      ];
+      const rows = [];
+      for (let offset = 0; offset < requestedLimit; offset += DAILY_OPERATIONS_PAGE_SIZE) {
+        const batchLimit = Math.min(DAILY_OPERATIONS_PAGE_SIZE, requestedLimit - offset);
+        const query = [...queryBase, `limit=${batchLimit}`, `offset=${offset}`].join("&");
+        const batch = await supabase.select("daily_operations", query);
+        const list = Array.isArray(batch) ? batch : [];
+        rows.push(...list);
+        if (list.length < batchLimit) break;
+      }
       const mapped = (Array.isArray(rows) ? rows : []).map(fromDb);
       return filters.approvedOnly ? mapped.filter(isApprovedDailyOperation) : mapped;
     } catch (error) {

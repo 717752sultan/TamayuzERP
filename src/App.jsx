@@ -7667,12 +7667,12 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
         channel: nextFilters.channel || "all",
       });
       if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
-        console.log("daily operations load debug", {
+        console.log("daily operations load limit debug", {
           filters: { ...nextFilters, month: queryMonth },
-          queryLimit,
+          limit: queryLimit,
           loadedRows: loaded.length,
-          firstDate: loaded[loaded.length - 1]?.operation_date,
-          lastDate: loaded[0]?.operation_date,
+          firstLoadedDate: loaded[loaded.length - 1]?.operation_date,
+          lastLoadedDate: loaded[0]?.operation_date,
         });
       }
       setRows(loaded);
