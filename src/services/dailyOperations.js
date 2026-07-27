@@ -144,7 +144,11 @@ const toDb = (row = {}) => {
   if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
   const operationDate = normalizeDateOnly(row.operation_date);
   if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
-    console.log("operation_date debug", { rawDate: row.operation_date, parsedDate: operationDate, savedDate: operationDate });
+    console.log("operation_date debug", {
+      source: "daily-operations-save",
+      rawDate: row.operation_date,
+      savedDate: operationDate,
+    });
   }
   const status = normalizeStatus(row.status);
   const normalized = {

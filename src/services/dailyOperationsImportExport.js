@@ -188,7 +188,12 @@ export const normalizeDailyOperationRow = (row = {}) => {
   const rawDate = mapped.operation_date;
   const operationDate = parseOperationDate(rawDate);
   if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
-    console.log("operation_date debug", { rawDate, parsedDate: operationDate, savedDate: operationDate });
+    console.log("operation_date debug", {
+      source: "daily-operations-import",
+      rawDate,
+      rawType: typeof rawDate,
+      parsedDate: operationDate,
+    });
   }
   const numberFields = [
     "operation_count",
@@ -226,7 +231,7 @@ export async function parseDailyOperationsExcel(file) {
   const workbook = XLSX.read(buffer, { type: "array", cellDates: false });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   if (!sheet) throw new Error("لا يحتوي الملف على ورقة بيانات");
-  const rows = XLSX.utils.sheet_to_json(sheet, { defval: "", blankrows: false });
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: "", blankrows: false, raw: true });
   const parsedRows = [];
   let consecutiveBlankRowsAfterData = 0;
   for (const [index, row] of rows.entries()) {
@@ -349,7 +354,11 @@ export async function importDailyOperationsRows(rows = [], currentCompanyId = ""
       status: row.status || "قيد المراجعة",
     };
     if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
-      console.log("operation_date debug", { rawDate: row.operation_date, parsedDate, savedDate: payload.operation_date });
+      console.log("operation_date debug", {
+        source: "daily-operations-save",
+        rawDate: row.operation_date,
+        savedDate: payload.operation_date,
+      });
     }
     const savedRow = await dailyOperationsService.saveDailyOperation(payload);
     saved.push(savedRow);
