@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
-import { isPlatformAdminUser, isProtectedPlatformRole } from "./tenant";
+import { getCurrentCompanyId, isPlatformAdminUser, isProtectedPlatformRole } from "./tenant";
+import { normalizeRoleName } from "./roles";
 import { ERP_MODULES } from "../constants/moduleRegistry";
 import { permissionActionLabels } from "../constants/pageRegistry";
 
@@ -251,38 +252,53 @@ const TREE_PERMISSION_COLUMNS = [
   "allowed_departments",
   "created_at",
   "updated_at",
+  "company_id",
 ];
 
-const toDbTreePermissionRow = (row = {}) => {
+const makePermissionId = (companyId, roleName, nodeKey) =>
+  `${companyId || "GLOBAL"}__${roleName}__${nodeKey}`
+    .replace(/\s+/g, "_")
+    .replace(/[^\w\u0600-\u06FF-]/g, "_");
+
+const toDbTreePermissionRow = (row = {}, companyId = "", selectedRole = "") => {
   const normalized = normalizeTreePermission(row);
   const now = new Date().toISOString();
+  const roleName = normalizeRoleName(normalized.role_name || selectedRole || "") || "";
+  const nodeKey = String(normalized.node_key || row.key || "").trim();
 
   return TREE_PERMISSION_COLUMNS.reduce((acc, key) => {
-    if (key === "created_at") {
-      acc[key] = row.created_at || now;
-    } else if (key === "updated_at") {
-      acc[key] = row.updated_at || now;
-    } else if (key === "allowed_branches") {
-      acc[key] = Array.isArray(normalized.allowed_branches) ? normalized.allowed_branches : [];
-    } else if (key === "allowed_departments") {
-      acc[key] = Array.isArray(normalized.allowed_departments) ? normalized.allowed_departments : [];
-    } else if (key === "data_scope") {
-      acc[key] = normalized.data_scope || "own";
-    } else if (key.startsWith("can_")) {
-      acc[key] = Boolean(normalized[key]);
-    } else {
-      acc[key] = normalized[key] ?? "";
-    }
-
+    if (key === "permission_id") acc[key] = String(row.permission_id || makePermissionId(companyId, roleName, nodeKey)).trim();
+    else if (key === "role_name") acc[key] = roleName;
+    else if (key === "node_key") acc[key] = nodeKey;
+    else if (key === "company_id") acc[key] = String(row.company_id || companyId || "").trim();
+    else if (key === "created_at") acc[key] = row.created_at || now;
+    else if (key === "updated_at") acc[key] = now;
+    else if (key === "allowed_branches") acc[key] = Array.isArray(normalized.allowed_branches) ? normalized.allowed_branches : [];
+    else if (key === "allowed_departments") acc[key] = Array.isArray(normalized.allowed_departments) ? normalized.allowed_departments : [];
+    else if (key === "data_scope") acc[key] = normalized.data_scope || "own";
+    else if (key.startsWith("can_")) acc[key] = Boolean(normalized[key]);
+    else acc[key] = normalized[key] ?? null;
     return acc;
   }, {});
 };
 
-const normalizeTreePermissionPayloadRows = (rows = []) =>
-  dedupeTreePermissionRows(rows)
-    .map(toDbTreePermissionRow)
-    .filter((row) => row.permission_id && row.role_name && row.node_key);
+const normalizeTreePermissionPayloadRows = (rows = [], companyId = "", selectedRole = "") =>
+  dedupeTreePermissionRows(rows).map((row) => toDbTreePermissionRow(row, companyId, selectedRole));
 
+const validatePermissionPayloadRows = (rows = []) => {
+  const expectedKeys = Object.keys(rows[0] || {}).sort().join("|");
+  for (const row of rows) {
+    const rowKeys = Object.keys(row).sort().join("|");
+    if (rowKeys !== expectedKeys) {
+      console.error("Permission row keys mismatch", { expectedKeys, rowKeys, row });
+      throw new Error("بيانات الصلاحيات غير موحدة. يرجى المحاولة مرة أخرى.");
+    }
+    if (!row.company_id || !row.role_name || !row.node_key || !row.permission_id) {
+      console.error("Permission row required fields missing", { row });
+      throw new Error("بيانات الصلاحيات غير مكتملة. يرجى المحاولة مرة أخرى.");
+    }
+  }
+};
 export const buildPermissionTree = (nodes = []) => {
   const map = Object.fromEntries(nodes.map((n) => [n.node_key, { ...n, children: [] }]));
   const roots = [];
@@ -327,7 +343,11 @@ export const treePermissionsService = {
       if (!isPlatformAdminUser() && isProtectedPlatformRole(roleName)) {
         throw new Error("لا يمكن حفظ صلاحيات هذا الدور من داخل إعدادات الشركة");
       }
-      const payload = normalizeTreePermission({ ...permission, role_name: roleName, node_key: nodeKey, updated_at: new Date().toISOString() });
+      const payload = normalizeTreePermissionPayloadRows([
+        { ...permission, role_name: roleName, node_key: nodeKey },
+      ], getCurrentCompanyId(), roleName)[0];
+      validatePermissionPayloadRows(payload ? [payload] : []);
+      if (!payload) throw new Error("بيانات الصلاحية غير مكتملة");
       const { data, error } = await supabase.from("app_role_node_permissions").upsert(payload, { onConflict: "permission_id" }).select().single();
       if (error) throw error;
       return permissionFromDb(data);
@@ -342,14 +362,31 @@ export const treePermissionsService = {
       if (!isPlatformAdminUser() && isProtectedPlatformRole(roleName)) {
         throw new Error("لا يمكن حفظ صلاحيات هذا الدور من داخل إعدادات الشركة");
       }
-      const payload = dedupeTreePermissionRows(permissions.map((p) => normalizeTreePermission({ ...p, role_name: roleName, permission_id: `${roleName}-${p.node_key}`, updated_at: new Date().toISOString() })));
+      const companyId = getCurrentCompanyId();
+      if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
+      const normalizedRoleName = normalizeRoleName(roleName) || "";
+      if (!normalizedRoleName) throw new Error("يجب تحديد الدور أولًا");
+      const payload = normalizeTreePermissionPayloadRows(
+        permissions.map((permission) => ({ ...permission, role_name: normalizedRoleName })),
+        companyId,
+        normalizedRoleName,
+      );
+      validatePermissionPayloadRows(payload);
+
+      await supabase.request(
+        `/rest/v1/app_role_node_permissions?company_id=eq.${encodeURIComponent(companyId)}&role_name=eq.${encodeURIComponent(normalizedRoleName)}`,
+        { method: "DELETE", prefer: "return=minimal" },
+      );
       if (!payload.length) return [];
-      const { data, error } = await supabase.from("app_role_node_permissions").upsert(payload, { onConflict: "permission_id" }).select();
-      if (error) throw error;
-      return (data || []).map(permissionFromDb);
-    } catch (error) {
+
+      const data = await supabase.request("/rest/v1/app_role_node_permissions", {
+        method: "POST",
+        prefer: "return=representation",
+        body: JSON.stringify(payload),
+      });
+      return (data || []).map(permissionFromDb);    } catch (error) {
       console.error("Tree permissions error:", error);
-      throw new Error("فشل حفظ صلاحيات الشجرة: " + error.message);
+      throw new Error("فشل حفظ صلاحيات الشجرة. يرجى مراجعة البيانات والمحاولة مرة أخرى.");
     }
   },
   async copyRolePermissions(sourceRole, targetRole) {

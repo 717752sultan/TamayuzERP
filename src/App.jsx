@@ -8962,7 +8962,7 @@ function UsersPermissionsPage({ employees, can, companyPermissions }) {
       const saved = await treePermissionsService.saveBulkNodePermissions(selectedRole, roleRows);
       setTreePermissions(saved);
       await syncLegacyPermissions(saved);
-      alert("تم حفظ صلاحيات الشجرة بنجاح");
+      alert("تم حفظ صلاحيات الدور بنجاح.");
     } catch (e) {
       alert(e.message);
     } finally {
