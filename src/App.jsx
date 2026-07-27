@@ -119,6 +119,7 @@ import AttendanceCalculationPage from "./components/hr/AttendanceCalculationPage
 import { EmployeeEffectivenessPage, EmployeesGridPage, UserActivityLogsPage } from "./components/hr/EmployeeSubPages";
 import SystemSettingsPage from "./components/settings/SystemSettingsPage";
 import GroupedSidebarNav from "./components/navigation/GroupedSidebarNav";
+import FixedAssetsModule from "./components/assets/FixedAssetsModule";
 const icons = {
   dashboard: LayoutDashboard,
   employees: Users,
@@ -1488,6 +1489,7 @@ export default function App() {
 	          {activePage === "shifts" && <EmployeeShiftsPage {...p} />}{" "}
 	          {activePage === "inventory" && <InventoryManagementPage {...p} />}{" "}
 	          {activePage === "daily_operations" && <DailyOperationsPageEnhanced {...p} />}{" "}
+	          {activePage?.startsWith("assets_") && <FixedAssetsModule {...p} activePage={activePage} />}{" "}
 	          {attendancePageKeys.has(activePage) && <AttendanceCalculationPage {...p} pageKey={activePage} />}{" "}
 	          {activePage === "performance_criteria" && <PerformanceCriteriaPageEnhanced {...p} />}{" "}
 	          {activePage === "performance_kpi_scores" && <KpiScoresPage {...p} />}{" "}

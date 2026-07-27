@@ -338,4 +338,11 @@ export const tenantAwareTables = new Set([
   "system_backups",
   "hrms_settings",
   "hrms_snapshots",
+  "fixed_asset_categories",
+  "fixed_assets",
+  "fixed_asset_custodies",
+  "fixed_asset_transfers",
+  "fixed_asset_maintenance",
+  "fixed_asset_disposals",
+  "fixed_asset_depreciation_entries",
 ]);
