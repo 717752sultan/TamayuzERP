@@ -7651,9 +7651,13 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
     setLoading(true);
     try {
       if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
-      setRows(await dailyOperationsService.loadDailyOperations({
+      const queryLimit = 10000;
+      const hasDateScope = Boolean(nextFilters.date || nextFilters.fromDate || nextFilters.toDate);
+      const queryMonth = hasDateScope ? "" : (nextFilters.month || today.slice(0, 7) || "");
+      const loaded = await dailyOperationsService.loadDailyOperations({
         companyId,
-        limit: 10000,
+        limit: queryLimit,
+        month: queryMonth,
         date: nextFilters.date,
         fromDate: nextFilters.fromDate,
         toDate: nextFilters.toDate,
@@ -7661,7 +7665,17 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
         employeeId: nextFilters.employeeId || "",
         operationType: nextFilters.operationType || "all",
         channel: nextFilters.channel || "all",
-      }));
+      });
+      if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
+        console.log("daily operations load debug", {
+          filters: { ...nextFilters, month: queryMonth },
+          queryLimit,
+          loadedRows: loaded.length,
+          firstDate: loaded[loaded.length - 1]?.operation_date,
+          lastDate: loaded[0]?.operation_date,
+        });
+      }
+      setRows(loaded);
     } catch (error) {
       console.error("Daily operations page load error:", error);
       alert(error.message || "تعذر تحميل العمليات اليومية");
@@ -7711,6 +7725,8 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
     ["المعتمدة", filtered.filter((row) => ["معتمدة", "معتمد"].includes(row.status)).length, BadgeCheck],
   ];
   const byBranch = Object.entries(groupCount(filtered, "branch")).map(([name, value]) => ({ name, value }));
+  const loadedDates = safeRows.map((row) => row.operation_date).filter(Boolean).sort();
+  const loadedDataRange = loadedDates.length ? `${loadedDates[0]} إلى ${loadedDates[loadedDates.length - 1]}` : "لا توجد بيانات محمّلة";
   const filtersActive = Boolean(filters.date || filters.fromDate || filters.toDate || filters.status !== "all" || filters.branch !== "all" || filters.employeeId || filters.operationType !== "all" || filters.channel !== "all" || filters.department !== "all" || filters.month || filters.year);
 
   useEffect(() => {
@@ -7743,7 +7759,8 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
     month: "",
   });
 
-  const clearDailyOperationFilters = () => setFilters({
+  const clearDailyOperationFilters = async () => {
+    const resetFilters = {
     month: "",
     date: "",
     fromDate: "",
@@ -7755,7 +7772,10 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
     operationType: "all",
     channel: "all",
     status: "all",
-  });
+    };
+    setFilters(resetFilters);
+    await load(resetFilters);
+  };
 
   const scrollToRef = (ref) => ref?.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
@@ -8076,6 +8096,7 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
           <button key={key} onClick={() => setViewMode(key)} className={`rounded-2xl px-4 py-2 text-sm font-extrabold transition ${viewMode === key ? "bg-brand-700 text-white shadow" : "bg-slate-50 text-slate-600 hover:bg-slate-100"}`}>{label}</button>
         ))}
         <span className="mr-auto rounded-2xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600">عدد النتائج المعروضة: {filtered.length} / إجمالي العمليات: {safeRows.length}</span>
+        <span className="rounded-2xl bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700">نطاق البيانات المحمّلة: {loadedDataRange}</span>
         {filtersActive && <span className="rounded-2xl bg-amber-50 px-4 py-2 text-sm font-extrabold text-amber-700">الفلاتر مفعلة</span>}
       </div>
 
@@ -8142,6 +8163,7 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
             <h3 className="font-extrabold text-slate-900">جدول العمليات</h3>
             <span className="mr-auto rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-600">عدد النتائج المعروضة: {filtered.length}</span>
             <span className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-600">إجمالي العمليات: {safeRows.length}</span>
+            <span className="rounded-xl bg-blue-50 px-3 py-2 text-sm font-bold text-blue-700">نطاق البيانات المحمّلة: {loadedDataRange}</span>
           </div>
           <div className="table-wrap max-h-[calc(100vh-260px)] overflow-auto rounded-2xl border">
             <table>

@@ -34,7 +34,7 @@ export const excludedFromKpiStatuses = new Set(["قيد المراجعة", "مس
 export const isApprovedDailyOperation = (row = {}) => row.included_in_kpi === true || approvedDailyOperationStatuses.has(String(row.status || "").trim());
 
 export const DAILY_OPERATIONS_BULK_CHUNK_SIZE = 100;
-export const DAILY_OPERATIONS_DEFAULT_LIMIT = 5000;
+export const DAILY_OPERATIONS_DEFAULT_LIMIT = 10000;
 
 const averageServiceTimeMarker = /\n?\[\[average_service_time:([-+]?\d+(?:\.\d+)?)\]\]/g;
 
