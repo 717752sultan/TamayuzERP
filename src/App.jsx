@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   LayoutDashboard,
@@ -8559,7 +8559,7 @@ function UserEditorModal({ dialog, setDialog, saveUser, employeeOptions, selectE
   const normalizedDialogRole = normalizeRoleName(dialog.role || "الموظف") || "الموظف";
   const roleChoices = getCleanRoleOptions(roles).filter((role) => role && !isMojibakeText(role));
   const isAdmin = String(normalizedDialogRole || "").includes("مدير النظام") || String(normalizedDialogRole || "").includes("مشرف النظام العام");
-  const isNewUser = !dialog.user_id && !dialog.id;
+  const isNewUser = dialog._isNew === true || (!dialog.user_id && !dialog.id);
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
       <form onSubmit={saveUser} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6">
@@ -8861,9 +8861,10 @@ function UsersPermissionsPage({ employees, can, companyPermissions }) {
     if (!dialog.employee_id && !String(dialogRole || "").includes("مدير النظام") && !String(dialogRole || "").includes("مشرف النظام العام")) return alert("يجب اختيار الموظف");
     if (!dialog.username) return alert("يجب إدخال اسم المستخدم");
     if (!dialogRole) return alert("يجب تحديد الدور");
+    if (dialog._isNew && !String(dialog.password || "").trim()) return alert("كلمة المرور مطلوبة عند إنشاء مستخدم جديد.");
     try {
       const selectedEmployee = employeeOptions.find((employee) => employee.id === dialog.employee_id || employee.employee_id === dialog.employee_id);
-      const saved = await adminService.saveUser({ ...dialog, role: dialogRole }, selectedEmployee);
+      const saved = await adminService.saveUser({ ...dialog, role: dialogRole }, selectedEmployee, dialog._isNew ? "add" : "edit");
       setUsers((list) => {
         const exists = list.some((x) => x.user_id === saved.user_id);
         return exists ? list.map((x) => (x.user_id === saved.user_id ? saved : x)) : [saved, ...list];
@@ -9001,7 +9002,7 @@ function UsersPermissionsPage({ employees, can, companyPermissions }) {
 
   return (
     <div className="space-y-5">
-      <PageHead title="المستخدمون والصلاحيات" desc="إدارة مستخدمي النظام ومصفوفة صلاحيات الأدوار" action={<button disabled={!canEdit} onClick={() => setDialog({ user_id: `USR-${Date.now()}`, employee_id: "", employee_name: "", username: "", password: "", role: "الموظف", branch: "", job: "", email: "", phone: "", is_active: true })} className="btn-primary"><Plus size={18} /> إضافة مستخدم</button>} />
+      <PageHead title="المستخدمون والصلاحيات" desc="إدارة مستخدمي النظام ومصفوفة صلاحيات الأدوار" action={<button disabled={!canEdit} onClick={() => setDialog({ _isNew: true, user_id: `USR-${Date.now()}`, employee_id: "", employee_name: "", username: "", password: "", role: "الموظف", branch: "", job: "", email: "", phone: "", is_active: true })} className="btn-primary"><Plus size={18} /> إضافة مستخدم</button>} />
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
       <div className="panel flex flex-wrap gap-3 p-4">
         <input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} className="field min-w-[220px] flex-1" placeholder="اكتب سبب طلب المراجعة..." />
@@ -9014,7 +9015,7 @@ function UsersPermissionsPage({ employees, can, companyPermissions }) {
           <h3 className="mb-3 font-extrabold">المستخدمون</h3>
           {loading ? <p className="text-sm text-slate-400">جاري التحميل...</p> : <div className="table-wrap"><table><thead><tr><th>المستخدم</th><th>الموظف</th><th>الدور</th><th>الفرع</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((u) => {
               const isProtectedUser = !isPlatformAdmin && isProtectedPlatformUser(u);
-              return <tr key={u.user_id}><td>{u.username}</td><td>{u.employee_name}<p className="text-xs text-slate-400">{u.employee_id}</p></td><td>{displayRoleName(u.role)}</td><td>{u.branch}</td><td><Status>{u.is_active ? "نشط" : "معطل"}</Status></td><td><button disabled={!canEdit || isProtectedUser} onClick={() => setDialog({ ...u, role: normalizeRoleName(u.role) || "" })} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canResetPassword || isProtectedUser} onClick={() => resetUserPassword(u)} className="p-2 text-amber-700">إعادة كلمة المرور</button><button disabled={!canEdit || isProtectedUser || !normalizeRoleName(u.role)} onClick={() => adminService.saveUser({ ...u, role: normalizeRoleName(u.role), is_active: !u.is_active }).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600">{u.is_active ? "تعطيل" : "تفعيل"}</button></td></tr>;
+              return <tr key={u.user_id}><td>{u.username}</td><td>{u.employee_name}<p className="text-xs text-slate-400">{u.employee_id}</p></td><td>{displayRoleName(u.role)}</td><td>{u.branch}</td><td><Status>{u.is_active ? "نشط" : "معطل"}</Status></td><td><button disabled={!canEdit || isProtectedUser} onClick={() => setDialog({ ...u, password: "", _isNew: false, role: normalizeRoleName(u.role) || "" })} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canResetPassword || isProtectedUser} onClick={() => resetUserPassword(u)} className="p-2 text-amber-700">إعادة كلمة المرور</button><button disabled={!canEdit || isProtectedUser || !normalizeRoleName(u.role)} onClick={() => adminService.saveUser({ ...u, role: normalizeRoleName(u.role), is_active: !u.is_active }, null, "edit").then(load).catch((e) => alert(e.message))} className="p-2 text-red-600">{u.is_active ? "تعطيل" : "تفعيل"}</button></td></tr>;
             })}</tbody></table></div>}
         </div>
         <TreePermissionsPanel

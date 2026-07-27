@@ -49,7 +49,7 @@ const userToDb = (companyId, user = {}) => ({
 const assertUser = (payload, mode = "edit") => {
   if (!payload.username) throw new Error("اسم المستخدم مطلوب");
   if (!payload.role || payload.role === "غير محدد") throw new Error("الدور مطلوب");
-  if (mode === "add" && !payload.password) throw new Error("كلمة المرور مطلوبة عند الإنشاء");
+  if (mode === "add" && !payload.password) throw new Error("كلمة المرور مطلوبة عند إنشاء مستخدم جديد.");
 };
 
 export const settingsUsersService = {
@@ -90,6 +90,7 @@ export const settingsUsersService = {
     } catch (error) {
       console.error("Settings CRUD error:", error);
       if (String(error.message || "").toLowerCase().includes("duplicate")) throw new Error("اسم المستخدم مستخدم مسبقا، استخدم اسم مستخدم مختلف.");
+      if (error.message === "كلمة المرور مطلوبة عند إنشاء مستخدم جديد.") throw error;
       throw new Error("تعذر حفظ المستخدم: " + error.message);
     }
   },

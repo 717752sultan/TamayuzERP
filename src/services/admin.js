@@ -1,4 +1,4 @@
-﻿import { supabase } from "./supabase";
+import { supabase } from "./supabase";
 import { isPlatformAdminUser, isProtectedPlatformRole, isProtectedPlatformUser } from "./tenant";
 import { ROLE_OPTIONS, isMojibakeText, normalizeRoleName } from "./roles";
 
@@ -136,7 +136,7 @@ const platformSettingsMessages = new Set([
   "تأكيد كلمة المرور غير مطابق",
 ]);
 
-export const normalizeAppUserForDb = (user = {}, selectedEmployee = null) => {
+export const normalizeAppUserForDb = (user = {}, selectedEmployee = null, mode = "edit") => {
   const role = normalizeRoleName(user.role || "الموظف");
   const admin = isAdminRole(role);
   const employeeName =
@@ -342,16 +342,16 @@ export const adminService = {
       throw new Error("فشل تحميل بيانات المستخدمين من Supabase: " + error.message);
     }
   },
-  async saveUser(user, selectedEmployee = null) {
+  async saveUser(user, selectedEmployee = null, mode = user?._isNew ? "add" : "edit") {
     try {
-      const payload = normalizeAppUserForDb(user, selectedEmployee);
+      const payload = normalizeAppUserForDb(user, selectedEmployee, mode);
       const admin = isAdminRole(payload.role);
       if (!payload.employee_id && !admin) throw new Error("يجب اختيار الموظف");
       if (!payload.name && !admin) throw new Error("لا يمكن حفظ مستخدم بدون اسم موظف");
       if (!payload.username) throw new Error("يجب إدخال اسم المستخدم");
       if (!payload.role || payload.role === "غير محدد") throw new Error("يجب تحديد الدور");
-      const isNewUser = !user.user_id && !user.id;
-      if (isNewUser && !payload.password) throw new Error("يجب إدخال كلمة المرور");
+      const isNewUser = mode === "add" || (!user.user_id && !user.id);
+      if (isNewUser && !payload.password) throw new Error("كلمة المرور مطلوبة عند إنشاء مستخدم جديد.");
       if (!payload.password) delete payload.password;
       if (isProtectedPlatformUser(payload) || isProtectedPlatformRole(payload.role)) {
         throw new Error("لا يمكن حفظ هذا المستخدم من داخل إعدادات الشركة");
