@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   LayoutDashboard,
@@ -7607,15 +7607,21 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
   const [rows, setRows] = useState([]);
   const [dialog, setDialog] = useState(null);
   const [importDialog, setImportDialog] = useState(null);
+  const [viewMode, setViewMode] = useState("list");
+  const pageTopRef = useRef(null);
+  const filtersRef = useRef(null);
+  const tableRef = useRef(null);
+  const pageBottomRef = useRef(null);
+  const dashboardRef = useRef(null);
   const [filters, setFilters] = useState({
-    month: today.slice(0, 7),
+    month: "",
     date: "",
     fromDate: "",
     toDate: "",
-    year: today.slice(0, 4),
+    year: "",
     branch: "all",
     department: "all",
-    employee: "all",
+    employeeId: "",
     operationType: "all",
     channel: "all",
     status: "all",
@@ -7647,11 +7653,14 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
       if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
       setRows(await dailyOperationsService.loadDailyOperations({
         companyId,
-        limit: 5000,
-        month: (nextFilters.fromDate || nextFilters.toDate || nextFilters.date) ? "" : nextFilters.month,
+        limit: 10000,
         date: nextFilters.date,
         fromDate: nextFilters.fromDate,
         toDate: nextFilters.toDate,
+        status: nextFilters.status || "all",
+        employeeId: nextFilters.employeeId || "",
+        operationType: nextFilters.operationType || "all",
+        channel: nextFilters.channel || "all",
       }));
     } catch (error) {
       console.error("Daily operations page load error:", error);
@@ -7665,16 +7674,17 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
     load();
     const unsubscribe = dailyOperationsService.subscribe(load);
     return () => unsubscribe?.();
-  }, [filters.month, filters.date, filters.fromDate, filters.toDate, filters.status, companyId]);
+  }, [filters.month, filters.date, filters.fromDate, filters.toDate, filters.status, filters.employeeId, filters.operationType, filters.channel, companyId]);
 
   const filtered = safeRows.filter((row) =>
     (!filters.date || row.operation_date === filters.date)
     && (!filters.fromDate || row.operation_date >= filters.fromDate)
     && (!filters.toDate || row.operation_date <= filters.toDate)
+    && (!filters.month || row.month === filters.month || String(row.operation_date || "").startsWith(filters.month))
     && (!filters.year || String(row.operation_date || "").slice(0, 4) === String(filters.year))
     && (filters.branch === "all" || row.branch === filters.branch)
     && (filters.department === "all" || row.department === filters.department)
-    && (filters.employee === "all" || row.employee_id === filters.employee)
+    && (!filters.employeeId || row.employee_id === filters.employeeId)
     && (filters.operationType === "all" || row.operation_type === filters.operationType)
     && (filters.channel === "all" || row.service_channel === filters.channel)
     && (filters.status === "all" || row.status === filters.status));
@@ -7701,6 +7711,53 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
     ["المعتمدة", filtered.filter((row) => ["معتمدة", "معتمد"].includes(row.status)).length, BadgeCheck],
   ];
   const byBranch = Object.entries(groupCount(filtered, "branch")).map(([name, value]) => ({ name, value }));
+  const filtersActive = Boolean(filters.date || filters.fromDate || filters.toDate || filters.status !== "all" || filters.branch !== "all" || filters.employeeId || filters.operationType !== "all" || filters.channel !== "all" || filters.department !== "all" || filters.month || filters.year);
+
+  useEffect(() => {
+    if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
+      console.log("daily operations filters debug", {
+        date: filters.date,
+        fromDate: filters.fromDate,
+        toDate: filters.toDate,
+        loadedRows: rows.length,
+        filteredRows: filtered.length,
+      });
+    }
+  }, [filters.date, filters.fromDate, filters.toDate, rows.length, filtered.length]);
+
+  const updateFilter = (patch = {}) => setFilters((current) => ({
+    ...current,
+    ...patch,
+  }));
+
+  const setSingleDateFilter = (date) => updateFilter({
+    date,
+    fromDate: "",
+    toDate: "",
+    month: date ? "" : filters.month,
+  });
+
+  const setRangeFilter = (patch = {}) => updateFilter({
+    ...patch,
+    date: "",
+    month: "",
+  });
+
+  const clearDailyOperationFilters = () => setFilters({
+    month: "",
+    date: "",
+    fromDate: "",
+    toDate: "",
+    year: "",
+    branch: "all",
+    department: "all",
+    employeeId: "",
+    operationType: "all",
+    channel: "all",
+    status: "all",
+  });
+
+  const scrollToRef = (ref) => ref?.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   const pickEmployee = (id) => {
     const employee = safeEmployees.find((item) => item.id === id) || {};
@@ -7799,7 +7856,7 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
     year: filters.year,
     branch: filters.branch,
     department: filters.department,
-    employee: filters.employee,
+    employeeId: filters.employeeId,
     operationType: filters.operationType,
     channel: filters.channel,
     status: filters.status,
@@ -7917,7 +7974,7 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
         || filters.month
         || filters.year
         || (filters.branch !== "all" && !importedBranches.has(filters.branch))
-        || (filters.employee !== "all" && !importedEmployees.has(filters.employee))
+        || (filters.employeeId && !importedEmployees.has(filters.employeeId))
         || filters.department !== "all"
         || filters.operationType !== "all"
         || filters.channel !== "all",
@@ -7931,7 +7988,7 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
         year: "",
         branch: "all",
         department: "all",
-        employee: "all",
+        employeeId: "",
         operationType: "all",
         channel: "all",
         status: "all",
@@ -7973,8 +8030,8 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
   };
 
   const exportEmployeeRows = () => {
-    if (filters.employee === "all") return alert("اختر الموظف أولًا");
-    exportRows(safeRows.filter((row) => row.employee_id === filters.employee), `daily-operations-employee-${filters.employee}.xlsx`);
+    if (!filters.employeeId) return alert("اختر الموظف أولًا");
+    exportRows(safeRows.filter((row) => row.employee_id === filters.employeeId), `daily-operations-employee-${filters.employeeId}.xlsx`);
   };
   const exportDayRows = () => {
     if (!filters.date) return alert("حدد اليوم أولًا");
@@ -7996,39 +8053,71 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
   ];
 
   return (
-    <div className="space-y-5">
+    <div ref={pageTopRef} className="relative space-y-5">
+      <div className="no-print fixed right-2 top-1/3 z-30 hidden flex-col gap-2 rounded-2xl border bg-white/95 p-2 shadow-lg xl:flex">
+        <button onClick={() => scrollToRef(pageTopRef)} className="rounded-xl px-3 py-2 text-xs font-extrabold text-slate-600 hover:bg-slate-100">أعلى الصفحة</button>
+        <button onClick={() => scrollToRef(filtersRef)} className="rounded-xl px-3 py-2 text-xs font-extrabold text-slate-600 hover:bg-slate-100">الفلاتر</button>
+        <button onClick={() => scrollToRef(tableRef)} className="rounded-xl px-3 py-2 text-xs font-extrabold text-slate-600 hover:bg-slate-100">جدول العمليات</button>
+        <button onClick={() => scrollToRef(pageBottomRef)} className="rounded-xl px-3 py-2 text-xs font-extrabold text-slate-600 hover:bg-slate-100">أسفل الصفحة</button>
+        <button onClick={() => { setViewMode("dashboard"); setTimeout(() => scrollToRef(dashboardRef), 0); }} className="rounded-xl bg-brand-50 px-3 py-2 text-xs font-extrabold text-brand-700 hover:bg-brand-100">الداشبورد</button>
+      </div>
       <PageHead
         title="العمليات اليومية"
         desc="تسجيل الإنتاجية اليومية وربطها بالـ KPI والحوافز"
         action={(
           <div className="flex flex-wrap justify-end gap-2">
             <button disabled={!canCreate} onClick={openAdd} className="btn-primary"><Plus size={18} /> إضافة عملية</button>
-            <button onClick={downloadDailyOperationsTemplate} className="btn-secondary"><Download size={17} /> تحميل نموذج Excel</button>
-            <button disabled={!canImport} onClick={() => setImportDialog({ file: null, rows: [], duplicateMode: "update", message: "", summary: null })} className="btn-secondary disabled:opacity-50"><Upload size={17} /> استيراد Excel</button>
-            <button disabled={!canExport} onClick={() => exportRows(filtered, `daily-operations-visible-${today}.xlsx`)} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير Excel</button>
-            <button disabled={!canExport} onClick={exportEmployeeRows} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير عمليات موظف</button>
-            <button disabled={!canExport} onClick={exportDayRows} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير عمليات يوم محدد</button>
-            <button disabled={!canExport} onClick={exportMonthRows} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير عمليات شهر محدد</button>
           </div>
         )}
       />
 
+      <div className="panel flex flex-wrap gap-2 p-3">
+        {[["list", "قائمة العمليات"], ["dashboard", "الداشبورد"], ["import", "الاستيراد والتصدير"]].map(([key, label]) => (
+          <button key={key} onClick={() => setViewMode(key)} className={`rounded-2xl px-4 py-2 text-sm font-extrabold transition ${viewMode === key ? "bg-brand-700 text-white shadow" : "bg-slate-50 text-slate-600 hover:bg-slate-100"}`}>{label}</button>
+        ))}
+        <span className="mr-auto rounded-2xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600">عدد النتائج المعروضة: {filtered.length} / إجمالي العمليات: {safeRows.length}</span>
+        {filtersActive && <span className="rounded-2xl bg-amber-50 px-4 py-2 text-sm font-extrabold text-amber-700">الفلاتر مفعلة</span>}
+      </div>
+
+      {viewMode === "dashboard" && <div ref={dashboardRef} className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {summaries.map(([label, value, Icon]) => <Mini key={label} label={label} value={value} I={Icon} />)}
       </div>
+      <div className="grid gap-5 xl:grid-cols-2">
+        <Chart title="العمليات حسب الفروع" sub="توزيع سجلات العمليات"><ResponsiveContainer width="100%" height={260}><BarChart data={byBranch}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></Chart>
+        <div className="panel p-4">
+          <h3 className="mb-3 font-extrabold">أحدث العمليات</h3>
+          <div className="table-wrap max-h-[320px]"><table><thead><tr><th>التاريخ</th><th>الموظف</th><th>العملية</th><th>الحالة</th></tr></thead><tbody>{filtered.slice(0, 10).map((row) => <tr key={row.operation_id}><td>{row.operation_date}</td><td>{row.employee_name}</td><td>{row.operation_type}</td><td><Status>{row.status}</Status></td></tr>)}</tbody></table></div>
+        </div>
+      </div>
+      </div>}
 
-      <div className="panel flex flex-wrap gap-3 p-4">
-        <input type="month" value={filters.month} onChange={(event) => setFilters({ ...filters, month: event.target.value })} className="field max-w-[160px]" />
-        <input type="date" value={filters.date} onChange={(event) => setFilters({ ...filters, date: event.target.value, month: event.target.value ? event.target.value.slice(0, 7) : filters.month })} className="field max-w-[170px]" />
-        <input type="date" value={filters.fromDate} onChange={(event) => setFilters({ ...filters, fromDate: event.target.value })} className="field max-w-[170px]" title="من تاريخ" />
-        <input type="date" value={filters.toDate} onChange={(event) => setFilters({ ...filters, toDate: event.target.value })} className="field max-w-[170px]" title="إلى تاريخ" />
-        <input type="number" value={filters.year} onChange={(event) => setFilters({ ...filters, year: event.target.value })} className="field max-w-[120px]" placeholder="السنة" />
-        <select value={filters.branch} onChange={(event) => setFilters({ ...filters, branch: event.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branchOptions.map((branch) => <option key={branch} value={branch}>{branch}</option>)}</select>
-        <select value={filters.department} onChange={(event) => setFilters({ ...filters, department: event.target.value })} className="field max-w-[180px]"><option value="all">كل الإدارات</option>{departmentOptions.map((department) => <option key={department} value={department}>{department}</option>)}</select>
-        <select value={filters.employee} onChange={(event) => setFilters({ ...filters, employee: event.target.value })} className="field max-w-[230px]"><option value="all">كل الموظفين</option>{safeEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} - {employee.id}</option>)}</select>
-        <select value={filters.operationType} onChange={(event) => setFilters({ ...filters, operationType: event.target.value })} className="field max-w-[210px]"><option value="all">كل أنواع العمليات</option>{operationTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}</select>
-        <select value={filters.channel} onChange={(event) => setFilters({ ...filters, channel: event.target.value })} className="field max-w-[160px]"><option value="all">كل القنوات</option>{channelOptions.map((channel) => <option key={channel} value={channel}>{channel}</option>)}</select>
-        <select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option>{statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}</select>
+      {viewMode === "import" && <div className="panel p-4">
+        <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm font-bold text-blue-700">استيراد وتصدير العمليات اليومية مع إبقاء صفوف قيد المراجعة ظاهرة بعد الحفظ.</div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={downloadDailyOperationsTemplate} className="btn-secondary"><Download size={17} /> تحميل نموذج Excel</button>
+          <button disabled={!canImport} onClick={() => setImportDialog({ file: null, rows: [], duplicateMode: "update", message: "", summary: null })} className="btn-secondary disabled:opacity-50"><Upload size={17} /> استيراد Excel</button>
+          <button disabled={!canExport} onClick={() => exportRows(filtered, `daily-operations-visible-${today}.xlsx`)} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير Excel</button>
+          <button disabled={!canExport} onClick={exportEmployeeRows} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير عمليات موظف</button>
+          <button disabled={!canExport} onClick={exportDayRows} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير عمليات يوم محدد</button>
+          <button disabled={!canExport} onClick={exportMonthRows} className="btn-secondary disabled:opacity-50"><FileSpreadsheet size={17} /> تصدير عمليات شهر محدد</button>
+        </div>
+      </div>}
+
+      {viewMode === "list" && <>
+      <div ref={filtersRef} className="panel flex flex-wrap gap-3 p-4">
+        <input type="month" value={filters.month} onChange={(event) => updateFilter({ month: event.target.value, date: "", fromDate: "", toDate: "" })} className="field max-w-[160px]" />
+        <input type="date" value={filters.date} onChange={(event) => setSingleDateFilter(event.target.value)} className="field max-w-[170px]" title="تاريخ واحد" />
+        <input type="date" value={filters.fromDate} onChange={(event) => setRangeFilter({ fromDate: event.target.value })} className="field max-w-[170px]" title="من تاريخ" />
+        <input type="date" value={filters.toDate} onChange={(event) => setRangeFilter({ toDate: event.target.value })} className="field max-w-[170px]" title="إلى تاريخ" />
+        <input type="number" value={filters.year} onChange={(event) => updateFilter({ year: event.target.value })} className="field max-w-[120px]" placeholder="السنة" />
+        <select value={filters.branch} onChange={(event) => updateFilter({ branch: event.target.value })} className="field max-w-[190px]"><option value="all">كل الفروع</option>{branchOptions.map((branch) => <option key={branch} value={branch}>{branch}</option>)}</select>
+        <select value={filters.department} onChange={(event) => updateFilter({ department: event.target.value })} className="field max-w-[180px]"><option value="all">كل الإدارات</option>{departmentOptions.map((department) => <option key={department} value={department}>{department}</option>)}</select>
+        <select value={filters.employeeId} onChange={(event) => updateFilter({ employeeId: event.target.value })} className="field max-w-[230px]"><option value="">كل الموظفين</option>{safeEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} - {employee.id}</option>)}</select>
+        <select value={filters.operationType} onChange={(event) => updateFilter({ operationType: event.target.value })} className="field max-w-[210px]"><option value="all">كل أنواع العمليات</option>{operationTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}</select>
+        <select value={filters.channel} onChange={(event) => updateFilter({ channel: event.target.value })} className="field max-w-[160px]"><option value="all">كل القنوات</option>{channelOptions.map((channel) => <option key={channel} value={channel}>{channel}</option>)}</select>
+        <select value={filters.status} onChange={(event) => updateFilter({ status: event.target.value })} className="field max-w-[160px]"><option value="all">كل الحالات</option>{statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}</select>
+        <button onClick={clearDailyOperationFilters} className="btn-secondary">مسح الفلاتر</button>
       </div>
 
       <div className="panel space-y-3 p-4">
@@ -8048,11 +8137,15 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
         </div>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-2">
-        <div className="panel p-4">
-          <div className="table-wrap">
+      <div ref={tableRef} className="panel p-4">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <h3 className="font-extrabold text-slate-900">جدول العمليات</h3>
+            <span className="mr-auto rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-600">عدد النتائج المعروضة: {filtered.length}</span>
+            <span className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-600">إجمالي العمليات: {safeRows.length}</span>
+          </div>
+          <div className="table-wrap max-h-[calc(100vh-260px)] overflow-auto rounded-2xl border">
             <table>
-              <thead><tr><th><input type="checkbox" checked={allVisibleSelected} onChange={(event) => setAllVisibleSelected(event.target.checked)} /></th><th>التاريخ</th><th>الموظف</th><th>الفرع</th><th>نوع العملية</th><th>القناة</th><th>العدد</th><th>المكتملة</th><th>المعلقة</th><th>المرتجعة</th><th>الأخطاء</th><th>الشكاوى</th><th>الحالة</th><th></th></tr></thead>
+              <thead className="sticky top-0 z-10 bg-slate-50"><tr><th><input type="checkbox" checked={allVisibleSelected} onChange={(event) => setAllVisibleSelected(event.target.checked)} /></th><th>التاريخ</th><th>الموظف</th><th>الفرع</th><th>نوع العملية</th><th>القناة</th><th>العدد</th><th>المكتملة</th><th>المعلقة</th><th>المرتجعة</th><th>الأخطاء</th><th>الشكاوى</th><th>الحالة</th><th></th></tr></thead>
               <tbody>
                 {loading ? <tr><td colSpan="14">جاري التحميل...</td></tr> : filtered.length ? filtered.map((row) => (
                   <tr key={row.operation_id}>
@@ -8060,13 +8153,12 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
                     <td>{row.operation_date}</td><td>{row.employee_name}<p className="text-xs text-slate-400">{row.job_name}</p></td><td>{row.branch}</td><td>{row.operation_type}</td><td>{row.service_channel}</td><td>{row.operation_count}</td><td>{row.completed_count}</td><td>{row.pending_count}</td><td>{row.returned_count}</td><td>{row.error_count}</td><td>{row.customer_complaints}</td><td><Status>{row.status}</Status></td>
                     <td><button disabled={!canEdit} onClick={() => setDialog(row)} className="p-2 text-blue-600 disabled:opacity-40"><Pencil size={16} /></button><button disabled={!canApprove} onClick={() => approve(row)} className="p-2 text-green-700 disabled:opacity-40"><BadgeCheck size={16} /></button><button disabled={!canDelete || row.status !== "مسودة"} onClick={() => remove(row)} className="p-2 text-red-600 disabled:opacity-40"><Trash2 size={16} /></button></td>
                   </tr>
-                )) : <tr><td colSpan="14" className="py-8 text-center text-slate-400">لا توجد عمليات يومية في الفترة المحددة</td></tr>}
+                )) : <tr><td colSpan="14" className="py-8 text-center text-slate-400"><p className="font-extrabold text-slate-600">لا توجد عمليات مطابقة للفلاتر الحالية.</p><button onClick={clearDailyOperationFilters} className="mt-3 btn-secondary">مسح الفلاتر</button></td></tr>}
               </tbody>
             </table>
           </div>
-        </div>
-        <Chart title="العمليات حسب الفروع" sub="توزيع سجلات العمليات"><ResponsiveContainer width="100%" height={260}><BarChart data={byBranch}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#7f1d1d" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></Chart>
       </div>
+      </>}
 
       {dialog && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
@@ -8151,6 +8243,7 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
           </div>
         </div>
       )}
+      <div ref={pageBottomRef} />
     </div>
   );
 }

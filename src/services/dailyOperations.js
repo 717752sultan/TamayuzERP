@@ -289,6 +289,8 @@ export const dailyOperationsService = {
         ...(filters.toDate ? [`operation_date=lte.${encodeURIComponent(filters.toDate)}`] : []),
         ...(filters.status && filters.status !== "all" ? [`status=eq.${encodeURIComponent(filters.status)}`] : []),
         ...(filters.employeeId ? [`employee_id=eq.${encodeURIComponent(filters.employeeId)}`] : []),
+        ...(filters.operationType && filters.operationType !== "all" ? [`operation_type=eq.${encodeURIComponent(filters.operationType)}`] : []),
+        ...(filters.channel && filters.channel !== "all" ? [`service_channel=eq.${encodeURIComponent(filters.channel)}`] : []),
         "select=*",
         "order=operation_date.desc",
         `limit=${Number(filters.limit || DAILY_OPERATIONS_DEFAULT_LIMIT)}`,
