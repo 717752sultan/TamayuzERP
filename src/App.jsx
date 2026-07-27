@@ -7641,16 +7641,17 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
   const departmentOptions = [...new Set(safeRows.map((row) => row.department).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "ar"));
   const channelOptions = [...new Set([...serviceChannels, ...safeRows.map((row) => row.service_channel)].filter(Boolean))];
 
-  const load = async () => {
+  const load = async (nextFilters = filters) => {
     setLoading(true);
     try {
       if (!companyId) throw new Error("لم يتم تحديد الشركة الحالية");
       setRows(await dailyOperationsService.loadDailyOperations({
         companyId,
-        month: (filters.fromDate || filters.toDate || filters.date) ? "" : filters.month,
-        date: filters.date,
-        fromDate: filters.fromDate,
-        toDate: filters.toDate,
+        limit: 5000,
+        month: (nextFilters.fromDate || nextFilters.toDate || nextFilters.date) ? "" : nextFilters.month,
+        date: nextFilters.date,
+        fromDate: nextFilters.fromDate,
+        toDate: nextFilters.toDate,
       }));
     } catch (error) {
       console.error("Daily operations page load error:", error);
@@ -7906,39 +7907,49 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
     try {
       setImportDialog((current) => ({ ...current, loading: true, message: "جاري استيراد العمليات..." }));
       const result = await importDailyOperationsRows(importRows, companyId, { duplicateMode: importDialog?.duplicateMode || "update" });
-      setImportDialog((current) => ({
-        ...current,
-        loading: false,
-        message: "تم استيراد العمليات اليومية بنجاح",
-        summary: {
-          total: importRows.length,
-          imported: result.inserted,
-          updated: result.updated,
-          skipped: result.skipped,
-          errors: invalidRows.map((row) => `الصف ${row.rowNumber}: ${row.validationMessage}`),
-        },
-      }));
-      const importedDates = importRows
-        .filter((row) => row.valid && row.operation_date)
-        .map((row) => row.operation_date)
-        .sort();
-      if (importedDates.length) {
-        setFilters((current) => ({
-          ...current,
-          month: "",
-          date: "",
-          fromDate: importedDates[0],
-          toDate: importedDates[importedDates.length - 1],
-          status: "all",
-        }));
-      }
-      await load();
+      const importedBranches = new Set(importRows.filter((row) => row.valid).map((row) => row.branch).filter(Boolean));
+      const importedEmployees = new Set(importRows.filter((row) => row.valid).map((row) => row.employee_id).filter(Boolean));
+      const filtersMayHideImportedRows = Boolean(
+        filters.status !== "all"
+        || filters.date
+        || filters.fromDate
+        || filters.toDate
+        || filters.month
+        || filters.year
+        || (filters.branch !== "all" && !importedBranches.has(filters.branch))
+        || (filters.employee !== "all" && !importedEmployees.has(filters.employee))
+        || filters.department !== "all"
+        || filters.operationType !== "all"
+        || filters.channel !== "all",
+      );
+      const resetFilters = {
+        ...filters,
+        month: "",
+        date: "",
+        fromDate: "",
+        toDate: "",
+        year: "",
+        branch: "all",
+        department: "all",
+        employee: "all",
+        operationType: "all",
+        channel: "all",
+        status: "all",
+      };
+      setFilters(resetFilters);
+      await load(resetFilters);
+      const savedCount = result.saved?.length || 0;
+      const filterWarning = filtersMayHideImportedRows
+        ? "\nتم الاستيراد بنجاح، لكن قد لا تظهر بعض العمليات بسبب الفلاتر الحالية. تم تصفير الفلاتر لعرض النتائج."
+        : "";
+      alert(`تم استيراد العمليات اليومية بنجاح\nتم الحفظ: ${savedCount}\nإضافة: ${result.inserted || 0}\nتحديث: ${result.updated || 0}\nتجاهل: ${result.skipped || 0}${filterWarning}`);
+      setImportDialog(null);
     } catch (error) {
       console.error("Daily operations Excel import error:", error);
       setImportDialog((current) => ({
         ...current,
         loading: false,
-        message: error.message || "تعذر استيراد العمليات اليومية",
+        message: "تعذر حفظ العمليات اليومية",
         summary: {
           total: importRows.length,
           imported: 0,
