@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import { isPlatformAdminUser, isProtectedPlatformRole, isProtectedPlatformUser } from "./tenant";
+import { getCurrentCompany, getCurrentCompanyCode, getCurrentCompanyId, isPlatformAdminUser, isProtectedPlatformRole, isProtectedPlatformUser } from "./tenant";
 import { ROLE_OPTIONS, isMojibakeText, normalizeRoleName } from "./roles";
 
 export const permissionPages = [
@@ -70,6 +70,8 @@ const userFromDb = (row = {}, employee = null) => {
     employee_name: employeeName,
     username: row.username || "",
     password: "",
+    company_id: row.company_id || "",
+    company_code: String(row.company_code || "").trim().toUpperCase(),
     role: normalizeRoleName(row.role || "الموظف") || "الموظف",
     branch: row.branch || employee?.branch || "",
     job: row.job || employee?.job || "",
@@ -345,10 +347,28 @@ export const adminService = {
   async saveUser(user, selectedEmployee = null, mode = user?._isNew ? "add" : "edit") {
     try {
       const payload = normalizeAppUserForDb(user, selectedEmployee, mode);
+      const selectedCompany = getCurrentCompany() || {};
+      payload.company_id = String(user.company_id || selectedCompany.company_id || getCurrentCompanyId() || "").trim();
+      payload.company_code = String(
+        user.company_code
+          || (selectedCompany.company_id === payload.company_id ? selectedCompany.company_code : "")
+          || getCurrentCompanyCode()
+          || "",
+      ).trim().toUpperCase();
+      if (payload.company_id && !payload.company_code) {
+        const companyRows = await supabase.select(
+          "companies",
+          `company_id=eq.${encodeURIComponent(payload.company_id)}&select=company_id,company_code&limit=1`,
+        );
+        payload.company_code = String(companyRows?.[0]?.company_code || payload.company_id).trim().toUpperCase();
+      }
+      payload.is_platform_admin = false;
       const admin = isAdminRole(payload.role);
       if (!payload.employee_id && !admin) throw new Error("يجب اختيار الموظف");
       if (!payload.name && !admin) throw new Error("لا يمكن حفظ مستخدم بدون اسم موظف");
       if (!payload.username) throw new Error("يجب إدخال اسم المستخدم");
+      if (!payload.company_id) throw new Error("لم يتم تحديد الشركة الحالية");
+      if (!payload.company_code) throw new Error("لم يتم تحديد كود الشركة");
       if (!payload.role || payload.role === "غير محدد") throw new Error("يجب تحديد الدور");
       const isNewUser = mode === "add" || (!user.user_id && !user.id);
       if (isNewUser && !payload.password) throw new Error("كلمة المرور مطلوبة عند إنشاء مستخدم جديد.");

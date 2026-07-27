@@ -1580,12 +1580,12 @@ function Login({ onLogin }) {
     e.preventDefault();
     setErr("");
     if (!companyCode.trim()) return setErr("يجب إدخال كود الشركة");
-    if (!u.trim() || !pw) return setErr("يرجى إدخال اسم المستخدم وكلمة المرور.");
+    if (!u.trim() || !pw.trim()) return setErr("يرجى إدخال اسم المستخدم وكلمة المرور.");
     setLoading(true);
     try {
       const user = await cloudLoginWithSupabase(
         u.trim(),
-        pw,
+        pw.trim(),
         "",
         companyCode.trim(),
       );

@@ -50,64 +50,56 @@ const extractVerifiedUser = (rpcData) => {
   const isWrappedResult = Object.prototype.hasOwnProperty.call(result, "user")
     || Object.prototype.hasOwnProperty.call(result, "user_data")
     || Object.prototype.hasOwnProperty.call(result, "data");
-  const payload = isWrappedResult ? (result.user || result.user_data || result.data || null) : result;
+  const rpcWrapper = Object.keys(result).length === 1 ? result.verify_app_login : null;
+  const payload = isWrappedResult ? (result.user || result.user_data || result.data || null) : (rpcWrapper || result);
   if (Array.isArray(payload)) return payload[0] || null;
   return payload && typeof payload === "object" && Object.keys(payload).length ? payload : null;
 };
 
-export async function loginWithSupabase(username, password, employeeNumber = "", companyCode = "PUREMONEY") {
+export async function loginWithSupabase(username, password, employeeNumber = "", companyCode = "") {
   const companyInput = String(companyCode || "").trim();
-  let normalizedCompanyCode = companyInput.toUpperCase();
-  const loginValue = String(employeeNumber || username || "").trim();
-  if (!normalizedCompanyCode) throw new Error("يجب إدخال كود الشركة");
+  const loginValue = String(username || "").trim();
+  const passwordValue = String(password || "").trim();
+  if (!companyInput) throw new Error("يجب إدخال كود الشركة");
   if (!loginValue) throw new Error("يجب إدخال اسم المستخدم أو الرقم الوظيفي");
+  if (!passwordValue) throw new Error("يرجى إدخال اسم المستخدم وكلمة المرور.");
 
-  const isPlatformLogin = normalizedCompanyCode === "PLATFORM";
   let company = null;
-
-  if (!isPlatformLogin) {
-    let companyRows = await supabase.select(
+  let companyRows = await supabase.select(
+    "companies",
+    `company_code=eq.${encodeURIComponent(companyInput.toUpperCase())}&select=*&limit=1`,
+  );
+  if (!companyRows?.length) {
+    companyRows = await supabase.select(
       "companies",
-      `company_code=eq.${encodeURIComponent(normalizedCompanyCode)}&select=*&limit=1`,
+      `company_name=eq.${encodeURIComponent(companyInput)}&select=*&limit=1`,
     );
-    if (!companyRows?.length) {
-      companyRows = await supabase.select(
-        "companies",
-        `company_name=eq.${encodeURIComponent(companyInput)}&select=*&limit=1`,
-      );
-    }
-    company = normalizeCompany(companyRows?.[0] || {});
-    if (!company.company_id) throw new Error("الشركة غير موجودة");
-    normalizedCompanyCode = company.company_code;
+  }
+  if (companyRows?.length) {
+    company = normalizeCompany(companyRows[0]);
     if (!company.is_active) throw new Error("هذه الشركة غير مفعلة، يرجى التواصل مع إدارة النظام");
     if (!activeSubscription(company.subscription_status)) throw new Error("اشتراك الشركة غير نشط، يرجى التواصل مع إدارة النظام");
   }
 
   const rpcData = await supabase.rpc("verify_app_login", {
-    p_company_code: normalizedCompanyCode,
+    p_company_code: companyInput,
     p_login: loginValue,
-    p_password: password,
+    p_password: passwordValue,
   });
   const verifiedUser = extractVerifiedUser(rpcData);
   if (!verifiedUser) throw new Error("بيانات الدخول غير صحيحة");
 
   const cloudUser = normalizeCloudUser(verifiedUser, loginValue);
-  if (isPlatformLogin && !cloudUser.is_platform_admin) throw new Error("بيانات دخول مشرف المنصة غير صحيحة");
-  if (!isPlatformLogin && cloudUser.is_platform_admin) throw new Error("لا يمكن دخول مشرف المنصة من مسار الشركات");
-  if (!isPlatformLogin && cloudUser.company_code && cloudUser.company_code !== normalizedCompanyCode) {
-    throw new Error("كود الشركة لا يطابق بيانات المستخدم");
-  }
-
   const user = normalizeTenantUser(
     {
       ...verifiedUser,
       ...cloudUser,
       company_id: cloudUser.company_id || company?.company_id || "",
-      company_code: cloudUser.company_code || company?.company_code || normalizedCompanyCode,
+      company_code: cloudUser.company_code || company?.company_code || companyInput,
     },
     company || {},
   );
-  if (isPlatformLogin) setPlatformSession(user);
+  if (cloudUser.is_platform_admin) setPlatformSession(user);
   else setCompanySession(user, company);
   return user;
 }

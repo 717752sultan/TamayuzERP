@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import { isPlatformAdminUser, isProtectedPlatformRole, isProtectedPlatformUser } from "./tenant";
+import { getCurrentCompany, isPlatformAdminUser, isProtectedPlatformRole, isProtectedPlatformUser } from "./tenant";
 import { normalizeRoleName } from "./roles";
 
 const requireCompany = (companyId) => {
@@ -12,6 +12,7 @@ export const settingsUserFromDb = (row = {}) => ({
   id: row.user_id || row.id || row.username || "",
   user_id: row.user_id || row.id || row.username || "",
   company_id: row.company_id || "",
+  company_code: String(row.company_code || "").trim().toUpperCase(),
   name: row.name || row.employee_name || row.username || "",
   username: row.username || "",
   password: "",
@@ -28,9 +29,10 @@ export const settingsUserFromDb = (row = {}) => ({
   updated_at: row.updated_at || "",
 });
 
-const userToDb = (companyId, user = {}) => ({
+const userToDb = (companyId, companyCode, user = {}) => ({
   user_id: String(user.user_id || user.id || `USR-${Date.now()}`).trim(),
   company_id: requireCompany(companyId),
+  company_code: String(companyCode || companyId).trim().toUpperCase(),
   name: String(user.name || user.employee_name || user.username || "").trim(),
   username: String(user.username || "").trim(),
   password: user.password === undefined ? undefined : String(user.password || "").trim(),
@@ -42,7 +44,7 @@ const userToDb = (companyId, user = {}) => ({
   phone: String(user.phone || "").trim(),
   email: user.email ? String(user.email).trim() : null,
   is_active: user.is_active !== false,
-  is_platform_admin: user.is_platform_admin === true,
+  is_platform_admin: false,
   updated_at: new Date().toISOString(),
 });
 
@@ -66,7 +68,19 @@ export const settingsUsersService = {
 
   async saveUser(companyId, user, mode = "edit") {
     try {
-      const payload = userToDb(companyId, user);
+      const id = requireCompany(companyId);
+      const selectedCompany = getCurrentCompany() || {};
+      let companyCode = String(
+        user.company_code || (selectedCompany.company_id === id ? selectedCompany.company_code : "") || "",
+      ).trim().toUpperCase();
+      if (!companyCode) {
+        const companyRows = await supabase.select(
+          "companies",
+          `company_id=eq.${encodeURIComponent(id)}&select=company_id,company_code&limit=1`,
+        );
+        companyCode = String(companyRows?.[0]?.company_code || id).trim().toUpperCase();
+      }
+      const payload = userToDb(id, companyCode, user);
       assertUser(payload, mode);
       if (isProtectedPlatformUser(payload)) {
         if (isProtectedPlatformRole(payload.role)) {
