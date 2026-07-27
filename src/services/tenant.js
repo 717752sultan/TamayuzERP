@@ -283,6 +283,8 @@ export const tenantAwareTables = new Set([
   "attendance_records",
   "attendance_work_periods",
   "attendance_requests",
+  "attendance_locations",
+  "employee_attendance_events",
   "incentives",
   "guarantees",
   "employee_guarantees",

@@ -116,6 +116,7 @@ import { ERP_MODULES, ERP_PAGE_BY_KEY, ERP_PAGE_BY_ROUTE, buildGroupedNavigation
 import HRFoundationPage from "./components/hr/HRFoundationPage";
 import HRExecutiveDashboard from "./components/hr/HRExecutiveDashboard";
 import AttendanceCalculationPage from "./components/hr/AttendanceCalculationPage";
+import EmployeeSelfAttendancePage from "./components/hr/EmployeeSelfAttendancePage";
 import { EmployeeEffectivenessPage, EmployeesGridPage, UserActivityLogsPage } from "./components/hr/EmployeeSubPages";
 import SystemSettingsPage from "./components/settings/SystemSettingsPage";
 import GroupedSidebarNav from "./components/navigation/GroupedSidebarNav";
@@ -1092,6 +1093,9 @@ export default function App() {
         </div>
       </div>
     );
+  if (window.location.pathname === "/employee-attendance") {
+    return <EmployeeSelfAttendancePage employees={employees} currentUser={currentUserState || getCurrentUser()} currentCompany={currentCompany || getCurrentCompany()} />;
+  }
   if (role === "الموظف")
     return (
       <EmployeePortal
