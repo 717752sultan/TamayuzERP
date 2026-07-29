@@ -5668,7 +5668,7 @@ function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCom
   const [panelLoading, setPanelLoading] = useState(false);
   const [panelMessage, setPanelMessage] = useState("");
   const [users, setUsers] = useState([]);
-  const [linkForm, setLinkForm] = useState({ user_id: "", username: "", role: "الموظف" });
+  const [linkForm, setLinkForm] = useState({ user_id: "", username: "", password: "", role: "الموظف" });
   const [passwordForm, setPasswordForm] = useState({ user_id: "", password: "", confirm: "" });
   const platformAdmin = isPlatformAdminUser(currentUser) || currentUser?.is_platform_admin === true;
   const sameCompany = platformAdmin || !currentCompany?.company_id || !employee?.company_id || employee.company_id === currentCompany.company_id;
@@ -5766,6 +5766,7 @@ function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCom
       setLinkForm({
         user_id: linked?.user_id || "",
         username: linked?.username || "",
+        password: "",
         role: linked?.role || "الموظف",
       });
       setPasswordForm((form) => ({ ...form, user_id: linked?.user_id || "" }));
@@ -5785,6 +5786,7 @@ function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCom
     event.preventDefault();
     if (!sameCompany) return setPanelMessage("لا يمكنك إدارة موظف تابع لشركة أخرى");
     if (!linkForm.user_id && !linkForm.username.trim()) return setPanelMessage("اختر حساباً أو أدخل اسم مستخدم جديد");
+    if (!linkForm.user_id && !String(linkForm.password || "").trim()) return setPanelMessage("كلمة المرور مطلوبة عند إنشاء مستخدم جديد.");
     setPanelLoading(true);
     try {
       const existing = users.find((user) => user.user_id === linkForm.user_id);
@@ -5804,6 +5806,7 @@ function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCom
           company_id: companyId,
           name: employee.name,
           username: linkForm.username.trim(),
+          password: String(linkForm.password || "").trim(),
           role: linkForm.role || "الموظف",
           employee_id: employee.id,
           employee_name: employee.name,
@@ -5815,6 +5818,9 @@ function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCom
           updated_at: new Date().toISOString(),
           created_at: new Date().toISOString(),
         };
+        const isCreate = true;
+        if (isCreate && !String(payload.password || "").trim()) throw new Error("كلمة المرور مطلوبة عند إنشاء مستخدم جديد.");
+        console.error("app_users write debug", { mode: "create", payloadKeys: Object.keys(payload), username: payload.username, hasPassword: Boolean(payload.password), role: payload.role });
         const { error } = await supabase.from("app_users").upsert(payload, { onConflict: "user_id" }).select().single();
         if (error) throw error;
       }
@@ -6011,7 +6017,7 @@ function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCom
               {activePanel === "link" && (
                 <form onSubmit={saveUserLink} className="grid gap-3 md:grid-cols-3">
                   <Label t="حساب موجود">
-                    <select value={linkForm.user_id} onChange={(e) => setLinkForm({ ...linkForm, user_id: e.target.value, username: "" })} className="field mt-2">
+                    <select value={linkForm.user_id} onChange={(e) => setLinkForm({ ...linkForm, user_id: e.target.value, username: "", password: "" })} className="field mt-2">
                       <option value="">إنشاء/اختيار لاحق</option>
                       {users.map((user) => <option key={user.user_id} value={user.user_id}>{user.username} - {user.employee_name || "غير مرتبط"}</option>)}
                     </select>
@@ -6019,6 +6025,7 @@ function EmployeeDetailsModal({ employee, close, onEdit, currentUser, currentCom
                   <Label t="اسم مستخدم جديد">
                     <input disabled={!!linkForm.user_id} value={linkForm.username} onChange={(e) => setLinkForm({ ...linkForm, username: e.target.value })} className="field mt-2" />
                   </Label>
+                  {!linkForm.user_id && <Label t="كلمة المرور"><input required type="password" value={linkForm.password || ""} onChange={(e) => setLinkForm({ ...linkForm, password: e.target.value })} className="field mt-2" /></Label>}
                   <Label t="الدور">
                     <select disabled={!!linkForm.user_id} value={linkForm.role} onChange={(e) => setLinkForm({ ...linkForm, role: e.target.value })} className="field mt-2">
                       {jobs.map((job) => <option key={job}>{job}</option>)}
@@ -9015,7 +9022,7 @@ function UsersPermissionsPage({ employees, can, companyPermissions }) {
           <h3 className="mb-3 font-extrabold">المستخدمون</h3>
           {loading ? <p className="text-sm text-slate-400">جاري التحميل...</p> : <div className="table-wrap"><table><thead><tr><th>المستخدم</th><th>الموظف</th><th>الدور</th><th>الفرع</th><th>الحالة</th><th></th></tr></thead><tbody>{filtered.map((u) => {
               const isProtectedUser = !isPlatformAdmin && isProtectedPlatformUser(u);
-              return <tr key={u.user_id}><td>{u.username}</td><td>{u.employee_name}<p className="text-xs text-slate-400">{u.employee_id}</p></td><td>{displayRoleName(u.role)}</td><td>{u.branch}</td><td><Status>{u.is_active ? "نشط" : "معطل"}</Status></td><td><button disabled={!canEdit || isProtectedUser} onClick={() => setDialog({ ...u, password: "", _isNew: false, role: normalizeRoleName(u.role) || "" })} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canResetPassword || isProtectedUser} onClick={() => resetUserPassword(u)} className="p-2 text-amber-700">إعادة كلمة المرور</button><button disabled={!canEdit || isProtectedUser || !normalizeRoleName(u.role)} onClick={() => adminService.saveUser({ ...u, role: normalizeRoleName(u.role), is_active: !u.is_active }, null, "edit").then(load).catch((e) => alert(e.message))} className="p-2 text-red-600">{u.is_active ? "تعطيل" : "تفعيل"}</button></td></tr>;
+              return <tr key={u.user_id}><td>{u.username}</td><td>{u.employee_name}<p className="text-xs text-slate-400">{u.employee_id}</p></td><td>{displayRoleName(u.role)}</td><td>{u.branch}</td><td><Status>{u.is_active ? "نشط" : "معطل"}</Status></td><td><button disabled={!canEdit || isProtectedUser} onClick={() => setDialog({ ...u, password: "", _isNew: false, role: normalizeRoleName(u.role) || "" })} className="p-2 text-blue-600"><Pencil size={16} /></button><button disabled={!canResetPassword || isProtectedUser} onClick={() => resetUserPassword(u)} className="p-2 text-amber-700">إعادة كلمة المرور</button><button disabled={!canEdit || isProtectedUser || !normalizeRoleName(u.role)} onClick={() => adminService.updateUserStatus(u.user_id, !u.is_active).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600">{u.is_active ? "تعطيل" : "تفعيل"}</button></td></tr>;
             })}</tbody></table></div>}
         </div>
         <TreePermissionsPanel

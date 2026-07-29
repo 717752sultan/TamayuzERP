@@ -371,8 +371,9 @@ export const adminService = {
       if (!payload.company_code) throw new Error("لم يتم تحديد كود الشركة");
       if (!payload.role || payload.role === "غير محدد") throw new Error("يجب تحديد الدور");
       const isNewUser = mode === "add" || (!user.user_id && !user.id);
-      if (isNewUser && !payload.password) throw new Error("كلمة المرور مطلوبة عند إنشاء مستخدم جديد.");
-      if (!payload.password) delete payload.password;
+      const isCreate = isNewUser;
+      if (isCreate && !String(payload.password || "").trim()) throw new Error("كلمة المرور مطلوبة عند إنشاء مستخدم جديد.");
+      if (!isCreate && !String(payload.password || "").trim()) delete payload.password;
       if (isProtectedPlatformUser(payload) || isProtectedPlatformRole(payload.role)) {
         throw new Error("لا يمكن حفظ هذا المستخدم من داخل إعدادات الشركة");
       }
@@ -395,6 +396,7 @@ export const adminService = {
         throw new Error("اسم المستخدم مستخدم مسبقًا");
       }
 
+      console.error("app_users write debug", { mode: isCreate ? "create" : "edit", payloadKeys: Object.keys(payload), username: payload.username, hasPassword: Boolean(payload.password), role: payload.role });
       const { data, error } = await supabase.from("app_users").upsert(payload, { onConflict: "user_id" }).select().single();
       if (error) throw error;
       return userFromDb(data, selectedEmployee);
@@ -402,6 +404,14 @@ export const adminService = {
       console.error("Users permissions module error:", error);
       throw new Error(error.message?.startsWith("فشل") ? error.message : "فشل حفظ بيانات المستخدم: " + error.message);
     }
+  },
+  async updateUserStatus(userId, isActive) {
+    const id = String(userId || "").trim();
+    if (!id) throw new Error("لم يتم تحديد المستخدم");
+    const payload = { is_active: Boolean(isActive), updated_at: new Date().toISOString() };
+    console.error("app_users write debug", { mode: "status", payloadKeys: Object.keys(payload), username: undefined, hasPassword: false, role: undefined });
+    await supabase.request(`/rest/v1/app_users?user_id=eq.${encodeURIComponent(id)}&is_platform_admin=eq.false`, { method: "PATCH", prefer: "return=minimal", body: JSON.stringify(payload) });
+    return { user_id: id, ...payload };
   },
   async resetUserPassword(userId, newPassword) {
     try {

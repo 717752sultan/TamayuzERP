@@ -143,12 +143,13 @@ export const companiesService = {
     if (!username) throw new Error("يجب إدخال اسم مستخدم مدير الشركة");
     await this.ensureUniqueAdminUsername(normalized.company_id, username, currentAdmin?.user_id || adminUserId || "");
 
+    const isCreate = !existingAdmin && !adminUserId;
     const payload = {
       user_id: currentAdmin?.user_id || admin.user_id || `USR-${normalized.company_code}-${Date.now()}`,
       company_id: normalized.company_id,
       company_code: normalized.company_code,
       username,
-      password: String(admin.password || admin.admin_password || currentAdmin?.password || "123456"),
+      password: String(admin.password || admin.admin_password || "").trim(),
       name: String(admin.name || admin.admin_name || currentAdmin?.name || currentAdmin?.employee_name || COMPANY_ADMIN_ROLE).trim(),
       employee_name: String(admin.employee_name || admin.name || admin.admin_name || currentAdmin?.employee_name || currentAdmin?.name || COMPANY_ADMIN_ROLE).trim(),
       employee_id: admin.employee_id || currentAdmin?.employee_id || "",
@@ -163,6 +164,9 @@ export const companiesService = {
       updated_at: new Date().toISOString(),
     };
 
+    if (isCreate && !String(payload.password || "").trim()) throw new Error("كلمة المرور مطلوبة عند إنشاء مستخدم جديد.");
+    if (!isCreate && !String(payload.password || "").trim()) delete payload.password;
+    console.error("app_users write debug", { mode: isCreate ? "create" : "edit", payloadKeys: Object.keys(payload), username: payload.username, hasPassword: Boolean(payload.password), role: payload.role });
     const { data, error } = await supabase.from("app_users").upsert(payload, { onConflict: "user_id" }).select().single();
     if (error) {
       console.error("Tenant/company admin user save error:", error);

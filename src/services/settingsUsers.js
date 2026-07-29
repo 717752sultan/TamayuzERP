@@ -97,7 +97,10 @@ export const settingsUsersService = {
           throw new Error("حساب مشرف المنصة محمي ولا يمكن تعديله من إعدادات الشركة");
         }
       }
-      if (mode !== "add" && !payload.password) delete payload.password;
+      const isCreate = mode === "add";
+      if (isCreate && !String(payload.password || "").trim()) throw new Error("كلمة المرور مطلوبة عند إنشاء مستخدم جديد.");
+      if (!isCreate && !String(payload.password || "").trim()) delete payload.password;
+      console.error("app_users write debug", { mode: isCreate ? "create" : "edit", payloadKeys: Object.keys(payload), username: payload.username, hasPassword: Boolean(payload.password), role: payload.role });
       const { data, error } = await supabase.from("app_users").upsert(payload, { onConflict: "user_id" }).select().single();
       if (error) throw error;
       return settingsUserFromDb(data);
@@ -118,7 +121,13 @@ export const settingsUsersService = {
   },
 
   async toggleUserStatus(companyId, userId, isActive, user = {}) {
-    return this.updateUser(companyId, userId, { ...user, is_active: isActive });
+    const id = String(userId || "").trim();
+    if (!id) throw new Error("لم يتم تحديد المستخدم");
+    const companyFilter = isPlatformAdminUser() ? "" : `&company_id=eq.${encodeURIComponent(requireCompany(companyId))}`;
+    const payload = { is_active: Boolean(isActive), updated_at: new Date().toISOString() };
+    console.error("app_users write debug", { mode: "status", payloadKeys: Object.keys(payload), username: user?.username, hasPassword: false, role: user?.role });
+    await supabase.request(`/rest/v1/app_users?user_id=eq.${encodeURIComponent(id)}&is_platform_admin=eq.false${companyFilter}`, { method: "PATCH", prefer: "return=minimal", body: JSON.stringify(payload) });
+    return { user_id: id, ...payload };
   },
 
   async resetUserPassword(companyId, userId, newPassword) {
