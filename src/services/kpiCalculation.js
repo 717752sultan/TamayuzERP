@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 import { dailyOperationsService, isApprovedDailyOperation } from "./dailyOperations";
 import { performanceCriteriaService } from "./performanceCriteria";
+import { getCurrentCompanyId } from "./tenant";
 
 const scoreByThreshold = (actual, criterion) => {
   const max = Number(criterion.max_score || 100);
@@ -28,9 +29,10 @@ const scoreFromDb = (row = {}) => ({
 });
 
 export const kpiCalculationService = {
-  async calculateEmployeeKpiScores(employee, month) {
+  async calculateEmployeeKpiScores(employee, month, companyId = "") {
     try {
-      const operations = await dailyOperationsService.loadDailyOperations({ month, approvedOnly: true });
+      const cid = companyId || employee.company_id || getCurrentCompanyId();
+      const operations = await dailyOperationsService.loadDailyOperations({ companyId: cid, month, approvedOnly: true, includedInKpiOnly: true });
       const employeeOps = operations.filter((op) => op.employee_id === employee.id && isApprovedDailyOperation(op));
       const criteria = await performanceCriteriaService.loadKpiCriteria(employee.job);
       const scores = criteria.filter((c) => c.is_active).map((criterion) => {
@@ -44,6 +46,7 @@ export const kpiCalculationService = {
         const score = scoreByThreshold(actual, criterion);
         return {
           score_id: `KS-${employee.id}-${month}-${criterion.criterion_id}`,
+          company_id: cid,
           employee_id: employee.id,
           employee_name: employee.name,
           job_name: employee.job,
@@ -77,9 +80,15 @@ export const kpiCalculationService = {
       throw new Error("فشل حفظ درجات KPI: " + error.message);
     }
   },
-  async loadKpiScores(month = "") {
+  async loadKpiScores(month = "", companyId = "") {
     try {
-      const query = month ? `month=eq.${encodeURIComponent(month)}&select=*&order=employee_name.asc` : "select=*&order=month.desc";
+      const cid = companyId || getCurrentCompanyId();
+      const query = [
+        "select=*",
+        ...(cid ? [`company_id=eq.${encodeURIComponent(cid)}`] : []),
+        ...(month ? [`month=eq.${encodeURIComponent(month)}`] : []),
+        `order=${month ? "employee_name.asc" : "month.desc"}`,
+      ].join("&");
       const rows = await supabase.select("performance_kpi_scores", query);
       return (rows || []).map(scoreFromDb);
     } catch (error) {
@@ -87,10 +96,10 @@ export const kpiCalculationService = {
       throw new Error("فشل تحميل درجات KPI: " + error.message);
     }
   },
-  async recalculateMonthKpis(employees, month) {
+  async recalculateMonthKpis(employees, month, companyId = "") {
     const all = [];
     for (const employee of employees) {
-      const rows = await this.calculateEmployeeKpiScores(employee, month);
+      const rows = await this.calculateEmployeeKpiScores(employee, month, companyId || employee.company_id);
       all.push(...rows);
     }
     return all;

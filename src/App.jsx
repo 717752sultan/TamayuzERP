@@ -120,6 +120,7 @@ import AttendanceCalculationPage from "./components/hr/AttendanceCalculationPage
 import EmployeeSelfAttendancePage from "./components/hr/EmployeeSelfAttendancePage";
 import EmployeePortalApp, { EmployeeLoginPage } from "./components/employee/EmployeePortalApp";
 import EmployeeAppAdminSettingsPage from "./components/hr/EmployeeAppAdminSettingsPage";
+import KpiScoresDashboardPage from "./components/hr/KpiScoresDashboardPage";
 import DailyOperationsReportsPage from "./components/hr/DailyOperationsReportsPage";
 import OvertimeImportExportPage from "./components/hr/OvertimeImportExportPage";
 import { EmployeeEffectivenessPage, EmployeesGridPage, UserActivityLogsPage } from "./components/hr/EmployeeSubPages";
@@ -1522,7 +1523,7 @@ export default function App() {
 	          {activePage?.startsWith("assets_") && !["assets_import_export", "assets_depreciation_tools"].includes(activePage) && <FixedAssetsModule {...p} activePage={activePage} />}{" "}
 	          {attendancePageKeys.has(activePage) && <AttendanceCalculationPage {...p} pageKey={activePage} />}{" "}
 	          {activePage === "performance_criteria" && <PerformanceCriteriaPageEnhanced {...p} />}{" "}
-	          {activePage === "performance_kpi_scores" && <KpiScoresPage {...p} />}{" "}
+	          {activePage === "performance_kpi_scores" && <KpiScoresDashboardPage {...p} />}{" "}
 	          {activePage === "users_permissions" && <UsersPermissionsPage {...p} />}{" "}
 	          {activePage === "recruitment" && <RecruitmentPage {...p} />}{" "}
 	          {activePage === "reports_center" && <EnterpriseReportsCenter {...p} />}{" "}
