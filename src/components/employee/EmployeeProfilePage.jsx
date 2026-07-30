@@ -3,9 +3,9 @@ import { employeeAppService } from "../../services/employeeApp";
 
 const item = (label, value) => <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-bold text-slate-400">{label}</p><b className="mt-1 block">{value || "—"}</b></div>;
 
-export default function EmployeeProfilePage({ company, employeeId, user }) {
+export default function EmployeeProfilePage({ company, employeeId, user, settings = {}, allowed = () => true }) {
   const [employee, setEmployee] = useState(null);
-  const canViewSalary = user?.can_view_financial === true || user?.can_view_sensitive === true;
+  const canViewSalary = settings.show_salary === true && allowed("profile_salary", "can_view");
   useEffect(() => {
     employeeAppService.loadEmployeeProfile(company.company_id, employeeId).then(setEmployee).catch(() => setEmployee({}));
   }, [company.company_id, employeeId]);

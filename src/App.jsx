@@ -44,6 +44,7 @@ import {
   CircleDollarSign,
   UserRoundCog,
   UserPlus,
+  Smartphone,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -118,6 +119,7 @@ import HRExecutiveDashboard from "./components/hr/HRExecutiveDashboard";
 import AttendanceCalculationPage from "./components/hr/AttendanceCalculationPage";
 import EmployeeSelfAttendancePage from "./components/hr/EmployeeSelfAttendancePage";
 import EmployeePortalApp, { EmployeeLoginPage } from "./components/employee/EmployeePortalApp";
+import EmployeeAppAdminSettingsPage from "./components/hr/EmployeeAppAdminSettingsPage";
 import { EmployeeEffectivenessPage, EmployeesGridPage, UserActivityLogsPage } from "./components/hr/EmployeeSubPages";
 import SystemSettingsPage from "./components/settings/SystemSettingsPage";
 import GroupedSidebarNav from "./components/navigation/GroupedSidebarNav";
@@ -181,6 +183,7 @@ const icons = {
   hr_training: Star,
   hr_reports: FileBarChart,
   hr_settings: Settings,
+  employee_app_settings: Smartphone,
   system_settings: Settings,
   hr_requests_approvals: ClipboardList,
   hr_approvals: BadgeCheck,
@@ -197,6 +200,7 @@ const fullHrNavItems = [
   ["user_activity_logs", "سجلات المستخدمين"],
   ["hr_org_chart", "الهيكل التنظيمي"],
   ["hr_settings", "إعدادات الموارد البشرية"],
+  ["employee_app_settings", "إعدادات تطبيق الموظف"],
   ["users_permissions", "المستخدمون والصلاحيات"],
   ["hr_contracts", "العقود"],
   ["hr_files", "ملفات الموظفين"],
@@ -1510,6 +1514,7 @@ export default function App() {
 	          {activePage === "settings" && <SettingsPage {...p} />}
           {activePage === "system_settings" && <SystemSettingsPage {...p} />}
           {activePage === "hr_home" && <HRExecutiveDashboard {...p} />}
+          {activePage === "employee_app_settings" && <EmployeeAppAdminSettingsPage {...p} />}
           {["hr_org_chart", "hr_settings"].includes(activePage) && <HRFoundationPage {...p} pageKey={activePage} />}
           {genericHrPageKeys.has(activePage) && <HRModulePage pageKey={activePage} currentCompany={company} can={p.can} />}
           </>

@@ -51,7 +51,7 @@ const hrPageKeys = new Set([
   "reports_center", "audit_logs", "hr_home", "hr_employees_full", "hr_reports", "hr_reports_full", "hr_requests_approvals", "hr_requests", "hr_performance_full", "hr_incentives_full",
   "hr_attendance_payroll", "hr_salary", "hr_disciplinary", "hr_recruitment_full", "hr_leaves", "hr_complaints", "hr_circulars", "hr_termination",
   "hr_surveys", "hr_insurance", "hr_announcements", "hr_files", "hr_contracts", "hr_custodies", "hr_training", "hr_approvals", "hr_org_chart", "hr_settings_full",
-  "hr_financial_setup", "hr_templates_full", "hr_settings", "ai_assistant", "theme_settings",
+  "hr_financial_setup", "hr_templates_full", "hr_settings", "employee_app_settings", "ai_assistant", "theme_settings",
 ]);
 
 const pageActionOverrides = {
@@ -73,6 +73,7 @@ const pageActionOverrides = {
   settings: settingsActions,
   system_settings: settingsActions,
   hr_settings: settingsActions,
+  employee_app_settings: settingsActions,
   users_permissions: settingsActions,
   audit_logs: ["can_view", "can_export", "can_print", "can_view_sensitive"],
   companies_admin: settingsActions,
@@ -128,7 +129,8 @@ const navigationMetadata = {
   hr_termination: { navGroupKey: "hr_termination", navGroupLabel: "إنهاء الخدمة", navGroupOrder: 9, navItemOrder: 1 },
   hr_reports: { navGroupKey: "hr_reports", navGroupLabel: "التقارير", navGroupOrder: 10, navItemOrder: 1 },
   hr_settings: { navGroupKey: "hr_settings", navGroupLabel: "الإعدادات والصلاحيات", navGroupOrder: 11, navItemOrder: 1 },
-  users_permissions: { navGroupKey: "hr_settings", navGroupLabel: "الإعدادات والصلاحيات", navGroupOrder: 11, navItemOrder: 2 },
+  employee_app_settings: { navGroupKey: "hr_settings", navGroupLabel: "الإعدادات والصلاحيات", navGroupOrder: 11, navItemOrder: 2 },
+  users_permissions: { navGroupKey: "hr_settings", navGroupLabel: "الإعدادات والصلاحيات", navGroupOrder: 11, navItemOrder: 3 },
 
   inventory: { navGroupKey: "inventory_dashboard", navGroupLabel: "لوحة المخزون", navGroupOrder: 1, navItemOrder: 1, navLabel: "لوحة المخزون" },
   inventory_items: { navGroupKey: "inventory_items", navGroupLabel: "الأصناف", navGroupOrder: 2, navItemOrder: 1 },
@@ -253,6 +255,7 @@ export const pageRegistry = [
   { key: "hr_requests_approvals", label: "الطلبات والموافقات", aliases: ["طلبات الموارد البشرية", "الموافقات"], icon: "ClipboardList", group: "hr", groupLabel: "موارد بشرية", permissionKey: "hr.requests_approvals", moduleKey: "hr_requests_approvals", order: 106, isOfficialPage: true, isDuplicateAllowed: false },
   { key: "hr_reports", label: "تقارير الموارد البشرية", aliases: ["تقارير HR"], icon: "FileBarChart", group: "reports", groupLabel: "تقارير", permissionKey: "hr.reports", moduleKey: "hr_reports", order: 122, isOfficialPage: true, isDuplicateAllowed: false },
   { key: "hr_settings", label: "إعدادات الموارد البشرية", aliases: ["إعدادات HR"], icon: "Settings", group: "settings", groupLabel: "إعدادات", permissionKey: "hr.settings", moduleKey: "hr_settings", order: 123, isOfficialPage: true, isDuplicateAllowed: false },
+  { key: "employee_app_settings", label: "إعدادات تطبيق الموظف", aliases: ["بوابة الموظف", "تطبيق الموظف"], icon: "Smartphone", group: "settings", groupLabel: "إعدادات", permissionKey: "employee_app_settings", moduleKey: "employee_app_settings", order: 123.5, isOfficialPage: true, isDuplicateAllowed: false, status: "active" },
   { key: "hr_employees_full", label: "قائمة الموظفين", aliases: ["قائمة موظفين كاملة"], icon: "Users", group: "hr", groupLabel: "موارد بشرية", permissionKey: "hr_employees_full", moduleKey: "hr_employees_full", order: 102, isOfficialPage: false, isDuplicateAllowed: false, status: "alias", defaultEnabled: false },
   { key: "hr_reports_full", label: "قسم التقارير", aliases: ["قسم تقارير كامل"], icon: "FileBarChart", group: "reports", groupLabel: "تقارير", permissionKey: "hr_reports_full", moduleKey: "hr_reports_full", order: 103, isOfficialPage: false, isDuplicateAllowed: false, status: "alias", defaultEnabled: false },
   { key: "hr_requests", label: "الطلبات", aliases: ["طلبات الموظفين"], icon: "ClipboardList", group: "hr", groupLabel: "موارد بشرية", permissionKey: "requests", moduleKey: "requests", order: 104, isOfficialPage: false, isDuplicateAllowed: false, status: "alias", defaultEnabled: false },

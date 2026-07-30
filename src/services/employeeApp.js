@@ -2,6 +2,7 @@ import { supabase } from "./supabase";
 import { normalizeCompany, normalizeTenantUser } from "./tenant";
 import { normalizeEmployee } from "./employees";
 import { attendanceGeoService, calculateDistanceMeters, getTodayDateOnly, validateEmployeeLocation } from "./attendanceGeo";
+import { defaultEmployeeAppSettings, defaultEmployeeRequestTypes } from "./employeeAppAdmin";
 
 export const EMPLOYEE_APP_SESSION_KEY = "tamyuz_employee_app_session";
 
@@ -84,7 +85,12 @@ export const employeeAppService = {
     }
     const user = normalizeTenantUser({ ...payload, company_id: payload.company_id || company.company_id, company_code: normalizedCompanyCode }, company);
     if (!user.employee_id && user.role !== "الموظف") throw new Error("هذا الحساب غير مرتبط برقم موظف");
-    const session = { user, company, loggedAt: new Date().toISOString() };
+    const settings = await this.loadEmployeeAppSettings(company.company_id).catch(() => defaultEmployeeAppSettings);
+    if (settings.app_enabled === false) throw new Error("تم إيقاف تطبيق الموظف مؤقتًا من قبل الإدارة.");
+    if (settings.employee_login_enabled === false) throw new Error("تم إيقاف تسجيل دخول الموظفين مؤقتًا من قبل الإدارة.");
+    const permissions = await this.loadEmployeeAppPermissions(company.company_id, user.role, user.employee_id || user.employeeId || user.id).catch(() => []);
+    const requestTypes = await this.loadEmployeeRequestTypes(company.company_id).catch(() => []);
+    const session = { user, company, settings, permissions, requestTypes, loggedAt: new Date().toISOString() };
     this.saveSession(session);
     return session;
   },
@@ -168,28 +174,52 @@ export const employeeAppService = {
     return (rows || []).map(normalizeNotification);
   },
   async loadEmployeeAppSettings(companyId) {
-    const id = `employee_app_settings_${companyId || "default"}`;
-    const rows = await supabase.select("hrms_settings", `select=*&id=eq.${encodeURIComponent(id)}&limit=1`);
-    return rows?.[0]?.settings || {
-      enabled: true,
-      geofence_required: true,
-      allowed_gps_accuracy: 100,
-      allow_attendance_without_location: false,
-      notes: "",
-    };
+    try {
+      const rows = await supabase.select("employee_app_settings", `select=*&company_id=eq.${encodeURIComponent(companyId || "")}&limit=1`);
+      return { ...defaultEmployeeAppSettings, ...(rows?.[0] || {}) };
+    } catch (error) {
+      console.error("Supabase employee_app_settings load error:", error);
+      return { ...defaultEmployeeAppSettings };
+    }
   },
   async saveEmployeeAppSettings(companyId, settings) {
-    const id = `employee_app_settings_${companyId || "default"}`;
     const payload = {
-      id,
-      settings: settings || {},
+      setting_id: settings?.setting_id || `employee_app_settings_${companyId || "default"}`,
+      company_id: companyId || settings?.company_id || "",
+      ...defaultEmployeeAppSettings,
+      ...(settings || {}),
       updated_at: new Date().toISOString(),
     };
-    const { data, error } = await supabase.from("hrms_settings").upsert(payload, { onConflict: "id" }).select().single();
+    const { data, error } = await supabase.from("employee_app_settings").upsert(payload, { onConflict: "setting_id" }).select().single();
     if (error) {
       console.error("Supabase employee app settings save error:", error);
       throw new Error("تعذر حفظ إعدادات تطبيق الموظف: " + error.message);
     }
-    return data?.settings || settings;
+    return data || payload;
+  },
+  async loadEmployeeAppPermissions(companyId, roleName = "الموظف", employeeId = "") {
+    try {
+      const rows = await supabase.select("employee_app_permissions", `select=*&company_id=eq.${encodeURIComponent(companyId || "")}&order=employee_id.desc`);
+      const relevant = (rows || []).filter((row) => (!row.employee_id && row.role_name === roleName) || row.employee_id === employeeId);
+      const byModule = new Map();
+      relevant.forEach((row) => byModule.set(row.module_key, { ...(byModule.get(row.module_key) || {}), ...row }));
+      return Array.from(byModule.values());
+    } catch (error) {
+      console.error("Supabase employee_app_permissions load error:", error);
+      return [];
+    }
+  },
+  hasPermission(permissions = [], moduleKey, action = "can_view") {
+    const row = permissions.find((item) => item.module_key === moduleKey);
+    return row ? row[action] === true : true;
+  },
+  async loadEmployeeRequestTypes(companyId) {
+    try {
+      const rows = await supabase.select("employee_app_request_types", `select=*&company_id=eq.${encodeURIComponent(companyId || "")}&is_enabled=eq.true&order=request_label.asc`);
+      return rows?.length ? rows : defaultEmployeeRequestTypes.map(([request_key, request_label, module_key]) => ({ request_key, request_label, module_key, is_enabled: true }));
+    } catch (error) {
+      console.error("Supabase employee_app_request_types load error:", error);
+      return defaultEmployeeRequestTypes.map(([request_key, request_label, module_key]) => ({ request_key, request_label, module_key, is_enabled: true }));
+    }
   },
 };

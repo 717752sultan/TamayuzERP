@@ -81,6 +81,7 @@ const CANONICAL_HR_PAGE_KEYS = [
   "user_activity_logs",
   "hr_org_chart",
   "hr_settings",
+  "employee_app_settings",
   "users_permissions",
   "hr_contracts",
   "hr_files",

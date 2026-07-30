@@ -10,11 +10,11 @@ import EmployeeNotificationsPage from "./EmployeeNotificationsPage";
 import EmployeeSchedulePage from "./EmployeeSchedulePage";
 
 const nav = [
-  ["/employee", "الرئيسية", Home],
-  ["/employee/attendance", "الحضور", MapPin],
-  ["/employee/requests", "طلباتي", ClipboardList],
-  ["/employee/schedule", "الدوام", CalendarDays],
-  ["/employee/profile", "ملفي", UserRound],
+  ["/employee", "الرئيسية", Home, "profile_basic"],
+  ["/employee/attendance", "الحضور", MapPin, "attendance_checkin"],
+  ["/employee/requests", "طلباتي", ClipboardList, "requests_leave"],
+  ["/employee/schedule", "الدوام", CalendarDays, "schedule"],
+  ["/employee/profile", "ملفي", UserRound, "profile_basic"],
 ];
 
 const pathNow = () => window.location.pathname;
@@ -50,7 +50,17 @@ export default function EmployeePortalApp() {
   }, []);
   const user = session?.user || {};
   const company = session?.company || {};
+  const settings = session?.settings || {};
+  const permissions = session?.permissions || [];
+  const requestTypes = session?.requestTypes || [];
   const employeeId = user.employee_id || user.employeeId || user.id || "";
+  const allowed = (moduleKey, action = "can_view") => employeeAppService.hasPermission(permissions, moduleKey, action);
+  const visibleNav = nav.filter(([, , , moduleKey]) => {
+    if (moduleKey === "schedule" && settings.show_schedule === false) return false;
+    if (moduleKey === "attendance_checkin") return allowed("attendance_checkin", "can_create") || allowed("attendance_history", "can_view");
+    if (moduleKey === "requests_leave") return requestTypes.some((type) => type.is_enabled !== false) || allowed("requests_leave", "can_create");
+    return allowed(moduleKey, "can_view");
+  });
   const go = (nextPath) => {
     window.history.pushState({}, "", nextPath);
     setPath(nextPath);
@@ -62,6 +72,12 @@ export default function EmployeePortalApp() {
   };
   const title = useMemo(() => nav.find(([href]) => href === path)?.[1] || "بوابة الموظف", [path]);
   if (!session) return <EmployeeLoginPage />;
-  const common = { user, company, employeeId, go };
-  return <main className="min-h-screen bg-slate-100 pb-24 text-slate-900" dir="rtl"><header className="sticky top-0 z-30 border-b border-white/20 bg-violet-950/95 px-4 py-4 text-white shadow-lg backdrop-blur"><div className="mx-auto flex max-w-5xl items-center justify-between gap-3"><div><p className="text-xs text-violet-200">{company.company_name || "التميز للأنظمة الذكية"}</p><h1 className="text-lg font-black">{title}</h1></div><button onClick={logout} className="rounded-2xl bg-white/10 p-3 hover:bg-white/20" title="تسجيل الخروج"><LogOut size={18} /></button></div></header><section className="mx-auto max-w-5xl p-4">{path === "/employee" && <EmployeeHomePage {...common} />}{path === "/employee/profile" && <EmployeeProfilePage {...common} />}{path === "/employee/attendance" && <EmployeeAttendancePage {...common} />}{path === "/employee/requests" && <EmployeeRequestsPage {...common} />}{path === "/employee/requests/new" && <NewEmployeeRequestPage {...common} />}{path === "/employee/notifications" && <EmployeeNotificationsPage {...common} />}{path === "/employee/schedule" && <EmployeeSchedulePage {...common} />}{!["/employee", "/employee/profile", "/employee/attendance", "/employee/requests", "/employee/requests/new", "/employee/notifications", "/employee/schedule"].includes(path) && <EmployeeHomePage {...common} />}</section><nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 shadow-2xl backdrop-blur"><div className="mx-auto grid max-w-5xl grid-cols-5 gap-1 p-2">{nav.map(([href, label, Icon]) => <button key={href} onClick={() => go(href)} className={`rounded-2xl px-1 py-2 text-[11px] font-extrabold ${path === href ? "bg-violet-700 text-white" : "text-slate-500 hover:bg-slate-100"}`}><Icon className="mx-auto mb-1" size={18} />{label}</button>)}<button onClick={() => go("/employee/notifications")} className={`absolute left-4 -top-14 rounded-full p-4 shadow-xl ${path === "/employee/notifications" ? "bg-violet-700 text-white" : "bg-white text-violet-700"}`}><Bell size={20} /></button></div></nav></main>;
+  if (settings.app_enabled === false) return <main className="grid min-h-screen place-items-center bg-slate-100 p-5" dir="rtl"><div className="rounded-[2rem] bg-white p-8 text-center font-bold text-slate-600 shadow-sm">تم إيقاف تطبيق الموظف مؤقتًا من قبل الإدارة.</div></main>;
+  const blocked = (path === "/employee/attendance" && !allowed("attendance_checkin", "can_create") && !allowed("attendance_history", "can_view"))
+    || (path === "/employee/profile" && !allowed("profile_basic", "can_view"))
+    || (path === "/employee/schedule" && (settings.show_schedule === false || !allowed("schedule", "can_view")))
+    || (path === "/employee/notifications" && (settings.notifications_enabled === false || !allowed("notifications", "can_view")))
+    || (path.startsWith("/employee/requests") && !visibleNav.some(([href]) => href === "/employee/requests"));
+  const common = { user, company, employeeId, go, settings, permissions, requestTypes, allowed };
+  return <main className="min-h-screen bg-slate-100 pb-24 text-slate-900" dir="rtl"><header className="sticky top-0 z-30 border-b border-white/20 bg-violet-950/95 px-4 py-4 text-white shadow-lg backdrop-blur"><div className="mx-auto flex max-w-5xl items-center justify-between gap-3"><div><p className="text-xs text-violet-200">{company.company_name || "التميز للأنظمة الذكية"}</p><h1 className="text-lg font-black">{title}</h1></div><button onClick={logout} className="rounded-2xl bg-white/10 p-3 hover:bg-white/20" title="تسجيل الخروج"><LogOut size={18} /></button></div></header><section className="mx-auto max-w-5xl p-4">{blocked && <div className="rounded-[2rem] bg-white p-8 text-center text-sm font-bold text-red-700 shadow-sm">لا تملك صلاحية الوصول إلى هذه الصفحة</div>}{!blocked && path === "/employee" && <EmployeeHomePage {...common} />}{!blocked && path === "/employee/profile" && <EmployeeProfilePage {...common} />}{!blocked && path === "/employee/attendance" && <EmployeeAttendancePage {...common} />}{!blocked && path === "/employee/requests" && <EmployeeRequestsPage {...common} />}{!blocked && path === "/employee/requests/new" && <NewEmployeeRequestPage {...common} />}{!blocked && path === "/employee/notifications" && <EmployeeNotificationsPage {...common} />}{!blocked && path === "/employee/schedule" && <EmployeeSchedulePage {...common} />}{!blocked && !["/employee", "/employee/profile", "/employee/attendance", "/employee/requests", "/employee/requests/new", "/employee/notifications", "/employee/schedule"].includes(path) && <EmployeeHomePage {...common} />}</section><nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 shadow-2xl backdrop-blur"><div className="mx-auto grid max-w-5xl grid-cols-5 gap-1 p-2">{visibleNav.map(([href, label, Icon]) => <button key={href} onClick={() => go(href)} className={`rounded-2xl px-1 py-2 text-[11px] font-extrabold ${path === href ? "bg-violet-700 text-white" : "text-slate-500 hover:bg-slate-100"}`}><Icon className="mx-auto mb-1" size={18} />{label}</button>)}{settings.notifications_enabled !== false && allowed("notifications", "can_view") && <button onClick={() => go("/employee/notifications")} className={`absolute left-4 -top-14 rounded-full p-4 shadow-xl ${path === "/employee/notifications" ? "bg-violet-700 text-white" : "bg-white text-violet-700"}`}><Bell size={20} /></button>}</div></nav></main>;
 }
