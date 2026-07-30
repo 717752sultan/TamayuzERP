@@ -1,14 +1,57 @@
 import { dailyOperationsService, isApprovedDailyOperation, isApprovedStatus, operationStatuses, operationTypes, serviceChannels } from "./dailyOperations";
+import { supabase } from "./supabase";
 
 const n = (value) => {
   const number = Number(value || 0);
   return Number.isFinite(number) ? number : 0;
 };
 
+const normalizeEmployeeIdValue = (value = "") => String(value || "").trim();
+
+const loadEmployeeIdAliasMaps = async (companyId) => {
+  if (!companyId) return { aliasToCanonical: new Map(), canonicalToAliases: new Map() };
+  try {
+    const rows = await supabase.select("employee_id_aliases", [
+      "select=company_id,alias_employee_id,canonical_employee_id,employee_name,is_active",
+      `company_id=eq.${encodeURIComponent(companyId)}`,
+      "is_active=eq.true",
+    ].join("&"));
+    const aliasToCanonical = new Map();
+    const canonicalToAliases = new Map();
+    (rows || []).forEach((row) => {
+      const alias = normalizeEmployeeIdValue(row.alias_employee_id);
+      const canonical = normalizeEmployeeIdValue(row.canonical_employee_id);
+      if (!alias || !canonical) return;
+      aliasToCanonical.set(alias, canonical);
+      const aliases = canonicalToAliases.get(canonical) || new Set();
+      aliases.add(alias);
+      canonicalToAliases.set(canonical, aliases);
+    });
+    return { aliasToCanonical, canonicalToAliases };
+  } catch (error) {
+    console.error("Daily operations employee_id_aliases load error:", error);
+    return { aliasToCanonical: new Map(), canonicalToAliases: new Map() };
+  }
+};
+
+const applyEmployeeIdAliases = (rows = [], aliasToCanonical = new Map()) => (rows || []).map((row) => {
+  const originalEmployeeId = normalizeEmployeeIdValue(row.employee_id);
+  const canonicalEmployeeId = aliasToCanonical.get(originalEmployeeId) || originalEmployeeId;
+  return {
+    ...row,
+    original_employee_id: originalEmployeeId,
+    employee_id: canonicalEmployeeId,
+    effective_employee_id: canonicalEmployeeId,
+    alias_employee_id: canonicalEmployeeId !== originalEmployeeId ? originalEmployeeId : "",
+  };
+});
+
 export const dailyOperationReportGroups = [
   ["all", "الكل"],
   ["branch", "الفرع"],
   ["employee", "الموظف"],
+  ["canonical_employee", "حسب الرقم الرسمي"],
+  ["original_employee", "حسب الرقم الأصلي"],
   ["department", "الإدارة / القسم"],
   ["operation_type", "نوع العملية"],
   ["operation_date", "اليوم"],
@@ -67,7 +110,9 @@ export const summarizeDailyOperations = (rows = []) => {
 export const groupDailyOperations = (rows = [], groupBy = "all") => {
   const keyOf = (row) => {
     if (groupBy === "all") return "الكل";
-    if (groupBy === "employee") return row.employee_name || row.employee_id || "غير محدد";
+    if (groupBy === "employee") return `${row.employee_name || "غير محدد"} - ${row.employee_id || "غير محدد"}`;
+    if (groupBy === "canonical_employee") return row.employee_id || "غير محدد";
+    if (groupBy === "original_employee") return row.original_employee_id || row.employee_id || "غير محدد";
     return row[groupBy] || "غير محدد";
   };
   const grouped = new Map();
@@ -89,7 +134,7 @@ export const groupDailyOperations = (rows = [], groupBy = "all") => {
 
 export const dailyOperationsReportsService = {
   async loadReport(companyId, filters = {}) {
-    const rows = await dailyOperationsService.loadDailyOperations({
+    const rawRows = await dailyOperationsService.loadDailyOperations({
       companyId,
       fromDate: filters.fromDate || "",
       toDate: filters.toDate || "",
@@ -103,8 +148,14 @@ export const dailyOperationsReportsService = {
       includedInKpiOnly: filters.includedInKpiOnly === true,
       limit: 10000,
     });
+    const aliasMaps = await loadEmployeeIdAliasMaps(companyId);
+    const rows = applyEmployeeIdAliases(rawRows, aliasMaps.aliasToCanonical);
     const summary = summarizeDailyOperations(rows);
     const grouped = groupDailyOperations(rows, filters.groupBy || "all");
-    return { rows, summary, grouped };
+    const linkedEmployeeIds = [...aliasMaps.canonicalToAliases.entries()].map(([canonical_employee_id, aliases]) => ({
+      canonical_employee_id,
+      linked_employee_ids: [...aliases].join("، "),
+    }));
+    return { rows, summary, grouped, linkedEmployeeIds };
   },
 };

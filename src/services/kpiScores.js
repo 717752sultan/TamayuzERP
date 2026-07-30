@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import { dailyOperationsService, isApprovedDailyOperation } from "./dailyOperations";
+import { isApprovedDailyOperation } from "./dailyOperations";
 import { exportWorkbook } from "./reportExport";
 
 const n = (value) => Number(value || 0) || 0;
@@ -21,6 +21,21 @@ export const classifyOperationType = (operationType = "") => {
   if (/بيع/.test(text)) return "sale";
   if (/شراء/.test(text)) return "purchase";
   return "other";
+};
+
+export const getProductivityTargetOperations = (employee = {}, filters = {}) => {
+  const explicit = Number(filters.target_operations || employee.target_operations || employee.kpi_target_operations || 0);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  const job = String(employee.job || employee.job_name || "").toLowerCase();
+  if (/خدمة عملاء|كاشير|صراف/.test(job)) return 800;
+  if (/مدير فرع/.test(job)) return 1200;
+  if (/واتس|واتساب/.test(job)) return 600;
+  return 500;
+};
+
+export const calculateProductivityScore = (totalOperations = 0, targetOperations = 500) => {
+  const target = Math.max(1, n(targetOperations));
+  return Number(Math.min(100, (n(totalOperations) / target) * 100).toFixed(2));
 };
 
 const normalizeScore = (row = {}) => ({
@@ -48,14 +63,126 @@ const filterEmployees = (employees = [], companyId = "", filters = {}) => (emplo
   && (!filters.employeeId || employee.id === filters.employeeId)
   && (!filters.department || filters.department === "all" || employee.department === filters.department));
 
+const normalizeEmployeeIdValue = (value = "") => String(value || "").trim();
+
+const getMonthDateRange = (month = "") => {
+  const match = String(month || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const monthNumber = Number(match[2]);
+  if (!year || !monthNumber) return null;
+  const lastDay = new Date(year, monthNumber, 0).getDate();
+  return {
+    fromDate: `${year}-${String(monthNumber).padStart(2, "0")}-01`,
+    toDate: `${year}-${String(monthNumber).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
+  };
+};
+
+const normalizeOperation = (row = {}) => ({
+  operation_id: row.operation_id || "",
+  company_id: row.company_id || "",
+  employee_id: normalizeEmployeeIdValue(row.employee_id),
+  original_employee_id: normalizeEmployeeIdValue(row.original_employee_id || row.employee_id),
+  alias_employee_id: row.alias_employee_id || "",
+  employee_name: row.employee_name || "",
+  branch: row.branch || "",
+  department: row.department || "",
+  operation_date: row.operation_date || "",
+  month: row.month || String(row.operation_date || "").slice(0, 7),
+  operation_type: row.operation_type || "",
+  operation_count: n(row.operation_count),
+  status: row.status || "",
+  included_in_kpi: row.included_in_kpi === true,
+});
+
+const loadEmployeeIdAliases = async (companyId) => {
+  if (!companyId) return { aliasToCanonical: new Map(), canonicalToAliases: new Map() };
+  try {
+    const rows = await supabase.select("employee_id_aliases", [
+      "select=company_id,alias_employee_id,canonical_employee_id,employee_name,is_active",
+      `company_id=eq.${encodeURIComponent(companyId)}`,
+      "is_active=eq.true",
+    ].join("&"));
+    const aliasToCanonical = new Map();
+    const canonicalToAliases = new Map();
+    (rows || []).forEach((row) => {
+      const alias = normalizeEmployeeIdValue(row.alias_employee_id);
+      const canonical = normalizeEmployeeIdValue(row.canonical_employee_id);
+      if (!alias || !canonical) return;
+      aliasToCanonical.set(alias, canonical);
+      const aliases = canonicalToAliases.get(canonical) || new Set();
+      aliases.add(alias);
+      canonicalToAliases.set(canonical, aliases);
+    });
+    return { aliasToCanonical, canonicalToAliases };
+  } catch (error) {
+    console.error("KPI employee_id_aliases load error:", error);
+    return { aliasToCanonical: new Map(), canonicalToAliases: new Map() };
+  }
+};
+
+const applyEmployeeIdAliases = (rows = [], aliasToCanonical = new Map()) => (rows || []).map((row) => {
+  const originalEmployeeId = normalizeEmployeeIdValue(row.employee_id);
+  const canonicalEmployeeId = aliasToCanonical.get(originalEmployeeId) || originalEmployeeId;
+  return normalizeOperation({
+    ...row,
+    employee_id: canonicalEmployeeId,
+    original_employee_id: originalEmployeeId,
+    alias_employee_id: canonicalEmployeeId !== originalEmployeeId ? originalEmployeeId : "",
+  });
+});
+
+const loadApprovedKpiOperations = async (companyId, filters = {}) => {
+  const params = [
+    "select=*",
+    `company_id=eq.${encodeURIComponent(companyId || "")}`,
+    `status=eq.${encodeURIComponent("معتمد")}`,
+    "included_in_kpi=eq.true",
+  ];
+  if (filters.fromDate || filters.toDate) {
+    if (filters.fromDate) params.push(`operation_date=gte.${encodeURIComponent(filters.fromDate)}`);
+    if (filters.toDate) params.push(`operation_date=lte.${encodeURIComponent(filters.toDate)}`);
+  } else if (filters.month) {
+    const range = getMonthDateRange(filters.month);
+    if (range) {
+      params.push(`operation_date=gte.${encodeURIComponent(range.fromDate)}`);
+      params.push(`operation_date=lte.${encodeURIComponent(range.toDate)}`);
+    }
+  }
+  if (filters.branch && filters.branch !== "all") params.push(`branch=eq.${encodeURIComponent(filters.branch)}`);
+  if (filters.department && filters.department !== "all") params.push(`department=eq.${encodeURIComponent(filters.department)}`);
+  if (filters.operationType && filters.operationType !== "all") params.push(`operation_type=eq.${encodeURIComponent(filters.operationType)}`);
+  const rows = [];
+  const limit = 1000;
+  for (let offset = 0; offset < 10000; offset += limit) {
+    const batch = await supabase.select("daily_operations", `${params.join("&")}&order=operation_date.desc&limit=${limit}&offset=${offset}`);
+    const list = Array.isArray(batch) ? batch : [];
+    rows.push(...list);
+    if (list.length < limit) break;
+  }
+  const aliasContext = filters.aliasContext || await loadEmployeeIdAliases(companyId);
+  return applyEmployeeIdAliases(rows, aliasContext.aliasToCanonical)
+    .filter((row) => row.employee_id && row.operation_count > 0)
+    .filter((row) => !filters.employeeId || row.employee_id === filters.employeeId || row.original_employee_id === filters.employeeId);
+};
+
 export const buildEmployeeOperationsSummary = (operationsRows = []) => {
   const map = new Map();
   (operationsRows || []).filter(isApprovedDailyOperation).forEach((row) => {
     const employeeId = row.employee_id || "";
-    const item = map.get(employeeId) || { employee_id: employeeId, total_operations: 0, receipt_operations: 0, payment_operations: 0, sale_operations: 0, purchase_operations: 0, other_operations: 0, daily: new Map(), byType: new Map() };
+    const item = map.get(employeeId) || { employee_id: employeeId, employee_name: row.employee_name || "", branches: new Set(), originalEmployeeIds: new Set(), total_operations: 0, receipt_operations: 0, payment_operations: 0, sale_operations: 0, purchase_operations: 0, other_operations: 0, daily: new Map(), byType: new Map(), byBranch: new Map(), byOriginalEmployeeId: new Map() };
     const count = n(row.operation_count);
     const kind = classifyOperationType(row.operation_type);
     item.total_operations += count;
+    const originalEmployeeId = row.original_employee_id || row.employee_id || "";
+    if (originalEmployeeId) {
+      item.originalEmployeeIds.add(originalEmployeeId);
+      item.byOriginalEmployeeId.set(originalEmployeeId, (item.byOriginalEmployeeId.get(originalEmployeeId) || 0) + count);
+    }
+    if (row.branch) {
+      item.branches.add(row.branch);
+      item.byBranch.set(row.branch, (item.byBranch.get(row.branch) || 0) + count);
+    }
     if (kind === "receipt") item.receipt_operations += count;
     else if (kind === "payment") item.payment_operations += count;
     else if (kind === "sale") item.sale_operations += count;
@@ -88,8 +215,27 @@ export const buildKpiEmployeeRanking = (employees = [], kpiRows = [], operations
   const rows = [...allEmployeeIds].map((employeeId) => {
     const employee = employees.find((item) => String(item.id) === String(employeeId)) || {};
     const scoreInfo = scoresByEmployee.get(employeeId);
-    const ops = opsByEmployee.get(employeeId) || { total_operations: 0, receipt_operations: 0, payment_operations: 0, sale_operations: 0, purchase_operations: 0, daily: new Map(), byType: new Map() };
-    const finalScore = scoreInfo ? Number(scoreInfo.total.toFixed(2)) : null;
+    const ops = opsByEmployee.get(employeeId) || { total_operations: 0, receipt_operations: 0, payment_operations: 0, sale_operations: 0, purchase_operations: 0, daily: new Map(), byType: new Map(), byBranch: new Map(), byOriginalEmployeeId: new Map(), branches: new Set(), originalEmployeeIds: new Set([employeeId]) };
+    const manualScore = scoreInfo ? Number(scoreInfo.total.toFixed(2)) : null;
+    const targetOperations = getProductivityTargetOperations(employee, filters);
+    const achievementPercentage = targetOperations ? Number(((n(ops.total_operations) / targetOperations) * 100).toFixed(2)) : 0;
+    const productivityScore = ops.total_operations > 0 ? calculateProductivityScore(ops.total_operations, targetOperations) : null;
+    let finalScore = null;
+    let calculation_source = "غير محسوب";
+    let calculation_reason = "لا توجد عمليات معتمدة داخلة في KPI ولا يوجد تقييم يدوي.";
+    if (manualScore !== null && productivityScore !== null) {
+      finalScore = Number(((manualScore * 0.6) + (productivityScore * 0.4)).toFixed(2));
+      calculation_source = "محسوب من الإنتاجية والتقييم";
+      calculation_reason = "تم احتساب الدرجة النهائية من التقييم اليدوي 60% والإنتاجية 40%.";
+    } else if (manualScore !== null) {
+      finalScore = manualScore;
+      calculation_source = "محسوب من التقييم اليدوي";
+      calculation_reason = "تم احتساب الدرجة من معايير KPI اليدوية المحفوظة.";
+    } else if (productivityScore !== null) {
+      finalScore = productivityScore;
+      calculation_source = "محسوب من الإنتاجية";
+      calculation_reason = "لا يوجد تقييم يدوي، لذلك تم احتساب الدرجة من العمليات المعتمدة الداخلة في KPI فقط.";
+    }
     const performance = classifyEmployeePerformance(finalScore);
     const strengths = [];
     if (ops.receipt_operations) strengths.push("قبض");
@@ -98,20 +244,28 @@ export const buildKpiEmployeeRanking = (employees = [], kpiRows = [], operations
     if (ops.purchase_operations) strengths.push("شراء");
     return {
       employee_id: employeeId,
-      employee_name: employee.name || scoreInfo?.criteria?.[0]?.employee_name || employeeId,
+      employee_name: employee.name || scoreInfo?.criteria?.[0]?.employee_name || ops.employee_name || employeeId,
       job_name: employee.job || employee.job_name || scoreInfo?.criteria?.[0]?.job_name || "",
-      branch: employee.branch || scoreInfo?.criteria?.[0]?.branch || "",
+      branch: employee.branch || scoreInfo?.criteria?.[0]?.branch || [...(ops.branches || [])][0] || "",
+      branches: [...(ops.branches || [])],
+      linked_employee_ids: [...(ops.originalEmployeeIds || new Set([employeeId]))],
       department: employee.department || "",
       final_score: finalScore,
+      manual_score: manualScore,
+      productivity_score: productivityScore,
+      target_operations: targetOperations,
+      achievement_percentage: achievementPercentage,
+      calculation_source,
+      calculation_reason,
       performance_label: performance.label,
       performance_tone: performance.tone,
       strengths: strengths.length ? strengths.join("، ") : finalScore !== null ? "ثبات الأداء" : "غير محدد",
-      notes: finalScore === null ? "لم يتم احتساب درجة KPI" : ops.total_operations ? "عمليات معتمدة داخلة في KPI" : "لا توجد عمليات معتمدة ضمن الفترة",
+      notes: calculation_reason,
       criteria: scoreInfo?.criteria || [],
       operations: ops,
     };
   }).filter((row) =>
-    (!filters.branch || filters.branch === "all" || row.branch === filters.branch)
+    (!filters.branch || filters.branch === "all" || row.branch === filters.branch || row.branches?.includes(filters.branch))
     && (!filters.job || filters.job === "all" || row.job_name === filters.job)
     && (!filters.employeeId || row.employee_id === filters.employeeId)
     && (!filters.department || filters.department === "all" || row.department === filters.department));
@@ -123,26 +277,23 @@ export const buildKpiEmployeeRanking = (employees = [], kpiRows = [], operations
 export const kpiScoresService = {
   async loadKpiScores(companyId, filters = {}, employees = []) {
     const month = filters.month || "";
+    const aliasContext = await loadEmployeeIdAliases(companyId);
     const params = ["select=*", `company_id=eq.${encodeURIComponent(companyId || "")}`];
     if (month) params.push(`month=eq.${encodeURIComponent(month)}`);
     const kpiRowsRaw = await supabase.select("performance_kpi_scores", `${params.join("&")}&order=employee_name.asc`);
-    const kpiRows = (kpiRowsRaw || []).map(normalizeScore);
-    const operationsRows = await dailyOperationsService.loadDailyOperations({
-      companyId,
-      month: filters.fromDate || filters.toDate ? "" : month,
-      fromDate: filters.fromDate || "",
-      toDate: filters.toDate || "",
-      branch: filters.branch || "all",
-      department: filters.department || "all",
-      employeeId: filters.employeeId || "",
-      operationType: filters.operationType || "all",
-      approvedOnly: true,
-      includedInKpiOnly: true,
-      limit: 10000,
+    const kpiRows = (kpiRowsRaw || []).map((row) => {
+      const normalized = normalizeScore(row);
+      const originalEmployeeId = normalizeEmployeeIdValue(normalized.employee_id);
+      return {
+        ...normalized,
+        original_employee_id: originalEmployeeId,
+        employee_id: aliasContext.aliasToCanonical.get(originalEmployeeId) || originalEmployeeId,
+      };
     });
+    const operationsRows = await loadApprovedKpiOperations(companyId, { ...filters, aliasContext });
     const scopedEmployees = filterEmployees(employees, companyId, filters);
     const ranking = buildKpiEmployeeRanking(scopedEmployees, kpiRows, operationsRows, filters);
-    return { kpiRows, operationsRows, ranking, employees: scopedEmployees };
+    return { kpiRows, operationsRows, ranking, employees: scopedEmployees, aliases: aliasContext };
   },
 
   async loadEmployeeKpiDetails(companyId, employeeId, filters = {}, employees = []) {
@@ -154,23 +305,43 @@ export const kpiScoresService = {
   },
 
   loadEmployeeOperationsSummary(companyId, filters = {}) {
-    return dailyOperationsService.loadDailyOperations({ companyId, ...filters, approvedOnly: true, includedInKpiOnly: true, limit: 10000 });
+    return loadApprovedKpiOperations(companyId, filters);
   },
 
   exportEmployeeKpiReportExcel(report) {
     const operationRows = [...(report?.operations?.byType || new Map()).entries()].map(([operation_type, operation_count]) => ({ operation_type, operation_count }));
+    const originalIdRows = [...(report?.operations?.byOriginalEmployeeId || new Map()).entries()].map(([employee_id, operation_count]) => ({ employee_id, operation_count }));
+    const branchRows = [...(report?.operations?.byBranch || new Map()).entries()].map(([branch, operation_count]) => ({ branch, operation_count }));
     const dailyRows = [...(report?.operations?.daily || new Map()).values()];
     exportWorkbook([
       { name: "ملخص الموظف", rows: [report || {}] },
       { name: "معايير التقييم", rows: report?.criteria || [] },
       { name: "عمليات الموظف", rows: operationRows },
+      { name: "حسب الرقم الأصلي", rows: originalIdRows },
+      { name: "حسب الفرع", rows: branchRows },
       { name: "الأداء اليومي", rows: dailyRows },
     ], `kpi-employee-report-${report?.employee_id || "employee"}.xlsx`);
   },
 
   exportKpiRankingExcel(ranking = [], kpiRows = []) {
     exportWorkbook([
-      { name: "ترتيب الموظفين", rows: ranking.map((row) => ({ ...row, operations: undefined, criteria: undefined })) },
+      { name: "ترتيب الموظفين", rows: ranking.map((row) => ({
+        rank: row.rank,
+        employee_id: row.employee_id,
+        linked_employee_ids: row.linked_employee_ids?.join("، ") || row.employee_id,
+        employee_name: row.employee_name,
+        job_name: row.job_name,
+        branch: row.branch,
+        total_operations: row.operations?.total_operations || 0,
+        target_operations: row.target_operations,
+        achievement_percentage: row.achievement_percentage,
+        productivity_score: row.productivity_score,
+        manual_score: row.manual_score,
+        final_score: row.final_score,
+        calculation_source: row.calculation_source,
+        performance_label: row.performance_label,
+        notes: row.notes,
+      })) },
       { name: "تفاصيل المعايير", rows: kpiRows },
     ], "kpi-ranking-report.xlsx");
   },

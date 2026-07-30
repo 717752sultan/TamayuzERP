@@ -9,6 +9,8 @@ const columns = [
   { key: "branch", label: "الفرع" },
   { key: "department", label: "الإدارة" },
   { key: "employee_name", label: "الموظف" },
+  { key: "employee_id", label: "الرقم الرسمي" },
+  { key: "original_employee_id", label: "الرقم الأصلي" },
   { key: "operation_type", label: "نوع العملية" },
   { key: "service_channel", label: "القناة" },
   { key: "operation_count", label: "عدد العمليات" },
@@ -91,6 +93,7 @@ export default function DailyOperationsReportsPage({ employees = [], currentComp
       { name: "حسب التجميع", rows: data.grouped },
       { name: "حسب الفرع", rows: data.grouped.filter(Boolean) },
       { name: "حسب الموظف", rows: data.rows },
+      { name: "الأرقام المرتبطة", rows: data.linkedEmployeeIds || [] },
       { name: "حسب نوع العملية", rows: data.grouped },
     ], "daily-operations-report.xlsx");
     setMessage("تم تصدير التقرير بنجاح.");
@@ -122,6 +125,7 @@ export default function DailyOperationsReportsPage({ employees = [], currentComp
           <label className="flex items-center gap-2 rounded-2xl bg-slate-50 px-3 text-sm font-bold"><input type="checkbox" checked={filters.includedInKpiOnly} onChange={(e) => setFilters({ ...filters, includedInKpiOnly: e.target.checked })} /> يدخل في KPI فقط</label>
         </div>
         {message && <div className="mt-4 rounded-2xl bg-amber-50 p-3 text-sm font-bold text-amber-800">{message}</div>}
+        <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-3 text-sm font-extrabold text-blue-800">يمكن عرض التقرير حسب الرقم الرسمي أو الرقم الأصلي، ويتم دمج الأرقام المرتبطة لأغراض التحليل.</div>
       </div>
       <OfficialReportLayout title="تقرير العمليات اليومية" company={currentCompany} generatedBy={currentUser?.username} period={`${filters.fromDate || "البداية"} إلى ${filters.toDate || "النهاية"}`} filters={Object.entries(filters).map(([k, v]) => `${k}: ${v}`)} summary={summaryCards}>
         <div className="overflow-x-auto">

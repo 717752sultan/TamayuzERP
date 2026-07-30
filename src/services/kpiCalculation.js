@@ -28,12 +28,39 @@ const scoreFromDb = (row = {}) => ({
   notes: row.notes || "",
 });
 
+const normalizeEmployeeIdValue = (value = "") => String(value || "").trim();
+
+const loadEmployeeIdAliasMap = async (companyId) => {
+  if (!companyId) return new Map();
+  try {
+    const rows = await supabase.select("employee_id_aliases", [
+      "select=company_id,alias_employee_id,canonical_employee_id,is_active",
+      `company_id=eq.${encodeURIComponent(companyId)}`,
+      "is_active=eq.true",
+    ].join("&"));
+    const aliasToCanonical = new Map();
+    (rows || []).forEach((row) => {
+      const alias = normalizeEmployeeIdValue(row.alias_employee_id);
+      const canonical = normalizeEmployeeIdValue(row.canonical_employee_id);
+      if (alias && canonical) aliasToCanonical.set(alias, canonical);
+    });
+    return aliasToCanonical;
+  } catch (error) {
+    console.error("KPI calculation employee_id_aliases load error:", error);
+    return new Map();
+  }
+};
+
 export const kpiCalculationService = {
   async calculateEmployeeKpiScores(employee, month, companyId = "") {
     try {
       const cid = companyId || employee.company_id || getCurrentCompanyId();
+      const aliasToCanonical = await loadEmployeeIdAliasMap(cid);
       const operations = await dailyOperationsService.loadDailyOperations({ companyId: cid, month, approvedOnly: true, includedInKpiOnly: true });
-      const employeeOps = operations.filter((op) => op.employee_id === employee.id && isApprovedDailyOperation(op));
+      const employeeOps = operations.filter((op) => {
+        const effectiveEmployeeId = aliasToCanonical.get(normalizeEmployeeIdValue(op.employee_id)) || normalizeEmployeeIdValue(op.employee_id);
+        return effectiveEmployeeId === normalizeEmployeeIdValue(employee.id) && isApprovedDailyOperation(op);
+      });
       const criteria = await performanceCriteriaService.loadKpiCriteria(employee.job);
       const scores = criteria.filter((c) => c.is_active).map((criterion) => {
         const actual = employeeOps.reduce((sum, op) => {
