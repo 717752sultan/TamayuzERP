@@ -95,6 +95,8 @@ import { dailyOperationsService, isApprovedDailyOperation, isApprovedStatus, nor
 import { downloadDailyOperationsTemplate, downloadProductivityTemplate, exportDailyOperationsToExcel, exportProductivityOperationsToExcel, getTodayDateOnly, importDailyOperationsRows, parseDailyOperationsExcel, validateDailyOperationsRows } from "./services/dailyOperationsImportExport";
 import { performanceCriteriaService, scoringTypes, defaultJobKpis } from "./services/performanceCriteria";
 import { kpiCalculationService } from "./services/kpiCalculation";
+import KpiSettingsPage from "./components/hr/KpiSettingsPage";
+import { defaultKpiCriterionTypes, defaultKpiEvaluationMethods, loadKpiCriterionTypes, loadKpiEvaluationMethods } from "./services/kpiSettings";
 import { aiAssistantService } from "./services/aiAssistant";
 import { settingsBranchesService } from "./services/settingsBranches";
 import { settingsCurrenciesService } from "./services/settingsCurrencies";
@@ -163,6 +165,7 @@ const icons = {
   attendance_period_settings: Settings,
   performance_criteria: ClipboardList,
   performance_kpi_scores: Star,
+  kpi_settings: Settings,
   users_permissions: UserRoundCog,
   recruitment: UserPlus,
   reports_center: FileBarChart,
@@ -238,6 +241,7 @@ const fullHrNavItems = [
   ["performance_criteria", "معايير الأداء"],
   ["evaluations", "التقييم"],
   ["performance_kpi_scores", "درجات KPI"],
+  ["kpi_settings", "إعدادات KPI"],
   ["productivity", "الإنتاجية"],
   ["incentives", "الحوافز"],
   ["top", "موظف الشهر"],
@@ -279,6 +283,7 @@ const navItems = [
   ["daily_operations", "العمليات اليومية"],
   ["performance_criteria", "معايير الأداء"],
   ["performance_kpi_scores", "درجات KPI"],
+  ["kpi_settings", "إعدادات KPI"],
   ["users_permissions", "المستخدمون والصلاحيات"],
   ["recruitment", "طلبات التوظيف"],
   ["reports_center", "مركز التقارير"],
@@ -710,6 +715,7 @@ const permissionNodeGroups = {
   shifts: ["shift_types", "shift_assignments", "shift_conflicts"],
   daily_operations: ["daily_operations_entry", "daily_operations_approval", "daily_operations_reports"],
   performance_criteria: ["performance_criteria"],
+  kpi_settings: ["kpi_settings"],
   evaluations: ["evaluations"],
   templates: ["templates"],
   incentives: ["incentives_calculation", "incentives_approval"],
@@ -1524,6 +1530,7 @@ export default function App() {
 	          {attendancePageKeys.has(activePage) && <AttendanceCalculationPage {...p} pageKey={activePage} />}{" "}
 	          {activePage === "performance_criteria" && <PerformanceCriteriaPageEnhanced {...p} />}{" "}
 	          {activePage === "performance_kpi_scores" && <KpiScoresDashboardPage {...p} />}{" "}
+          {activePage === "kpi_settings" && <KpiSettingsPage {...p} />}{" "}
 	          {activePage === "users_permissions" && <UsersPermissionsPage {...p} />}{" "}
 	          {activePage === "recruitment" && <RecruitmentPage {...p} />}{" "}
 	          {activePage === "reports_center" && <EnterpriseReportsCenter {...p} />}{" "}
@@ -7548,13 +7555,8 @@ function DialogActions({ close }) {
   return <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={close} className="btn-secondary">إلغاء</button><button className="btn-primary"><Save size={17} /> حفظ البيانات</button></div>;
 }
 
-const kpiCriterionTypeOptions = [
-  ["behavioral", "إداري / سلوكي"],
-  ["operational", "إنتاجي / تشغيلي"],
-  ["cash_counting", "عدّ نقدي / عداد"],
-  ["financial", "مالي"],
-  ["service_quality", "جودة وخدمة عملاء"],
-];
+const fallbackKpiCriterionTypeOptions = defaultKpiCriterionTypes.filter(([key]) => ["operational", "behavioral", "administrative", "compliance", "attendance_discipline"].includes(key));
+const fallbackKpiEvaluationMethodOptions = defaultKpiEvaluationMethods.filter(([key]) => key !== "mixed").map(([key, label]) => [key, label]);
 const inferCriterionType = (item = {}) => {
   if (item.criterion_type) return item.criterion_type;
   const name = String(item.criterion_name || item.name || "");
@@ -7566,19 +7568,29 @@ const inferCriterionType = (item = {}) => {
 };
 const kpiFieldNumber = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
 
-function PerformanceCriteriaPageEnhanced({ can }) {
+function PerformanceCriteriaPageEnhanced({ can, currentCompany }) {
   const [templates, setTemplates] = useState([]);
   const [criteriaRows, setCriteriaRows] = useState([]);
   const [selectedJob, setSelectedJob] = useState("");
   const [dialog, setDialog] = useState(null);
   const [triedSave, setTriedSave] = useState(false);
+  const [criterionTypeOptions, setCriterionTypeOptions] = useState(fallbackKpiCriterionTypeOptions);
+  const [evaluationMethodOptions, setEvaluationMethodOptions] = useState(fallbackKpiEvaluationMethodOptions);
   const load = async () => {
-    const [t, c] = await Promise.all([performanceCriteriaService.loadJobTemplates(), performanceCriteriaService.loadKpiCriteria()]);
+    const companyId = currentCompany?.company_id || "";
+    const [t, c, typeRows, methodRows] = await Promise.all([
+      performanceCriteriaService.loadJobTemplates(),
+      performanceCriteriaService.loadKpiCriteria(),
+      companyId ? loadKpiCriterionTypes(companyId, { activeOnly: true }).catch((error) => { console.error("KPI criterion types fallback:", error); return []; }) : [],
+      companyId ? loadKpiEvaluationMethods(companyId, { activeOnly: true }).catch((error) => { console.error("KPI evaluation methods fallback:", error); return []; }) : [],
+    ]);
     setTemplates(t);
     setCriteriaRows(c);
+    setCriterionTypeOptions(typeRows.length ? typeRows.map((row) => [row.type_key, row.type_name]) : fallbackKpiCriterionTypeOptions);
+    setEvaluationMethodOptions(methodRows.length ? methodRows.map((row) => [row.method_key, row.method_name]) : fallbackKpiEvaluationMethodOptions);
     setSelectedJob((j) => j || t[0]?.job_name || Object.keys(defaultJobKpis)[0] || "");
   };
-  useEffect(() => { load().catch((e) => alert(e.message)); }, []);
+  useEffect(() => { load().catch((e) => alert(e.message)); }, [currentCompany?.company_id]);
   const rows = criteriaRows.filter((r) => r.job_name === selectedJob);
   const totalWeight = performanceCriteriaService.validateCriteriaWeights(rows);
   const openCriterion = (item = {}) => {
@@ -7589,7 +7601,7 @@ function PerformanceCriteriaPageEnhanced({ can }) {
       criterion_type: inferCriterionType(item),
       weight: 10,
       max_score: 100,
-      scoring_type: scoringTypes[0],
+      scoring_type: evaluationMethodOptions[0]?.[1] || scoringTypes[0],
       target_value: 100,
       excellent_threshold: 100,
       good_threshold: 80,
@@ -7639,7 +7651,7 @@ function PerformanceCriteriaPageEnhanced({ can }) {
   };
   const dialogCriterionName = String(dialog?.criterion_name || dialog?.name || "");
   const showEnhancedCashDenominationFields = dialog?.criterion_type === "cash_counting" && isCashDenominationCriterion(dialogCriterionName);
-  return <div className="space-y-5"><PageHead title="معايير الأداء" desc="معايير KPI عادلة ومنفصلة حسب الوظيفة" action={<div className="flex gap-2"><button onClick={() => performanceCriteriaService.seedDefaults().then(load).catch((e) => alert(e.message))} className="btn-secondary">توليد المعايير الافتراضية</button><button disabled={can?.("performance_criteria", "can_create") === false} onClick={() => openCriterion()} className="btn-primary"><Plus size={18} /> إضافة معيار</button></div>} /><div className="panel flex flex-wrap gap-3 p-4"><select value={selectedJob} onChange={(e) => setSelectedJob(e.target.value)} className="field max-w-md">{[...new Set([...templates.map((t) => t.job_name), ...Object.keys(defaultJobKpis)])].map((j) => <option key={j}>{j}</option>)}</select><span className={`rounded-xl px-4 py-2 text-sm font-bold ${totalWeight === 100 ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>إجمالي الأوزان: {totalWeight}%</span></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>المعيار</th><th>النوع</th><th>الوزن</th><th>طريقة الاحتساب</th><th>المستهدف</th><th>الحافز</th><th>الحالة</th><th></th></tr></thead><tbody>{rows.map((r) => <tr key={r.criterion_id}><td>{r.criterion_name}</td><td>{kpiCriterionTypeOptions.find(([id]) => id === inferCriterionType(r))?.[1]}</td><td>{r.weight}%</td><td>{r.scoring_type}</td><td>{r.target_value}</td><td>{r.affects_incentive ? "نعم" : "لا"}</td><td><Status>{r.is_active ? "نشط" : "معطل"}</Status></td><td><button onClick={() => openCriterion(r)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => performanceCriteriaService.deleteKpiCriterion(r.criterion_id).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div>{dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={saveCriterion} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6"><DialogTitle title="تعديل معيار" close={() => setDialog(null)} />{triedSave && validationErrors.length > 0 && <div className="mb-4 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">{validationErrors.map((e) => <p key={e}>{e}</p>)}</div>}<div className="grid gap-4 md:grid-cols-3"><Label t="الوظيفة"><input value={dialog.job_name} onChange={(e) => setDialog({ ...dialog, job_name: e.target.value })} className="field mt-2" /></Label><Label t="اسم المعيار"><input value={dialog.criterion_name} onChange={(e) => setDialog({ ...dialog, criterion_name: e.target.value })} className={`field mt-2 ${triedSave && !String(dialog.criterion_name || "").trim() ? "border-red-300" : ""}`} /></Label><Label t="نوع المعيار"><select value={dialog.criterion_type} onChange={(e) => setDialog({ ...dialog, criterion_type: e.target.value })} className="field mt-2">{kpiCriterionTypeOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></Label><Label t="الوزن النسبي %"><input type="number" value={dialog.weight} onChange={(e) => setDialog({ ...dialog, weight: e.target.value })} className="field mt-2" /></Label><Label t="طريقة التقييم"><select value={dialog.scoring_type} onChange={(e) => setDialog({ ...dialog, scoring_type: e.target.value })} className="field mt-2">{scoringTypes.map((s) => <option key={s}>{s}</option>)}</select></Label><Label t="الدرجة القصوى"><input type="number" value={dialog.max_score || 100} onChange={(e) => setDialog({ ...dialog, max_score: e.target.value })} className="field mt-2" /></Label>{dialog.criterion_type === "operational" && <><Label t="الحد الأدنى"><input type="number" value={dialog.acceptable_threshold || 0} onChange={(e) => setDialog({ ...dialog, acceptable_threshold: e.target.value })} className="field mt-2" /></Label><Label t="الهدف"><input type="number" value={dialog.target_value || 0} onChange={(e) => setDialog({ ...dialog, target_value: e.target.value })} className="field mt-2" /></Label><Label t="الحد الممتاز"><input type="number" value={dialog.excellent_threshold || 0} onChange={(e) => setDialog({ ...dialog, excellent_threshold: e.target.value })} className="field mt-2" /></Label></>}{dialog.criterion_type === "financial" && <><Label t="مبلغ مستهدف"><input type="number" value={dialog.target_value || 0} onChange={(e) => setDialog({ ...dialog, target_value: e.target.value })} className="field mt-2" /></Label><Label t="عملة"><input value={dialog.currency || "SAR"} onChange={(e) => setDialog({ ...dialog, currency: e.target.value })} className="field mt-2" /></Label></>}{dialog.criterion_type === "service_quality" && <><Label t="درجة الرضا"><input type="number" value={dialog.satisfaction_score || 0} onChange={(e) => setDialog({ ...dialog, satisfaction_score: e.target.value })} className="field mt-2" /></Label><Label t="عدد الشكاوى"><input type="number" value={dialog.complaints_count || 0} onChange={(e) => setDialog({ ...dialog, complaints_count: e.target.value })} className="field mt-2" /></Label><Label t="سرعة الخدمة"><input value={dialog.service_speed || ""} onChange={(e) => setDialog({ ...dialog, service_speed: e.target.value })} className="field mt-2" /></Label></>}{showEnhancedCashDenominationFields && <div className="md:col-span-3 rounded-2xl border border-amber-200 bg-amber-50 p-4"><h4 className="font-extrabold text-amber-800">أوزان الفئات النقدية للعداد</h4><div className="mt-3 grid gap-3 md:grid-cols-3">{[["cash200","فئة 200"],["cash500","فئة 500"],["cash1000","فئة 1000"]].map(([key,label]) => <Label key={key} t={label}><input type="number" min="0" value={dialog[key] || 0} onChange={(e) => setDialog({ ...dialog, [key]: e.target.value })} className="field mt-2 bg-white" /></Label>)}</div></div>}<Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label><Label t="ملاحظات"><textarea value={dialog.notes || ""} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}</div>;
+  return <div className="space-y-5"><PageHead title="معايير الأداء" desc="معايير KPI عادلة ومنفصلة حسب الوظيفة" action={<div className="flex gap-2"><button onClick={() => performanceCriteriaService.seedDefaults().then(load).catch((e) => alert(e.message))} className="btn-secondary">توليد المعايير الافتراضية</button><button disabled={can?.("performance_criteria", "can_create") === false} onClick={() => openCriterion()} className="btn-primary"><Plus size={18} /> إضافة معيار</button></div>} /><div className="panel flex flex-wrap gap-3 p-4"><select value={selectedJob} onChange={(e) => setSelectedJob(e.target.value)} className="field max-w-md">{[...new Set([...templates.map((t) => t.job_name), ...Object.keys(defaultJobKpis)])].map((j) => <option key={j}>{j}</option>)}</select><span className={`rounded-xl px-4 py-2 text-sm font-bold ${totalWeight === 100 ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>إجمالي الأوزان: {totalWeight}%</span></div><div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>المعيار</th><th>النوع</th><th>الوزن</th><th>طريقة الاحتساب</th><th>المستهدف</th><th>الحافز</th><th>الحالة</th><th></th></tr></thead><tbody>{rows.map((r) => <tr key={r.criterion_id}><td>{r.criterion_name}</td><td>{criterionTypeOptions.find(([id]) => id === inferCriterionType(r))?.[1] || r.criterion_type}</td><td>{r.weight}%</td><td>{r.scoring_type}</td><td>{r.target_value}</td><td>{r.affects_incentive ? "نعم" : "لا"}</td><td><Status>{r.is_active ? "نشط" : "معطل"}</Status></td><td><button onClick={() => openCriterion(r)} className="p-2 text-blue-600"><Pencil size={16} /></button><button onClick={() => performanceCriteriaService.deleteKpiCriterion(r.criterion_id).then(load).catch((e) => alert(e.message))} className="p-2 text-red-600"><Trash2 size={16} /></button></td></tr>)}</tbody></table></div></div>{dialog && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={saveCriterion} className="panel max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6"><DialogTitle title="تعديل معيار" close={() => setDialog(null)} />{triedSave && validationErrors.length > 0 && <div className="mb-4 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">{validationErrors.map((e) => <p key={e}>{e}</p>)}</div>}<div className="grid gap-4 md:grid-cols-3"><Label t="الوظيفة"><input value={dialog.job_name} onChange={(e) => setDialog({ ...dialog, job_name: e.target.value })} className="field mt-2" /></Label><Label t="اسم المعيار"><input value={dialog.criterion_name} onChange={(e) => setDialog({ ...dialog, criterion_name: e.target.value })} className={`field mt-2 ${triedSave && !String(dialog.criterion_name || "").trim() ? "border-red-300" : ""}`} /></Label><Label t="نوع المعيار"><select value={dialog.criterion_type} onChange={(e) => setDialog({ ...dialog, criterion_type: e.target.value })} className="field mt-2">{[...criterionTypeOptions, ...(dialog.criterion_type && !criterionTypeOptions.some(([id]) => id === dialog.criterion_type) ? [[dialog.criterion_type, dialog.criterion_type]] : [])].map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></Label><Label t="الوزن النسبي %"><input type="number" value={dialog.weight} onChange={(e) => setDialog({ ...dialog, weight: e.target.value })} className="field mt-2" /></Label><Label t="طريقة التقييم"><select value={dialog.scoring_type} onChange={(e) => setDialog({ ...dialog, scoring_type: e.target.value })} className="field mt-2">{[...evaluationMethodOptions.map(([, label]) => label), ...(dialog.scoring_type && !evaluationMethodOptions.some(([, label]) => label === dialog.scoring_type) ? [dialog.scoring_type] : [])].map((label) => <option key={label} value={label}>{label}</option>)}</select></Label><Label t="الدرجة القصوى"><input type="number" value={dialog.max_score || 100} onChange={(e) => setDialog({ ...dialog, max_score: e.target.value })} className="field mt-2" /></Label>{dialog.criterion_type === "operational" && <><Label t="الحد الأدنى"><input type="number" value={dialog.acceptable_threshold || 0} onChange={(e) => setDialog({ ...dialog, acceptable_threshold: e.target.value })} className="field mt-2" /></Label><Label t="الهدف"><input type="number" value={dialog.target_value || 0} onChange={(e) => setDialog({ ...dialog, target_value: e.target.value })} className="field mt-2" /></Label><Label t="الحد الممتاز"><input type="number" value={dialog.excellent_threshold || 0} onChange={(e) => setDialog({ ...dialog, excellent_threshold: e.target.value })} className="field mt-2" /></Label></>}{dialog.criterion_type === "financial" && <><Label t="مبلغ مستهدف"><input type="number" value={dialog.target_value || 0} onChange={(e) => setDialog({ ...dialog, target_value: e.target.value })} className="field mt-2" /></Label><Label t="عملة"><input value={dialog.currency || "SAR"} onChange={(e) => setDialog({ ...dialog, currency: e.target.value })} className="field mt-2" /></Label></>}{dialog.criterion_type === "service_quality" && <><Label t="درجة الرضا"><input type="number" value={dialog.satisfaction_score || 0} onChange={(e) => setDialog({ ...dialog, satisfaction_score: e.target.value })} className="field mt-2" /></Label><Label t="عدد الشكاوى"><input type="number" value={dialog.complaints_count || 0} onChange={(e) => setDialog({ ...dialog, complaints_count: e.target.value })} className="field mt-2" /></Label><Label t="سرعة الخدمة"><input value={dialog.service_speed || ""} onChange={(e) => setDialog({ ...dialog, service_speed: e.target.value })} className="field mt-2" /></Label></>}{showEnhancedCashDenominationFields && <div className="md:col-span-3 rounded-2xl border border-amber-200 bg-amber-50 p-4"><h4 className="font-extrabold text-amber-800">أوزان الفئات النقدية للعداد</h4><div className="mt-3 grid gap-3 md:grid-cols-3">{[["cash200","فئة 200"],["cash500","فئة 500"],["cash1000","فئة 1000"]].map(([key,label]) => <Label key={key} t={label}><input type="number" min="0" value={dialog[key] || 0} onChange={(e) => setDialog({ ...dialog, [key]: e.target.value })} className="field mt-2 bg-white" /></Label>)}</div></div>}<Label t="الحالة"><select value={String(dialog.is_active !== false)} onChange={(e) => setDialog({ ...dialog, is_active: e.target.value === "true" })} className="field mt-2"><option value="true">نشط</option><option value="false">معطل</option></select></Label><Label t="ملاحظات"><textarea value={dialog.notes || ""} onChange={(e) => setDialog({ ...dialog, notes: e.target.value })} className="field mt-2 !h-auto py-3" /></Label></div><DialogActions close={() => setDialog(null)} /></form></div>}</div>;
 }
 
 function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompany, can }) {

@@ -279,6 +279,8 @@ export const tenantAwareTables = new Set([
   "performance_job_templates",
   "performance_kpi_criteria",
   "performance_kpi_scores",
+  "kpi_criterion_types",
+  "kpi_evaluation_methods",
   "daily_operations",
   "attendance_records",
   "attendance_work_periods",

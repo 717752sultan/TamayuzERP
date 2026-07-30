@@ -108,6 +108,7 @@ const CANONICAL_HR_PAGE_KEYS = [
   "performance_criteria",
   "evaluations",
   "performance_kpi_scores",
+  "kpi_settings",
   "productivity",
   "incentives",
   "top",
