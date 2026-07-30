@@ -1,14 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, MapPin, Plus, RefreshCw, Save, Smartphone, X } from "lucide-react";
+import { Download, Eye, MapPin, Plus, RefreshCw, Save, Smartphone, X } from "lucide-react";
 import {
   defaultEmployeeAppSettings,
   defaultEmployeeRequestTypes,
   employeeAppAdminService,
   employeePortalPermissionModules,
 } from "../../services/employeeAppAdmin";
+import { exportWorkbook } from "../../services/reportExport";
+import { getTodayDateOnly } from "../../services/attendanceGeo";
 
-const tabs = ["الإعدادات العامة", "صلاحيات بوابة الموظف", "مواقع الحضور", "أجهزة الموظفين", "الطلبات والنماذج", "معاينة بوابة الموظف"];
+const tabs = ["لوحة متابعة الموظفين", "الإعدادات العامة", "صلاحيات بوابة الموظف", "مواقع الدخول والخروج", "أجهزة الموظفين", "الطلبات والنماذج", "معاينة بوابة الموظف"];
 const permissionActions = [["can_view", "عرض"], ["can_create", "إنشاء"], ["can_upload", "رفع"], ["can_cancel", "إلغاء"], ["can_approve", "اعتماد"]];
+const purposeLabels = { check_in: "دخول فقط", check_out: "خروج فقط", both: "دخول وخروج" };
+const eventLabels = { check_in: "دخول", check_out: "خروج" };
 
 function Head({ title, desc, action }) {
   return (
@@ -45,6 +49,9 @@ export default function EmployeeAppAdminSettingsPage({ currentCompany, currentUs
   const [requestTypes, setRequestTypes] = useState([]);
   const [locationDialog, setLocationDialog] = useState(null);
   const [requestDialog, setRequestDialog] = useState(null);
+  const [dashboard, setDashboard] = useState({ cards: {}, summaryRows: [], outOfGeofenceRows: [], latestRows: [] });
+  const [dashboardFilters, setDashboardFilters] = useState({ date: getTodayDateOnly(), branch: "all", employeeId: "", status: "all", scope: "all", eventType: "all" });
+  const [details, setDetails] = useState(null);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const canManage = can?.("employee_app_settings", "can_configure") !== false || can?.("employee_app_settings", "can_edit") !== false;
@@ -94,6 +101,20 @@ export default function EmployeeAppAdminSettingsPage({ currentCompany, currentUs
 
   useEffect(() => { load(); }, [load]);
 
+  const loadDashboard = useCallback(async () => {
+    if (!companyId) return;
+    setLoading(true);
+    try {
+      setDashboard(await employeeAppAdminService.loadEmployeeAttendanceDashboard(companyId, dashboardFilters, employeeOptions));
+    } catch (error) {
+      setMessage(error.message || "تعذر تحميل لوحة متابعة الموظفين");
+    } finally {
+      setLoading(false);
+    }
+  }, [companyId, dashboardFilters, employeeOptions]);
+
+  useEffect(() => { if (activeTab === "لوحة متابعة الموظفين") loadDashboard(); }, [activeTab, loadDashboard]);
+
   const updateSetting = (key, value) => setSettings((prev) => ({ ...prev, [key]: value }));
   const updatePermission = (index, key, value) => {
     setPermissions((rows) => rows.map((row, rowIndex) => {
@@ -119,6 +140,12 @@ export default function EmployeeAppAdminSettingsPage({ currentCompany, currentUs
       setMessage(error.message);
     }
   };
+
+  const exportDashboard = () => exportWorkbook([
+    { name: "حضور اليوم", rows: dashboard.summaryRows || [] },
+    { name: "خارج النطاق", rows: dashboard.outOfGeofenceRows || [] },
+    { name: "آخر العمليات", rows: dashboard.latestRows || [] },
+  ], `employee-attendance-dashboard-${dashboardFilters.date}.xlsx`);
 
   const savePermissions = async () => {
     try {
@@ -190,6 +217,12 @@ export default function EmployeeAppAdminSettingsPage({ currentCompany, currentUs
     latitude: "",
     longitude: "",
     allowed_radius_meters: 100,
+    location_purpose: "both",
+    allow_check_in: true,
+    allow_check_out: true,
+    block_check_in_here: false,
+    block_check_out_here: false,
+    priority: 1,
     is_active: true,
     notes: "",
   });
@@ -228,6 +261,49 @@ export default function EmployeeAppAdminSettingsPage({ currentCompany, currentUs
       </div>
       {loading && <div className="panel p-6 text-center text-sm font-bold text-slate-500">جاري تحميل البيانات...</div>}
 
+      {activeTab === "لوحة متابعة الموظفين" && (
+        <section className="space-y-5">
+          <div className="panel p-5">
+            <Head title="لوحة متابعة الموظفين" desc="متابعة دخول وخروج الموظفين ومواقعهم وأجهزتهم ومحاولات الرفض." action={<div className="flex gap-2"><button onClick={loadDashboard} className="btn-primary"><RefreshCw size={17} /> تحديث</button><button onClick={exportDashboard} className="btn-secondary"><Download size={17} /> Excel</button></div>} />
+            <div className="grid gap-3 md:grid-cols-6">
+              <input type="date" value={dashboardFilters.date} onChange={(event) => setDashboardFilters({ ...dashboardFilters, date: event.target.value })} className="field" />
+              <select value={dashboardFilters.branch} onChange={(event) => setDashboardFilters({ ...dashboardFilters, branch: event.target.value })} className="field"><option value="all">كل الفروع</option>{[...new Set(employeeOptions.map((e) => e.branch).filter(Boolean))].map((branch) => <option key={branch} value={branch}>{branch}</option>)}</select>
+              <select value={dashboardFilters.employeeId} onChange={(event) => setDashboardFilters({ ...dashboardFilters, employeeId: event.target.value })} className="field"><option value="">كل الموظفين</option>{employeeOptions.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select>
+              <select value={dashboardFilters.status} onChange={(event) => setDashboardFilters({ ...dashboardFilters, status: event.target.value })} className="field"><option value="all">كل الحالات</option><option>لم يسجل دخول</option><option>داخل الدوام</option><option>خرج</option></select>
+              <select value={dashboardFilters.scope} onChange={(event) => setDashboardFilters({ ...dashboardFilters, scope: event.target.value })} className="field"><option value="all">داخل وخارج النطاق</option><option value="inside">داخل النطاق</option><option value="outside">خارج النطاق</option></select>
+              <select value={dashboardFilters.eventType} onChange={(event) => setDashboardFilters({ ...dashboardFilters, eventType: event.target.value })} className="field"><option value="all">كل الأحداث</option><option value="check_in">دخول</option><option value="check_out">خروج</option></select>
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-4">
+            {[
+              ["إجمالي الموظفين", dashboard.cards?.totalEmployees],
+              ["سجّلوا دخول اليوم", dashboard.cards?.checkedInToday],
+              ["سجّلوا خروج اليوم", dashboard.cards?.checkedOutToday],
+              ["لم يسجلوا دخول", dashboard.cards?.notCheckedIn],
+              ["المتأخرون عن الدوام", dashboard.cards?.lateEmployees],
+              ["إجمالي دقائق التأخير", dashboard.cards?.totalLateMinutes],
+              ["خارج نطاق الموقع", dashboard.cards?.outsideGeofence],
+              ["محاولات مرفوضة", dashboard.cards?.rejectedAttempts],
+              ["أجهزة نشطة", dashboard.cards?.activeDevices],
+            ].map(([label, value]) => <div key={label} className="panel p-4"><p className="text-xs font-bold text-slate-500">{label}</p><b className="mt-1 block text-2xl text-slate-900">{value ?? 0}</b></div>)}
+          </div>
+          <div className="panel p-5">
+            <Head title="جدول حضور اليوم" desc="أول دخول وآخر خروج وحالة الموقع والتأخير لكل موظف." />
+            <div className="table-wrap"><table><thead><tr>{["الموظف", "الفرع", "أول دخول", "آخر خروج", "حالة الحضور", "التأخير بالدقائق", "موقع الدخول", "موقع الخروج", "المسافة", "حالة الموقع", "الجهاز", "إجراء"].map((h) => <th key={h}>{h}</th>)}</tr></thead><tbody>{dashboard.summaryRows?.length ? dashboard.summaryRows.map((row) => <tr key={row.employee_id}><td>{row.employee_name}</td><td>{row.branch}</td><td>{row.first_check_in || "—"}</td><td>{row.last_check_out || "—"}</td><td>{row.attendance_status}</td><td>{row.late_minutes}</td><td>{row.check_in_location}</td><td>{row.check_out_location}</td><td>{row.distance_meters} م</td><td>{row.geofence_status === "inside" ? "داخل النطاق" : row.geofence_status === "outside" ? "خارج النطاق" : "غير متاح"}</td><td className="max-w-xs truncate">{row.device_info || "—"}</td><td><button onClick={() => setDetails(row)} className="text-brand-700 font-bold">عرض التفاصيل</button></td></tr>) : <tr><td colSpan={12} className="py-8 text-center text-slate-400">لا توجد بيانات حضور لهذا التاريخ</td></tr>}</tbody></table></div>
+          </div>
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div className="panel p-5">
+              <Head title="محاولات خارج النطاق" />
+              <div className="table-wrap"><table><thead><tr>{["الموظف", "نوع العملية", "الوقت", "الإحداثيات", "الموقع المسموح", "المسافة", "سبب الرفض", "الجهاز"].map((h) => <th key={h}>{h}</th>)}</tr></thead><tbody>{dashboard.outOfGeofenceRows?.length ? dashboard.outOfGeofenceRows.map((row) => <tr key={row.event_id}><td>{row.employee_name}</td><td>{eventLabels[row.event_type] || row.event_type}</td><td>{row.event_time}</td><td><a className="text-brand-700" target="_blank" rel="noreferrer" href={`https://www.google.com/maps?q=${row.latitude},${row.longitude}`}>{row.latitude}, {row.longitude}</a></td><td>{row.matched_location_name || "—"}</td><td>{Math.round(row.distance_from_allowed_location || 0)} م</td><td>{row.rejection_reason || "خارج النطاق"}</td><td className="max-w-xs truncate">{row.device_info}</td></tr>) : <tr><td colSpan={8} className="py-8 text-center text-slate-400">لا توجد محاولات خارج النطاق</td></tr>}</tbody></table></div>
+            </div>
+            <div className="panel p-5">
+              <Head title="آخر عمليات الحضور" />
+              <div className="table-wrap"><table><thead><tr>{["الوقت", "الموظف", "نوع الحدث", "الفرع", "الموقع", "حالة النطاق", "دقة GPS", "الجهاز"].map((h) => <th key={h}>{h}</th>)}</tr></thead><tbody>{dashboard.latestRows?.length ? dashboard.latestRows.map((row) => <tr key={row.event_id}><td>{row.event_time}</td><td>{row.employee_name}</td><td>{eventLabels[row.event_type] || row.event_type}</td><td>{row.branch}</td><td>{row.matched_location_name || "—"}</td><td>{row.geofence_status}</td><td>{Math.round(row.accuracy || 0)} م</td><td className="max-w-xs truncate">{row.device_info}</td></tr>) : <tr><td colSpan={8} className="py-8 text-center text-slate-400">لا توجد عمليات حضور</td></tr>}</tbody></table></div>
+            </div>
+          </div>
+        </section>
+      )}
+
       {activeTab === "الإعدادات العامة" && (
         <section className="panel p-5">
           <Head title="الإعدادات العامة" desc="هذه الإعدادات تتحكم بما يظهر ويعمل داخل بوابة الموظف." action={<button onClick={saveSettings} className="btn-primary"><Save size={17} /> حفظ</button>} />
@@ -245,6 +321,11 @@ export default function EmployeeAppAdminSettingsPage({ currentCompany, currentUs
             <Toggle label="السماح بالإشعارات" checked={settings.notifications_enabled !== false} onChange={(value) => updateSetting("notifications_enabled", value)} />
             <Toggle label="تفعيل تسجيل الأجهزة" checked={settings.device_registration_enabled === true} onChange={(value) => updateSetting("device_registration_enabled", value)} />
             <Toggle label="السماح بجهاز واحد فقط لكل موظف" checked={settings.single_device_only === true} onChange={(value) => updateSetting("single_device_only", value)} />
+            <Toggle label="احتساب التأخير بعد السماح" checked={settings.count_late_after_grace !== false} onChange={(value) => updateSetting("count_late_after_grace", value)} />
+            <Toggle label="حفظ محاولات الحضور المرفوضة" checked={settings.save_rejected_attendance_attempts !== false} onChange={(value) => updateSetting("save_rejected_attendance_attempts", value)} />
+            <Field label="وقت الدخول الافتراضي"><input type="time" value={settings.default_check_in_time || "08:00"} onChange={(event) => updateSetting("default_check_in_time", event.target.value)} className="field mt-2" /></Field>
+            <Field label="وقت الخروج الافتراضي"><input type="time" value={settings.default_check_out_time || "17:00"} onChange={(event) => updateSetting("default_check_out_time", event.target.value)} className="field mt-2" /></Field>
+            <Field label="فترة السماح بالدقائق"><input type="number" min="0" value={settings.grace_period_minutes || 15} onChange={(event) => updateSetting("grace_period_minutes", Number(event.target.value || 0))} className="field mt-2" /></Field>
             <Field label="الحد الأقصى لدقة GPS بالمتر">
               <input type="number" min="10" value={settings.max_gps_accuracy_meters || 100} onChange={(event) => updateSetting("max_gps_accuracy_meters", Number(event.target.value || 100))} className="field mt-2" />
             </Field>
@@ -278,20 +359,23 @@ export default function EmployeeAppAdminSettingsPage({ currentCompany, currentUs
         </section>
       )}
 
-      {activeTab === "مواقع الحضور" && (
+      {activeTab === "مواقع الدخول والخروج" && (
         <section className="panel p-5">
-          <Head title="مواقع الحضور" desc="موقع الموظف الخاص له الأولوية، ثم موقع الفرع، ثم الموقع العام للشركة." action={<button onClick={newLocation} className="btn-primary"><Plus size={17} /> إضافة موقع</button>} />
+          <Head title="مواقع الدخول والخروج" desc="يمكن تخصيص مواقع للدخول فقط أو الخروج فقط أو كليهما. موقع الموظف الخاص له الأولوية، ثم موقع الفرع، ثم الموقع العام للشركة." action={<button onClick={newLocation} className="btn-primary"><Plus size={17} /> إضافة موقع</button>} />
           <div className="table-wrap">
             <table>
-              <thead><tr><th>الموقع</th><th>الفرع</th><th>الموظف</th><th>الإحداثيات</th><th>النطاق</th><th>الحالة</th><th>إجراءات</th></tr></thead>
+              <thead><tr><th>الموقع</th><th>الفرع</th><th>الموظف</th><th>نوع الموقع</th><th>الإحداثيات</th><th>النطاق</th><th>قيود</th><th>الأولوية</th><th>الحالة</th><th>إجراءات</th></tr></thead>
               <tbody>
                 {locations.map((location) => (
                   <tr key={location.location_id}>
                     <td>{location.location_name}</td>
                     <td>{location.branch || "كل الفروع"}</td>
                     <td>{employeeOptions.find((employee) => employee.id === location.employee_id)?.name || location.employee_id || "كل الموظفين"}</td>
+                    <td><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold">{purposeLabels[location.location_purpose] || "دخول وخروج"}</span></td>
                     <td>{location.latitude}, {location.longitude}</td>
                     <td>{location.allowed_radius_meters} م</td>
+                    <td className="space-x-1 space-x-reverse">{location.block_check_in_here && <span className="rounded-full bg-red-50 px-2 py-1 text-xs text-red-700">محظور للدخول</span>}{location.block_check_out_here && <span className="rounded-full bg-red-50 px-2 py-1 text-xs text-red-700">محظور للخروج</span>}</td>
+                    <td>{location.priority || 1}</td>
                     <td>{location.is_active ? "نشط" : "معطل"}</td>
                     <td><button onClick={() => setLocationDialog(location)} className="p-2 text-blue-700">تعديل</button><button onClick={() => disableLocation(location)} className="p-2 text-red-700">تعطيل</button></td>
                   </tr>
@@ -359,9 +443,18 @@ export default function EmployeeAppAdminSettingsPage({ currentCompany, currentUs
               <Field label="اسم الموقع"><input required value={locationDialog.location_name || ""} onChange={(event) => setLocationDialog({ ...locationDialog, location_name: event.target.value })} className="field mt-2" /></Field>
               <Field label="الفرع"><input value={locationDialog.branch || ""} onChange={(event) => setLocationDialog({ ...locationDialog, branch: event.target.value })} className="field mt-2" placeholder="كل الفروع" /></Field>
               <Field label="الموظف"><select value={locationDialog.employee_id || ""} onChange={(event) => setLocationDialog({ ...locationDialog, employee_id: event.target.value })} className="field mt-2"><option value="">كل الموظفين</option>{employeeOptions.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></Field>
+              <Field label="نوع الموقع"><select value={locationDialog.location_purpose || "both"} onChange={(event) => {
+                const purpose = event.target.value;
+                setLocationDialog({ ...locationDialog, location_purpose: purpose, allow_check_in: purpose !== "check_out", allow_check_out: purpose !== "check_in" });
+              }} className="field mt-2"><option value="check_in">دخول فقط</option><option value="check_out">خروج فقط</option><option value="both">دخول وخروج</option></select></Field>
               <Field label="خط العرض"><input required type="number" step="any" value={locationDialog.latitude || ""} onChange={(event) => setLocationDialog({ ...locationDialog, latitude: event.target.value })} className="field mt-2" /></Field>
               <Field label="خط الطول"><input required type="number" step="any" value={locationDialog.longitude || ""} onChange={(event) => setLocationDialog({ ...locationDialog, longitude: event.target.value })} className="field mt-2" /></Field>
               <Field label="النطاق بالمتر"><input type="number" min="10" value={locationDialog.allowed_radius_meters || 100} onChange={(event) => setLocationDialog({ ...locationDialog, allowed_radius_meters: event.target.value })} className="field mt-2" /></Field>
+              <Field label="أولوية الموقع"><input type="number" min="1" value={locationDialog.priority || 1} onChange={(event) => setLocationDialog({ ...locationDialog, priority: Number(event.target.value || 1) })} className="field mt-2" /></Field>
+              <Toggle label="السماح بتسجيل الدخول من هذا الموقع" checked={locationDialog.allow_check_in !== false} onChange={(value) => setLocationDialog({ ...locationDialog, allow_check_in: value })} />
+              <Toggle label="السماح بتسجيل الخروج من هذا الموقع" checked={locationDialog.allow_check_out !== false} onChange={(value) => setLocationDialog({ ...locationDialog, allow_check_out: value })} />
+              <Toggle label="منع الدخول من هذا الموقع" checked={locationDialog.block_check_in_here === true} onChange={(value) => setLocationDialog({ ...locationDialog, block_check_in_here: value })} />
+              <Toggle label="منع الخروج من هذا الموقع" checked={locationDialog.block_check_out_here === true} onChange={(value) => setLocationDialog({ ...locationDialog, block_check_out_here: value })} />
               <Toggle label="نشط" checked={locationDialog.is_active !== false} onChange={(value) => setLocationDialog({ ...locationDialog, is_active: value })} />
               <Field label="ملاحظات"><textarea value={locationDialog.notes || ""} onChange={(event) => setLocationDialog({ ...locationDialog, notes: event.target.value })} className="field mt-2 !h-24 py-3" /></Field>
               <div className="flex items-end"><button type="button" onClick={useCurrentPosition} className="btn-secondary"><MapPin size={17} /> استخدام موقعي الحالي</button></div>
@@ -370,6 +463,7 @@ export default function EmployeeAppAdminSettingsPage({ currentCompany, currentUs
           </form>
         </div>
       )}
+      {details && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><div className="panel w-full max-w-2xl p-6"><div className="mb-4 flex items-center"><h3 className="text-xl font-extrabold">تفاصيل حضور الموظف</h3><button type="button" onClick={() => setDetails(null)} className="mr-auto p-2"><X /></button></div><div className="grid gap-3 text-sm md:grid-cols-2">{Object.entries(details).map(([key, value]) => <div key={key} className="rounded-2xl bg-slate-50 p-3"><b className="block text-slate-500">{key}</b><span>{String(value || "—")}</span></div>)}</div></div></div>}
 
       {requestDialog && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">

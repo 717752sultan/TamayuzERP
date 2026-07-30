@@ -20,6 +20,12 @@ const normalizeLocation = (row = {}) => ({
   latitude: Number(row.latitude || 0),
   longitude: Number(row.longitude || 0),
   allowed_radius_meters: Number(row.allowed_radius_meters || row.allowedRadiusMeters || 100),
+  location_purpose: row.location_purpose || row.locationPurpose || "both",
+  allow_check_in: row.allow_check_in !== false,
+  allow_check_out: row.allow_check_out !== false,
+  block_check_in_here: row.block_check_in_here === true,
+  block_check_out_here: row.block_check_out_here === true,
+  priority: Number(row.priority || 1),
   is_active: row.is_active !== false,
   notes: row.notes || "",
   created_at: row.created_at || new Date().toISOString(),
@@ -43,6 +49,13 @@ const normalizeEvent = (row = {}) => ({
   allowed_radius_meters: Number(row.allowed_radius_meters || 0),
   distance_from_allowed_location: numberOrNull(row.distance_from_allowed_location),
   geofence_status: row.geofence_status || "unavailable",
+  matched_location_id: row.matched_location_id || "",
+  matched_location_name: row.matched_location_name || "",
+  matched_location_purpose: row.matched_location_purpose || "",
+  event_status: row.event_status || "accepted",
+  rejection_reason: row.rejection_reason || "",
+  is_late: row.is_late === true,
+  late_minutes: Number(row.late_minutes || 0),
   source: row.source || "employee_app",
   device_info: row.device_info || "",
   notes: row.notes || "",
@@ -80,9 +93,63 @@ export const validateEmployeeLocation = (currentLocation = {}, allowedLocation =
   };
 };
 
+const purposeLabel = (purpose = "both") => purpose === "check_in" ? "دخول فقط" : purpose === "check_out" ? "خروج فقط" : "دخول وخروج";
+
+const isLocationAllowedForEvent = (location = {}, eventType = "check_in") => {
+  if (eventType === "check_in") return location.allow_check_in !== false && location.block_check_in_here !== true && location.location_purpose !== "check_out";
+  return location.allow_check_out !== false && location.block_check_out_here !== true && location.location_purpose !== "check_in";
+};
+
+export const findNearestAttendanceLocation = (currentLocation = {}, locations = []) => {
+  return [...(locations || [])]
+    .filter((location) => location?.latitude && location?.longitude && location.is_active !== false)
+    .map((location) => ({
+      ...location,
+      distance: calculateDistanceMeters(Number(currentLocation.latitude), Number(currentLocation.longitude), Number(location.latitude), Number(location.longitude)),
+    }))
+    .sort((a, b) => Number(a.priority || 1) - Number(b.priority || 1) || a.distance - b.distance)[0] || null;
+};
+
+export const validateEmployeeLocationForEvent = (currentLocation = {}, candidateLocations = [], eventType = "check_in", options = {}) => {
+  const active = (candidateLocations || []).filter((location) => location.is_active !== false);
+  if (!active.length) {
+    return options.allowWithoutLocation
+      ? { status: "unavailable", allowed: true, distance: null, matchedLocation: null, message: "لم يتم تحديد موقع حضور لهذا الموظف أو الفرع" }
+      : { status: "unavailable", allowed: false, distance: null, matchedLocation: null, message: "لم يتم تحديد موقع حضور لهذا الموظف أو الفرع" };
+  }
+  const nearestAny = findNearestAttendanceLocation(currentLocation, active);
+  if (nearestAny && nearestAny.distance <= Number(nearestAny.allowed_radius_meters || 100) && !isLocationAllowedForEvent(nearestAny, eventType)) {
+    return {
+      status: "blocked",
+      allowed: false,
+      distance: nearestAny.distance,
+      matchedLocation: nearestAny,
+      message: eventType === "check_in"
+        ? "هذا الموقع مخصص للخروج ولا يسمح بتسجيل الدخول منه."
+        : "هذا الموقع مخصص للدخول ولا يسمح بتسجيل الخروج منه.",
+    };
+  }
+  const allowedLocations = active.filter((location) => isLocationAllowedForEvent(location, eventType));
+  const nearest = findNearestAttendanceLocation(currentLocation, allowedLocations);
+  if (!nearest) {
+    return { status: "blocked", allowed: false, distance: null, matchedLocation: nearestAny, message: eventType === "check_in" ? "هذا الموقع مخصص للخروج ولا يسمح بتسجيل الدخول منه." : "هذا الموقع مخصص للدخول ولا يسمح بتسجيل الخروج منه." };
+  }
+  const radius = Number(nearest.allowed_radius_meters || 100);
+  const inside = nearest.distance <= radius;
+  return {
+    status: inside ? "inside" : "outside",
+    allowed: inside,
+    distance: nearest.distance,
+    matchedLocation: nearest,
+    message: inside ? `الموظف داخل نطاق موقع ${purposeLabel(nearest.location_purpose)}` : eventType === "check_in" ? "أنت خارج نطاق موقع الدخول المسموح." : "أنت خارج نطاق موقع الخروج المسموح.",
+  };
+};
+
 export const attendanceGeoService = {
   calculateDistanceMeters,
   validateEmployeeLocation,
+  validateEmployeeLocationForEvent,
+  findNearestAttendanceLocation,
   getTodayDateOnly,
 
   async loadAttendanceLocations(companyId) {
@@ -124,6 +191,15 @@ export const attendanceGeoService = {
       || locations.find((item) => item.is_active && item.branch && item.branch === branch && !item.employee_id)
       || locations.find((item) => item.is_active && !item.branch && !item.employee_id)
       || null;
+  },
+
+  async getEmployeeAllowedLocations(companyId, employeeId, branch = "") {
+    const locations = await this.loadAttendanceLocations(companyId);
+    const employeeLocations = locations.filter((item) => item.is_active && item.employee_id === employeeId);
+    if (employeeLocations.length) return employeeLocations;
+    const branchLocations = locations.filter((item) => item.is_active && item.branch && item.branch === branch && !item.employee_id);
+    if (branchLocations.length) return branchLocations;
+    return locations.filter((item) => item.is_active && !item.branch && !item.employee_id);
   },
 
   async saveEmployeeAttendanceEvent(payload) {

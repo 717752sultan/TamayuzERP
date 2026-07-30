@@ -4,6 +4,10 @@ import { attendanceService } from "../../services/attendance";
 import { employeeAppService, dateOnly } from "../../services/employeeApp";
 
 const timeLabel = (value) => value ? new Date(value).toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" }) : "—";
+const minutesOf = (time = "00:00") => {
+  const [h, m] = String(time || "00:00").slice(0, 5).split(":").map(Number);
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+};
 
 export default function EmployeeAttendancePage({ company, employeeId, user, settings = {}, allowed = () => true }) {
   const [profile, setProfile] = useState({});
@@ -38,14 +42,17 @@ export default function EmployeeAttendancePage({ company, employeeId, user, sett
       if (appSettings.max_gps_accuracy_meters && currentLocation.accuracy > Number(appSettings.max_gps_accuracy_meters)) {
         return setMessage(`دقة GPS الحالية (${Math.round(currentLocation.accuracy)} م) أعلى من الحد المسموح (${appSettings.max_gps_accuracy_meters} م).`);
       }
-      const allowedLocation = await employeeAppService.getAllowedAttendanceLocation(company.company_id, employeeId, profile.branch || user.branch || "");
-      const validation = employeeAppService.validateGeofence(currentLocation, allowedLocation, {
+      const allowedLocations = await employeeAppService.getAllowedAttendanceLocations(company.company_id, employeeId, profile.branch || user.branch || "");
+      const validation = employeeAppService.validateGeofenceForEvent(currentLocation, allowedLocations, eventType, {
         allowWithoutLocation: appSettings.geofence_required === false || appSettings.allow_attendance_without_location === true,
       });
       if (eventType === "check_out" && validation.status === "outside" && appSettings.allow_checkout_outside_geofence === true) validation.allowed = true;
-      if (!validation.allowed) return setMessage(validation.message || "أنت خارج نطاق موقع العمل المسموح.");
       const now = new Date();
-      await employeeAppService.saveEmployeeAttendanceEvent({
+      const matchedLocation = validation.matchedLocation || null;
+      const scheduledStart = minutesOf(appSettings.default_check_in_time || "08:00") + Number(appSettings.grace_period_minutes || 0);
+      const actualMinutes = now.getHours() * 60 + now.getMinutes();
+      const lateMinutes = eventType === "check_in" && appSettings.count_late_after_grace !== false ? Math.max(0, actualMinutes - scheduledStart) : 0;
+      const eventPayload = {
         event_id: crypto.randomUUID?.() || `EVT-${Date.now()}`,
         company_id: company.company_id,
         employee_id: employeeId,
@@ -57,15 +64,27 @@ export default function EmployeeAttendancePage({ company, employeeId, user, sett
         latitude: currentLocation.latitude,
         longitude: currentLocation.longitude,
         accuracy: currentLocation.accuracy,
-        allowed_latitude: allowedLocation?.latitude || null,
-        allowed_longitude: allowedLocation?.longitude || null,
-        allowed_radius_meters: allowedLocation?.allowed_radius_meters || null,
+        allowed_latitude: matchedLocation?.latitude || null,
+        allowed_longitude: matchedLocation?.longitude || null,
+        allowed_radius_meters: matchedLocation?.allowed_radius_meters || null,
         distance_from_allowed_location: validation.distance,
         geofence_status: validation.status,
+        matched_location_id: matchedLocation?.location_id || "",
+        matched_location_name: matchedLocation?.location_name || "",
+        matched_location_purpose: matchedLocation?.location_purpose || "",
+        event_status: validation.allowed ? "accepted" : "rejected",
+        rejection_reason: validation.allowed ? "" : (validation.message || "أنت خارج نطاق موقع العمل المسموح."),
+        is_late: lateMinutes > 0,
+        late_minutes: lateMinutes,
         source: "employee_app",
         device_info: navigator.userAgent,
         notes: "",
-      });
+      };
+      if (!validation.allowed) {
+        if (appSettings.save_rejected_attendance_attempts !== false) await employeeAppService.saveEmployeeAttendanceEvent(eventPayload);
+        return setMessage(validation.message || "أنت خارج نطاق موقع العمل المسموح.");
+      }
+      await employeeAppService.saveEmployeeAttendanceEvent(eventPayload);
       const clock = now.toTimeString().slice(0, 5);
       if (eventType === "check_in") await attendanceService.checkInEmployee(profile, today, clock, {}, { company_id: company.company_id, created_by: user.username || "employee_app" });
       else {

@@ -119,6 +119,9 @@ export const employeeAppService = {
   getAllowedAttendanceLocation(companyId, employeeId, branch) {
     return attendanceGeoService.getEmployeeAllowedLocation(companyId, employeeId, branch);
   },
+  getAllowedAttendanceLocations(companyId, employeeId, branch) {
+    return attendanceGeoService.getEmployeeAllowedLocations(companyId, employeeId, branch);
+  },
   calculateDistanceMeters,
   validateGeofence(currentLocation, allowedLocation, options = {}) {
     const result = validateEmployeeLocation(currentLocation, allowedLocation);
@@ -126,6 +129,9 @@ export const employeeAppService = {
       return { ...result, allowed: false, message: "لم يتم إعداد موقع حضور لهذا الموظف أو الفرع" };
     }
     return result;
+  },
+  validateGeofenceForEvent(currentLocation, allowedLocations, eventType, options = {}) {
+    return attendanceGeoService.validateEmployeeLocationForEvent(currentLocation, allowedLocations, eventType, options);
   },
   saveEmployeeAttendanceEvent(payload) {
     return attendanceGeoService.saveEmployeeAttendanceEvent(payload);
