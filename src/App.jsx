@@ -117,6 +117,7 @@ import HRFoundationPage from "./components/hr/HRFoundationPage";
 import HRExecutiveDashboard from "./components/hr/HRExecutiveDashboard";
 import AttendanceCalculationPage from "./components/hr/AttendanceCalculationPage";
 import EmployeeSelfAttendancePage from "./components/hr/EmployeeSelfAttendancePage";
+import EmployeePortalApp, { EmployeeLoginPage } from "./components/employee/EmployeePortalApp";
 import { EmployeeEffectivenessPage, EmployeesGridPage, UserActivityLogsPage } from "./components/hr/EmployeeSubPages";
 import SystemSettingsPage from "./components/settings/SystemSettingsPage";
 import GroupedSidebarNav from "./components/navigation/GroupedSidebarNav";
@@ -961,6 +962,10 @@ export default function App() {
       unsubNotifications?.();
     };
   }, [logged, role, currentUserState?.user_id, currentCompany?.company_id]);
+  const employeePortalPaths = ["/employee-login", "/employee", "/employee/profile", "/employee/attendance", "/employee/requests", "/employee/requests/new", "/employee/notifications", "/employee/schedule"];
+  if (employeePortalPaths.includes(window.location.pathname)) {
+    return window.location.pathname === "/employee-login" ? <EmployeeLoginPage /> : <EmployeePortalApp />;
+  }
   if (!logged)
     return (window.location.pathname === "/platform-login" || window.location.pathname === "/admin-platform-login") ? (
       <PlatformLogin

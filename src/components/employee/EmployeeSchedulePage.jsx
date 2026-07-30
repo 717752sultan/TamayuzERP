@@ -1,0 +1,6 @@
+import React from "react";
+import { CalendarDays } from "lucide-react";
+
+export default function EmployeeSchedulePage({ user }) {
+  return <div className="space-y-4"><section className="rounded-[2rem] bg-white p-5 shadow-sm"><div className="flex items-center gap-3"><div className="grid h-12 w-12 place-items-center rounded-2xl bg-violet-50 text-violet-700"><CalendarDays /></div><div><h2 className="text-xl font-black">جدول الدوام</h2><p className="text-sm text-slate-500">سيتم ربط الجدول التفصيلي ببيانات المناوبات في المرحلة التالية.</p></div></div></section><section className="grid gap-3 md:grid-cols-2"><div className="rounded-3xl bg-white p-4 shadow-sm"><p className="text-xs font-bold text-slate-400">مناوبة اليوم</p><b className="mt-1 block">دوام افتراضي</b><p className="mt-2 text-sm text-slate-500">08:00 - 16:00</p></div><div className="rounded-3xl bg-white p-4 shadow-sm"><p className="text-xs font-bold text-slate-400">الفرع</p><b className="mt-1 block">{user?.branch || "غير محدد"}</b></div></section><div className="rounded-[2rem] bg-amber-50 p-4 text-sm font-bold text-amber-800">لا يوجد جدول مناوبات مخصص ظاهر لهذا الموظف حالياً. هذه صفحة جاهزة للربط مع جداول المناوبات الحالية.</div></div>;
+}
