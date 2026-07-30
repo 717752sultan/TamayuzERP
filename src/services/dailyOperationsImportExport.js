@@ -2,6 +2,7 @@ import * as XLSX from "xlsx";
 import {
   dailyOperationLogicalKey,
   dailyOperationsService,
+  normalizeIncludedInKpi,
   operationTypes,
   stableDailyOperationId,
 } from "./dailyOperations";
@@ -352,6 +353,7 @@ export async function importDailyOperationsRows(rows = [], currentCompanyId = ""
       currency: row.currency || "",
       notes: row.notes || "",
       status: row.status || "قيد المراجعة",
+      included_in_kpi: normalizeIncludedInKpi(row.status || "قيد المراجعة", row.included_in_kpi === true),
     };
     if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
       console.log("operation_date debug", {

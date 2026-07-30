@@ -91,7 +91,7 @@ import { calculateInventoryDashboardTotals, generateInventoryReports, inventoryR
 import { generateBranchForecast } from "./services/inventoryForecast";
 import { canInventory } from "./services/inventoryPermissions";
 import { inventorySettingsService, defaultInventorySettings, defaultDocumentNumbering } from "./services/inventorySettings";
-import { dailyOperationsService, isApprovedDailyOperation, operationTypes, serviceChannels, operationStatuses, pendingDailyOperationStatuses } from "./services/dailyOperations";
+import { dailyOperationsService, isApprovedDailyOperation, isApprovedStatus, normalizeIncludedInKpi, operationTypes, serviceChannels, operationStatuses, pendingDailyOperationStatuses } from "./services/dailyOperations";
 import { downloadDailyOperationsTemplate, downloadProductivityTemplate, exportDailyOperationsToExcel, exportProductivityOperationsToExcel, getTodayDateOnly, importDailyOperationsRows, parseDailyOperationsExcel, validateDailyOperationsRows } from "./services/dailyOperationsImportExport";
 import { performanceCriteriaService, scoringTypes, defaultJobKpis } from "./services/performanceCriteria";
 import { kpiCalculationService } from "./services/kpiCalculation";
@@ -7745,23 +7745,33 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
   const sum = (key) => filtered.reduce((total, row) => total + Number(row[key] || 0), 0);
   const totalOperations = sum("operation_count");
   const totalErrors = sum("error_count");
+  const approvedRows = filtered.filter((row) => isApprovedStatus(row.status));
+  const pendingRows = filtered.filter((row) => String(row.status || "").trim() === "قيد المراجعة");
+  const kpiRows = filtered.filter((row) => isApprovedDailyOperation(row));
+  const nonKpiRows = filtered.filter((row) => !isApprovedDailyOperation(row));
+  const approvedOperationsTotal = approvedRows.reduce((total, row) => total + Number(row.operation_count || 0), 0);
+  const pendingOperationsTotal = pendingRows.reduce((total, row) => total + Number(row.operation_count || 0), 0);
+  const kpiOperationsTotal = kpiRows.reduce((total, row) => total + Number(row.operation_count || 0), 0);
+  const nonKpiOperationsTotal = nonKpiRows.reduce((total, row) => total + Number(row.operation_count || 0), 0);
   const pendingCount = filtered.filter((row) => pendingDailyOperationStatuses.has(String(row.status || "").trim())).length;
-  const approvedCount = filtered.filter((row) => isApprovedDailyOperation(row)).length;
+  const approvedCount = approvedRows.length;
   const rejectedCount = filtered.filter((row) => ["مرفوض", "مرفوضة"].includes(String(row.status || "").trim())).length;
   const summaries = [
-    ["إجمالي العمليات المستوردة", filtered.length, Upload],
+    ["عدد السجلات", filtered.length, Upload],
+    ["إجمالي العمليات الكلي", totalOperations, Gauge],
+    ["إجمالي العمليات المعتمدة", approvedOperationsTotal, BadgeCheck],
+    ["إجمالي العمليات قيد المراجعة", pendingOperationsTotal, Clock3],
+    ["إجمالي العمليات الداخلة في KPI", kpiOperationsTotal, Gauge],
+    ["إجمالي العمليات غير الداخلة في KPI", nonKpiOperationsTotal, AlertTriangle],
     ["قيد المراجعة", pendingCount, Clock3],
     ["معتمدة", approvedCount, BadgeCheck],
     ["مرفوضة", rejectedCount, AlertTriangle],
-    ["داخلة في KPI", filtered.filter((row) => isApprovedDailyOperation(row)).length, Gauge],
-    ["إجمالي العمليات", totalOperations, Gauge],
     ["العمليات المكتملة", sum("completed_count"), BadgeCheck],
     ["العمليات المعلقة", sum("pending_count"), Clock3],
     ["العمليات المرتجعة", sum("returned_count"), ArrowUpLeft],
     ["عدد الأخطاء", totalErrors, AlertTriangle],
     ["شكاوى العملاء", sum("customer_complaints"), MessageSquareWarning],
     ["نسبة الأخطاء", `${totalOperations ? ((totalErrors / totalOperations) * 100).toFixed(1) : 0}%`, TrendingUp],
-    ["المعتمدة", filtered.filter((row) => ["معتمدة", "معتمد"].includes(row.status)).length, BadgeCheck],
   ];
   const byBranch = Object.entries(groupCount(filtered, "branch")).map(([name, value]) => ({ name, value }));
   const loadedDates = safeRows.map((row) => row.operation_date).filter(Boolean).sort();
@@ -7862,6 +7872,7 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
       const saved = await dailyOperationsService.saveDailyOperation({
         ...dialog,
         company_id: companyId,
+        included_in_kpi: normalizeIncludedInKpi(dialog.status, dialog.included_in_kpi === true),
         entered_by: currentUser?.username || "",
       });
       setRows((list) => list.some((item) => item.operation_id === saved.operation_id)
@@ -8055,10 +8066,18 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
       setFilters(resetFilters);
       await load(resetFilters);
       const savedCount = result.saved?.length || 0;
+      const validImportRows = importRows.filter((row) => row.valid);
+      const excelTotal = validImportRows.reduce((total, row) => total + Number(row.operation_count || 0), 0);
+      const savedRows = result.saved || [];
+      const systemTotal = savedRows.reduce((total, row) => total + Number(row.operation_count || 0), 0);
+      const approvedTotal = savedRows.filter((row) => isApprovedStatus(row.status)).reduce((total, row) => total + Number(row.operation_count || 0), 0);
+      const pendingReviewTotal = savedRows.filter((row) => String(row.status || "").trim() === "قيد المراجعة").reduce((total, row) => total + Number(row.operation_count || 0), 0);
+      const kpiTotal = savedRows.filter((row) => isApprovedDailyOperation(row)).reduce((total, row) => total + Number(row.operation_count || 0), 0);
+      const reconciliation = `\nإجمالي Excel: ${excelTotal}\nإجمالي النظام الكلي: ${systemTotal}\nإجمالي المعتمد: ${approvedTotal}\nإجمالي قيد المراجعة: ${pendingReviewTotal}\nإجمالي داخل KPI: ${kpiTotal}\nالفرق: ${excelTotal - systemTotal}`;
       const filterWarning = filtersMayHideImportedRows
         ? "\nتم الاستيراد بنجاح، لكن قد لا تظهر بعض العمليات بسبب الفلاتر الحالية. تم تصفير الفلاتر لعرض النتائج."
         : "";
-      alert(`تم استيراد العمليات اليومية بنجاح\nتم الحفظ: ${savedCount}\nإضافة: ${result.inserted || 0}\nتحديث: ${result.updated || 0}\nتجاهل: ${result.skipped || 0}${filterWarning}`);
+      alert(`تم استيراد العمليات اليومية بنجاح\nتم الحفظ: ${savedCount}\nإضافة: ${result.inserted || 0}\nتحديث: ${result.updated || 0}\nتجاهل: ${result.skipped || 0}${reconciliation}${filterWarning}`);
       setImportDialog(null);
     } catch (error) {
       console.error("Daily operations Excel import error:", error);
@@ -8140,6 +8159,9 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
       </div>
 
       {viewMode === "dashboard" && <div ref={dashboardRef} className="space-y-5">
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-extrabold text-amber-800">
+        قيد المراجعة لا تدخل في مؤشرات الأداء KPI حتى يتم اعتمادها.
+      </div>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {summaries.map(([label, value, Icon]) => <Mini key={label} label={label} value={value} I={Icon} />)}
       </div>
@@ -8182,7 +8204,7 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
 
       <div className="panel space-y-3 p-4">
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-800">
-          العمليات المعتمدة فقط تدخل في الإنتاجية ودرجات KPI والحوافز.
+          قيد المراجعة لا تدخل في مؤشرات الأداء KPI حتى يتم اعتمادها. العمليات الداخلة في KPI يجب أن تكون حالتها "معتمد" ومؤشر KPI مفعّل.
         </div>
         {!canApprove && <div className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">لا تملك صلاحية اعتماد العمليات</div>}
         <div className="flex flex-wrap items-center gap-2">
@@ -8233,6 +8255,11 @@ function DailyOperationsPageEnhanced({ employees = [], currentUser, currentCompa
               <Label t="القناة"><select required value={dialog.service_channel} onChange={(event) => setDialog({ ...dialog, service_channel: event.target.value })} className="field mt-2">{serviceChannels.map((channel) => <option key={channel} value={channel}>{channel}</option>)}</select></Label>
               {numericFields.map(([key, label]) => <Label key={key} t={label}><input required={key === "operation_count"} type="number" min="0" value={dialog[key] ?? 0} onChange={(event) => setDialog({ ...dialog, [key]: event.target.value })} className="field mt-2" /></Label>)}
               <Label t="العملة"><input value={dialog.currency || ""} onChange={(event) => setDialog({ ...dialog, currency: event.target.value })} className="field mt-2" /></Label>
+              <Label t="الحالة"><select value={dialog.status || "قيد المراجعة"} onChange={(event) => setDialog({ ...dialog, status: event.target.value, included_in_kpi: normalizeIncludedInKpi(event.target.value, dialog.included_in_kpi === true) })} className="field mt-2">{operationStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></Label>
+              <label className={`mt-6 flex items-center gap-2 rounded-2xl p-3 text-sm font-bold ${isApprovedStatus(dialog.status) ? "bg-emerald-50 text-emerald-800" : "bg-slate-100 text-slate-500"}`}>
+                <input type="checkbox" disabled={!isApprovedStatus(dialog.status)} checked={isApprovedDailyOperation(dialog)} onChange={(event) => setDialog({ ...dialog, included_in_kpi: normalizeIncludedInKpi(dialog.status, event.target.checked) })} />
+                يدخل في KPI {isApprovedStatus(dialog.status) ? "" : "(متاح فقط عند الاعتماد)"}
+              </label>
               <Label t="ملاحظات"><textarea value={dialog.notes || ""} onChange={(event) => setDialog({ ...dialog, notes: event.target.value })} className="field mt-2 !h-auto py-3" rows="3" /></Label>
             </div>
             <DialogActions close={() => setDialog(null)} />

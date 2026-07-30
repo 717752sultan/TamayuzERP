@@ -1,4 +1,4 @@
-import { dailyOperationsService, operationStatuses, operationTypes, serviceChannels } from "./dailyOperations";
+import { dailyOperationsService, isApprovedDailyOperation, isApprovedStatus, operationStatuses, operationTypes, serviceChannels } from "./dailyOperations";
 
 const n = (value) => {
   const number = Number(value || 0);
@@ -41,8 +41,12 @@ export const summarizeDailyOperations = (rows = []) => {
     if (kind === "sell") acc.sell += count;
     if (kind === "buy") acc.buy += count;
     acc.total += count;
+    if (isApprovedStatus(row.status)) acc.approved += count;
+    if (String(row.status || "").includes("قيد المراجعة")) acc.pendingReview += count;
+    if (isApprovedDailyOperation(row)) acc.kpi += count;
+    else acc.notKpi += count;
     return acc;
-  }, { receive: 0, pay: 0, sell: 0, buy: 0, total: 0 });
+  }, { receive: 0, pay: 0, sell: 0, buy: 0, total: 0, approved: 0, pendingReview: 0, kpi: 0, notKpi: 0 });
   const employees = new Map();
   const branches = new Map();
   rows.forEach((row) => {

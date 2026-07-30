@@ -28,10 +28,13 @@ export const operationTypes = [...new Set([
 
 export const serviceChannels = [...new Set(["مباشر", "واتساب", "هاتف", "تطبيق", "أخرى", "فرع", "إدارة", "نظام داخلي"])];
 export const operationStatuses = ["قيد المراجعة", "معتمد", "معتمدة", "مسودة", "مرفوض", "ملغي", "معاد للتعديل"];
-export const approvedDailyOperationStatuses = new Set(["معتمد", "معتمدة"]);
+export const approvedDailyOperationStatuses = new Set(["معتمد"]);
 export const pendingDailyOperationStatuses = new Set(["مستورد", "قيد المراجعة", "مسودة"]);
 export const excludedFromKpiStatuses = new Set(["قيد المراجعة", "مستورد", "مرفوض", "مرفوضة", "ملغي", "ملغى", "معاد للتعديل", "مسودة"]);
-export const isApprovedDailyOperation = (row = {}) => row.included_in_kpi === true || approvedDailyOperationStatuses.has(String(row.status || "").trim());
+export const isApprovedStatus = (status = "") => approvedDailyOperationStatuses.has(String(status || "").trim());
+export const canIncludeDailyOperationInKpi = (row = {}) => isApprovedStatus(row.status);
+export const normalizeIncludedInKpi = (status = "", requested = false) => isApprovedStatus(status) && requested === true;
+export const isApprovedDailyOperation = (row = {}) => isApprovedStatus(row.status) && row.included_in_kpi === true;
 
 export const DAILY_OPERATIONS_BULK_CHUNK_SIZE = 100;
 export const DAILY_OPERATIONS_DEFAULT_LIMIT = 10000;
@@ -133,7 +136,7 @@ const fromDb = (row = {}) => {
     rejected_by: row.rejected_by || "",
     rejected_at: row.rejected_at || "",
     rejection_reason: row.rejection_reason || "",
-    included_in_kpi: row.included_in_kpi === true || approvedDailyOperationStatuses.has(status),
+    included_in_kpi: normalizeIncludedInKpi(status, row.included_in_kpi),
     status,
     created_at: row.created_at || "",
     updated_at: row.updated_at || "",
@@ -178,7 +181,7 @@ const toDb = (row = {}) => {
     rejected_by: String(row.rejected_by || ""),
     rejected_at: row.rejected_at || null,
     rejection_reason: String(row.rejection_reason || ""),
-    included_in_kpi: row.included_in_kpi === true || approvedDailyOperationStatuses.has(status),
+    included_in_kpi: normalizeIncludedInKpi(status, row.included_in_kpi),
     status,
     updated_at: new Date().toISOString(),
   };
@@ -308,7 +311,7 @@ export const dailyOperationsService = {
         if (list.length < batchLimit) break;
       }
       const mapped = (Array.isArray(rows) ? rows : []).map(fromDb);
-      const kpiFiltered = filters.includedInKpiOnly ? mapped.filter((row) => row.included_in_kpi === true) : mapped;
+      const kpiFiltered = filters.includedInKpiOnly ? mapped.filter(isApprovedDailyOperation) : mapped;
       return filters.approvedOnly ? kpiFiltered.filter(isApprovedDailyOperation) : kpiFiltered;
     } catch (error) {
       console.error("Supabase daily_operations load error:", error);
@@ -413,7 +416,7 @@ export const dailyOperationsService = {
     return {
       imported: rows.length,
       pending: rows.filter((row) => pendingDailyOperationStatuses.has(String(row.status || "").trim())).length,
-      approved: rows.filter(isApprovedDailyOperation).length,
+      approved: rows.filter((row) => isApprovedStatus(row.status)).length,
       rejected: rows.filter((row) => ["مرفوض", "مرفوضة"].includes(String(row.status || "").trim())).length,
       includedInKpi: rows.filter(isApprovedDailyOperation).length,
     };
