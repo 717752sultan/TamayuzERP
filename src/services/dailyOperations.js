@@ -290,6 +290,8 @@ export const dailyOperationsService = {
         ...(filters.fromDate ? [`operation_date=gte.${encodeURIComponent(filters.fromDate)}`] : []),
         ...(filters.toDate ? [`operation_date=lte.${encodeURIComponent(filters.toDate)}`] : []),
         ...(filters.status && filters.status !== "all" ? [`status=eq.${encodeURIComponent(filters.status)}`] : []),
+        ...(filters.branch && filters.branch !== "all" ? [`branch=eq.${encodeURIComponent(filters.branch)}`] : []),
+        ...(filters.department && filters.department !== "all" ? [`department=eq.${encodeURIComponent(filters.department)}`] : []),
         ...(filters.employeeId ? [`employee_id=eq.${encodeURIComponent(filters.employeeId)}`] : []),
         ...(filters.operationType && filters.operationType !== "all" ? [`operation_type=eq.${encodeURIComponent(filters.operationType)}`] : []),
         ...(filters.channel && filters.channel !== "all" ? [`service_channel=eq.${encodeURIComponent(filters.channel)}`] : []),
@@ -306,7 +308,8 @@ export const dailyOperationsService = {
         if (list.length < batchLimit) break;
       }
       const mapped = (Array.isArray(rows) ? rows : []).map(fromDb);
-      return filters.approvedOnly ? mapped.filter(isApprovedDailyOperation) : mapped;
+      const kpiFiltered = filters.includedInKpiOnly ? mapped.filter((row) => row.included_in_kpi === true) : mapped;
+      return filters.approvedOnly ? kpiFiltered.filter(isApprovedDailyOperation) : kpiFiltered;
     } catch (error) {
       console.error("Supabase daily_operations load error:", error);
       throw new Error("فشل تحميل العمليات اليومية: " + error.message);

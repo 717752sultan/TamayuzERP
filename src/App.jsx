@@ -120,10 +120,15 @@ import AttendanceCalculationPage from "./components/hr/AttendanceCalculationPage
 import EmployeeSelfAttendancePage from "./components/hr/EmployeeSelfAttendancePage";
 import EmployeePortalApp, { EmployeeLoginPage } from "./components/employee/EmployeePortalApp";
 import EmployeeAppAdminSettingsPage from "./components/hr/EmployeeAppAdminSettingsPage";
+import DailyOperationsReportsPage from "./components/hr/DailyOperationsReportsPage";
+import OvertimeImportExportPage from "./components/hr/OvertimeImportExportPage";
 import { EmployeeEffectivenessPage, EmployeesGridPage, UserActivityLogsPage } from "./components/hr/EmployeeSubPages";
 import SystemSettingsPage from "./components/settings/SystemSettingsPage";
 import GroupedSidebarNav from "./components/navigation/GroupedSidebarNav";
 import FixedAssetsModule from "./components/assets/FixedAssetsModule";
+import FixedAssetsImportExportPage from "./components/assets/FixedAssetsImportExportPage";
+import AssetDepreciationPage from "./components/assets/AssetDepreciationPage";
+import InventoryItemsImportExportPage from "./components/inventory/InventoryItemsImportExportPage";
 const icons = {
   dashboard: LayoutDashboard,
   employees: Users,
@@ -141,9 +146,12 @@ const icons = {
   settings: Settings,
   guarantees: ShieldCheck,
   overtime: Clock3,
+  overtime_import_export: FileSpreadsheet,
   shifts: CalendarCheck,
   inventory: Wallet,
+  inventory_items_import_export: FileSpreadsheet,
   daily_operations: Gauge,
+  daily_operations_reports: FileBarChart,
   attendance_dashboard: Clock3,
   attendance_records: CalendarCheck,
   bulk_attendance: Users,
@@ -178,6 +186,8 @@ const icons = {
   hr_insurance: ShieldCheck,
   hr_announcements: Bell,
   hr_files: FileSpreadsheet,
+  assets_import_export: FileSpreadsheet,
+  assets_depreciation_tools: FileBarChart,
   hr_contracts: ClipboardList,
   hr_custodies: Wallet,
   hr_training: Star,
@@ -207,6 +217,7 @@ const fullHrNavItems = [
   ["guarantees", "الضمانات"],
   ["hr_custodies", "العهد"],
   ["daily_operations", "العمليات اليومية"],
+  ["daily_operations_reports", "تقارير العمليات اليومية"],
   ["attendance_dashboard", "لوحة حساب الدوام"],
   ["attendance_records", "تسجيل حضور وانصراف"],
   ["bulk_attendance", "تحضير جماعي"],
@@ -218,6 +229,7 @@ const fullHrNavItems = [
   ["discipline", "الحضور والانصراف"],
   ["shifts", "الشفتات"],
   ["overtime", "العمل الإضافي"],
+  ["overtime_import_export", "استيراد وتصدير العمل الإضافي"],
   ["hr_leaves", "الإجازات"],
   ["hr_requests_approvals", "الطلبات والموافقات"],
   ["hr_salary", "الرواتب"],
@@ -1499,10 +1511,15 @@ export default function App() {
 	          {activePage === "plans" && <EnhancedPlans {...p} />}{" "}
 	          {activePage === "guarantees" && <EmployeeGuaranteesPage {...p} />}{" "}
 	          {activePage === "overtime" && <OvertimePage {...p} />}{" "}
+	          {activePage === "overtime_import_export" && <OvertimeImportExportPage {...p} />}{" "}
 	          {activePage === "shifts" && <EmployeeShiftsPage {...p} />}{" "}
 	          {activePage === "inventory" && <InventoryManagementPage {...p} />}{" "}
+	          {activePage === "inventory_items_import_export" && <InventoryItemsImportExportPage {...p} />}{" "}
 	          {activePage === "daily_operations" && <DailyOperationsPageEnhanced {...p} />}{" "}
-	          {activePage?.startsWith("assets_") && <FixedAssetsModule {...p} activePage={activePage} />}{" "}
+	          {activePage === "daily_operations_reports" && <DailyOperationsReportsPage {...p} />}{" "}
+	          {activePage === "assets_import_export" && <FixedAssetsImportExportPage {...p} />}{" "}
+	          {activePage === "assets_depreciation_tools" && <AssetDepreciationPage {...p} />}{" "}
+	          {activePage?.startsWith("assets_") && !["assets_import_export", "assets_depreciation_tools"].includes(activePage) && <FixedAssetsModule {...p} activePage={activePage} />}{" "}
 	          {attendancePageKeys.has(activePage) && <AttendanceCalculationPage {...p} pageKey={activePage} />}{" "}
 	          {activePage === "performance_criteria" && <PerformanceCriteriaPageEnhanced {...p} />}{" "}
 	          {activePage === "performance_kpi_scores" && <KpiScoresPage {...p} />}{" "}
@@ -6844,6 +6861,7 @@ const upsertLocal = (list, item, key) =>
 const inventoryTabs = [
   ["dashboard", "لوحة المخزون", "inventory_dashboard"],
   ["items", "الأصناف", "inventory_items"],
+  ["items_import_export", "الاستيراد والتصدير", "inventory_items_import_export"],
   ["suppliers", "الموردون", "inventory_suppliers"],
   ["purchase_requests", "طلب شراء", "inventory_purchase_requests"],
   ["purchase_orders", "أمر شراء", "inventory_purchase_orders"],
