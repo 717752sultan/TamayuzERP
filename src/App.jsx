@@ -129,6 +129,7 @@ import BranchTargetsPage from "./components/performance/BranchTargetsPage";
 import AttendanceKpiRulesPage from "./components/performance/AttendanceKpiRulesPage";
 import IncentiveExclusionsPage from "./components/performance/IncentiveExclusionsPage";
 import PerformanceProcessGuidePage from "./components/performance/PerformanceProcessGuidePage";
+import IncentiveProposalPage from "./components/performance/IncentiveProposalPage";
 import { kpiScoresService } from "./services/kpiScores";
 import { dailyOperationsReportsService } from "./services/dailyOperationsReports";
 import DailyOperationsReportsPage from "./components/hr/DailyOperationsReportsPage";
@@ -257,9 +258,10 @@ const fullHrNavItems = [
   ["productivity", "\u0627\u0644\u0625\u0646\u062a\u0627\u062c\u064a\u0629"],
   ["incentives", "\u0627\u0644\u062d\u0648\u0627\u0641\u0632"],
   ["performance-incentive-exclusions", "\u0627\u0633\u062a\u062b\u0646\u0627\u0621\u0627\u062a \u0627\u0644\u062d\u0648\u0627\u0641\u0632"],
+  ["performance-incentive-proposal", "\u062a\u0635\u0648\u0631 \u0646\u0638\u0627\u0645 \u0627\u0644\u062d\u0648\u0627\u0641\u0632"],
   ["performance-process-guide", "\u0634\u0631\u062d \u0622\u0644\u064a\u0629 \u0627\u0644\u062a\u0642\u064a\u064a\u0645 \u0648\u0627\u0644\u062d\u0648\u0627\u0641\u0632"],
   ["top", "\u0645\u0648\u0638\u0641 \u0627\u0644\u0634\u0647\u0631"],
-  ["plans", "\u062e\u0637\u0637 \u0627\u0644\u062a\u062d\u0633\u064a\u0646"]
+  ["plans", "\u062e\u0637\u0637 \u0627\u0644\u062a\u062d\u0633\u064a\u0646"],
   ["recruitment", "التوظيف"],
   ["hr_training", "التدريب"],
   ["hr_disciplinary", "المخالفات والإنذارات"],
@@ -305,6 +307,11 @@ const navItems = [
   ...fullHrNavItems,
   ...baseNavItems.slice(-2),
 ];
+const safeNavigationItems = (items = []) => (Array.isArray(items) ? items : []).filter((item) => {
+  const valid = Array.isArray(item) && item.length >= 2 && Boolean(item[0]);
+  if (!valid) console.warn("Invalid navigation item skipped", item);
+  return valid;
+});
 const nf = new Intl.NumberFormat("ar-SA"),
   money = (n) => `${nf.format(Math.round(n || 0))} ر.س`,
   classify = (n) =>
@@ -1174,7 +1181,7 @@ export default function App() {
         if (pageKey === "companies_admin" || pageKey === "platform_admin_settings") return platformAdmin;
         if (platformAdmin) return hasSelectedCompany;
         if (!hasSelectedCompany) return false;
-        if (isAdministrativeUser && ["performance-monthly-targets", "performance-branch-targets", "performance-attendance-rules", "performance-incentive-exclusions", "performance-process-guide", "hr-attendance-records"].includes(pageKey)) return true;
+        if (isAdministrativeUser && ["performance-monthly-targets", "performance-branch-targets", "performance-attendance-rules", "performance-incentive-exclusions", "performance-incentive-proposal", "performance-process-guide", "hr-attendance-records"].includes(pageKey)) return true;
         if (["employees_grid", "employee_effectiveness", "user_activity_logs"].includes(pageKey)
           && !companyCanPageFromRows(companyPermissions, "employees", "can_view")) return false;
         if (pageKey === "employee_effectiveness"
@@ -1194,7 +1201,7 @@ export default function App() {
         if (isAdministrativeUser) return true;
         return pageAllowedByTree(treeRolePermissions, role, pageKey, action) || canByPermission(appPermissions, role, pageKey, action);
       },
-	    rawVisibleNavItems = navItems.filter(([id]) => {
+	    rawVisibleNavItems = safeNavigationItems(navItems).filter(([id]) => {
         if (platformAdmin) return hasSelectedCompany ? true : ["companies_admin", "platform_admin_settings"].includes(id);
         if (id === "companies_admin" || id === "platform_admin_settings") return false;
         if (!companyCanPage(id, "can_view")) return false;
@@ -1550,6 +1557,7 @@ export default function App() {
           {activePage === "performance-branch-targets" && <BranchTargetsPage {...p} />}
           {activePage === "performance-attendance-rules" && <AttendanceKpiRulesPage {...p} />}
           {activePage === "performance-incentive-exclusions" && <IncentiveExclusionsPage {...p} />}
+          {activePage === "performance-incentive-proposal" && <IncentiveProposalPage {...p} />}
           {activePage === "performance-process-guide" && <PerformanceProcessGuidePage {...p} />}
           {activePage === "hr-attendance-records" && <AttendanceRecordsPage {...p} />}{" "}
 	          {activePage === "users_permissions" && <UsersPermissionsPage {...p} />}{" "}

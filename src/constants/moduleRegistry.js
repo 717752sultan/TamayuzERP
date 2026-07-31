@@ -116,6 +116,7 @@ const CANONICAL_HR_PAGE_KEYS = [
   "productivity",
   "incentives",
   "performance-incentive-exclusions",
+  "performance-incentive-proposal",
   "performance-process-guide",
   "top",
   "plans",
@@ -197,7 +198,11 @@ export const isPlaceholderPage = (pageKey = "") => ERP_PAGE_BY_KEY[pageKey]?.sta
 export const buildGroupedNavigation = (pages = []) => {
   const groups = new Map();
   for (const page of pages || []) {
-    if (!page?.key || page.hiddenFromNavigation || page.alias || page.canonical === false || page.status === "alias") continue;
+    if (!page || typeof page !== "object" || !page.key) {
+      console.warn("Invalid navigation item skipped", page);
+      continue;
+    }
+    if (page.hiddenFromNavigation || page.alias || page.canonical === false || page.status === "alias") continue;
     const groupKey = page.navGroupKey || `${page.moduleKey || "module"}_pages`;
     if (!groups.has(groupKey)) {
       groups.set(groupKey, {
