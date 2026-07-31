@@ -4,7 +4,7 @@ import { performanceCriteriaService } from "./performanceCriteria";
 import { getCurrentCompanyId } from "./tenant";
 
 const scoreByThreshold = (actual, criterion) => {
-  const max = Number(criterion.max_score || 100);
+  const max = Math.max(0, Math.min(100, Number(criterion.max_score || 100)));
   if (actual >= Number(criterion.excellent_threshold || criterion.target_value || 0)) return max;
   if (actual >= Number(criterion.good_threshold || 0)) return max * 0.8;
   if (actual >= Number(criterion.acceptable_threshold || 0)) return max * 0.6;
@@ -55,6 +55,7 @@ export const kpiCalculationService = {
   async calculateEmployeeKpiScores(employee, month, companyId = "") {
     try {
       const cid = companyId || employee.company_id || getCurrentCompanyId();
+      if (!cid) throw new Error("لم يتم تحديد الشركة الحالية");
       const aliasToCanonical = await loadEmployeeIdAliasMap(cid);
       const operations = await dailyOperationsService.loadDailyOperations({ companyId: cid, month, approvedOnly: true, includedInKpiOnly: true });
       const employeeOps = operations.filter((op) => {
@@ -110,9 +111,10 @@ export const kpiCalculationService = {
   async loadKpiScores(month = "", companyId = "") {
     try {
       const cid = companyId || getCurrentCompanyId();
+      if (!cid) throw new Error("لم يتم تحديد الشركة الحالية");
       const query = [
         "select=*",
-        ...(cid ? [`company_id=eq.${encodeURIComponent(cid)}`] : []),
+        `company_id=eq.${encodeURIComponent(cid)}`,
         ...(month ? [`month=eq.${encodeURIComponent(month)}`] : []),
         `order=${month ? "employee_name.asc" : "month.desc"}`,
       ].join("&");

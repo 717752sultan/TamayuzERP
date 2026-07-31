@@ -3,6 +3,7 @@ import { isApprovedDailyOperation } from "./dailyOperations";
 import { exportWorkbook } from "./reportExport";
 
 const n = (value) => Number(value || 0) || 0;
+const clampScore = (value) => Number(Math.max(0, Math.min(100, n(value))).toFixed(2));
 
 export const classifyEmployeePerformance = (score) => {
   if (score === null || score === undefined || Number.isNaN(Number(score))) return { label: "غير محسوب", tone: "slate" };
@@ -35,7 +36,21 @@ export const getProductivityTargetOperations = (employee = {}, filters = {}) => 
 
 export const calculateProductivityScore = (totalOperations = 0, targetOperations = 500) => {
   const target = Math.max(1, n(targetOperations));
-  return Number(Math.min(100, (n(totalOperations) / target) * 100).toFixed(2));
+  return clampScore((n(totalOperations) / target) * 100);
+};
+
+export const normalizeEmployeeKpiResult = ({ employee = {}, employeeId = "", scoreInfo = null, operations = {}, filters = {} } = {}) => {
+  const totalOperations = n(operations.total_operations);
+  const targetOperations = getProductivityTargetOperations(employee, filters);
+  const achievementPercentage = targetOperations ? Number(((totalOperations / targetOperations) * 100).toFixed(2)) : 0;
+  const productivityScore = clampScore(achievementPercentage);
+  const manualScore = scoreInfo ? clampScore(scoreInfo.total) : null;
+  const finalKpiScore = clampScore(manualScore !== null ? (manualScore * 0.6) + (productivityScore * 0.4) : productivityScore);
+  const calculationSource = manualScore !== null ? "محسوب من الإنتاجية والتقييم" : "محسوب من الإنتاجية";
+  const calculationReason = manualScore !== null ? "تم احتساب الدرجة النهائية من التقييم اليدوي 60% والإنتاجية 40%." : "لا يوجد تقييم يدوي، لذلك تم احتساب الدرجة من العمليات المعتمدة الداخلة في KPI فقط.";
+  const performance = classifyEmployeePerformance(finalKpiScore);
+  const job = employee.job || employee.job_name || scoreInfo?.criteria?.[0]?.job_name || "";
+  return { employee_id: employeeId, employee_name: employee.name || scoreInfo?.criteria?.[0]?.employee_name || operations.employee_name || employeeId, job, job_name: job, branch: employee.branch || scoreInfo?.criteria?.[0]?.branch || [...(operations.branches || [])][0] || "", branches: [...(operations.branches || [])], total_operations: totalOperations, target_operations: targetOperations, achievement_percentage: achievementPercentage, productivity_score: productivityScore, manual_score: manualScore, final_kpi_score: finalKpiScore, final_score: finalKpiScore, rating_label: performance.label, performance_label: performance.label, performance_tone: performance.tone, calculation_source: calculationSource, calculation_reason: calculationReason };
 };
 
 const normalizeScore = (row = {}) => ({
@@ -216,51 +231,18 @@ export const buildKpiEmployeeRanking = (employees = [], kpiRows = [], operations
     const employee = employees.find((item) => String(item.id) === String(employeeId)) || {};
     const scoreInfo = scoresByEmployee.get(employeeId);
     const ops = opsByEmployee.get(employeeId) || { total_operations: 0, receipt_operations: 0, payment_operations: 0, sale_operations: 0, purchase_operations: 0, daily: new Map(), byType: new Map(), byBranch: new Map(), byOriginalEmployeeId: new Map(), branches: new Set(), originalEmployeeIds: new Set([employeeId]) };
-    const manualScore = scoreInfo ? Number(scoreInfo.total.toFixed(2)) : null;
-    const targetOperations = getProductivityTargetOperations(employee, filters);
-    const achievementPercentage = targetOperations ? Number(((n(ops.total_operations) / targetOperations) * 100).toFixed(2)) : 0;
-    const productivityScore = ops.total_operations > 0 ? calculateProductivityScore(ops.total_operations, targetOperations) : null;
-    let finalScore = null;
-    let calculation_source = "غير محسوب";
-    let calculation_reason = "لا توجد عمليات معتمدة داخلة في KPI ولا يوجد تقييم يدوي.";
-    if (manualScore !== null && productivityScore !== null) {
-      finalScore = Number(((manualScore * 0.6) + (productivityScore * 0.4)).toFixed(2));
-      calculation_source = "محسوب من الإنتاجية والتقييم";
-      calculation_reason = "تم احتساب الدرجة النهائية من التقييم اليدوي 60% والإنتاجية 40%.";
-    } else if (manualScore !== null) {
-      finalScore = manualScore;
-      calculation_source = "محسوب من التقييم اليدوي";
-      calculation_reason = "تم احتساب الدرجة من معايير KPI اليدوية المحفوظة.";
-    } else if (productivityScore !== null) {
-      finalScore = productivityScore;
-      calculation_source = "محسوب من الإنتاجية";
-      calculation_reason = "لا يوجد تقييم يدوي، لذلك تم احتساب الدرجة من العمليات المعتمدة الداخلة في KPI فقط.";
-    }
-    const performance = classifyEmployeePerformance(finalScore);
+    const normalized = normalizeEmployeeKpiResult({ employee, employeeId, scoreInfo, operations: ops, filters });
     const strengths = [];
     if (ops.receipt_operations) strengths.push("قبض");
     if (ops.payment_operations) strengths.push("صرف");
     if (ops.sale_operations) strengths.push("بيع");
     if (ops.purchase_operations) strengths.push("شراء");
     return {
-      employee_id: employeeId,
-      employee_name: employee.name || scoreInfo?.criteria?.[0]?.employee_name || ops.employee_name || employeeId,
-      job_name: employee.job || employee.job_name || scoreInfo?.criteria?.[0]?.job_name || "",
-      branch: employee.branch || scoreInfo?.criteria?.[0]?.branch || [...(ops.branches || [])][0] || "",
-      branches: [...(ops.branches || [])],
+      ...normalized,
       linked_employee_ids: [...(ops.originalEmployeeIds || new Set([employeeId]))],
       department: employee.department || "",
-      final_score: finalScore,
-      manual_score: manualScore,
-      productivity_score: productivityScore,
-      target_operations: targetOperations,
-      achievement_percentage: achievementPercentage,
-      calculation_source,
-      calculation_reason,
-      performance_label: performance.label,
-      performance_tone: performance.tone,
-      strengths: strengths.length ? strengths.join("، ") : finalScore !== null ? "ثبات الأداء" : "غير محدد",
-      notes: calculation_reason,
+      strengths: strengths.length ? strengths.join("، ") : "ثبات الأداء",
+      notes: normalized.calculation_reason,
       criteria: scoreInfo?.criteria || [],
       operations: ops,
     };

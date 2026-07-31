@@ -158,4 +158,29 @@ export const dailyOperationsReportsService = {
     }));
     return { rows, summary, grouped, linkedEmployeeIds };
   },
+
+  async compareProductivityPeriods(companyId, range = {}) {
+    const id = String(companyId || "").trim();
+    if (!id) throw new Error("لم يتم تحديد الشركة الحالية");
+    const scope = ["branch", "employee", "job", "operation_type"].includes(range.scope) ? range.scope : "employee";
+    const loadPeriod = (fromDate, toDate) => this.loadReport(id, { fromDate, toDate, status: "معتمد", approvedOnly: true, includedInKpiOnly: true });
+    const [periodA, periodB] = await Promise.all([loadPeriod(range.aFrom, range.aTo), loadPeriod(range.bFrom, range.bTo)]);
+    const keyOf = (row) => {
+      if (scope === "branch") return row.branch || "غير محدد";
+      if (scope === "job") return row.job || row.job_name || "غير محدد";
+      if (scope === "operation_type") return row.operation_type || "غير محدد";
+      return (row.employee_name || row.employee_id || "غير محدد") + " - " + (row.employee_id || "غير محدد");
+    };
+    const sumByScope = (rows) => (rows || []).reduce((map, row) => { const key = keyOf(row); map.set(key, (map.get(key) || 0) + n(row.operation_count)); return map; }, new Map());
+    const a = sumByScope(periodA.rows);
+    const b = sumByScope(periodB.rows);
+    const keys = [...new Set([...a.keys(), ...b.keys()])];
+    const rows = keys.map((name) => {
+      const period_a = a.get(name) || 0;
+      const period_b = b.get(name) || 0;
+      const change = period_a === 0 ? (period_b > 0 ? null : 0) : Number((((period_b - period_a) / period_a) * 100).toFixed(2));
+      return { name, period_a, period_b, change, change_label: period_a === 0 && period_b > 0 ? "جديد" : String(change) + "%" };
+    }).sort((x, y) => y.period_b - x.period_b || y.period_a - x.period_a);
+    return { rows, branches: [...new Set([...periodA.rows, ...periodB.rows].map((row) => row.branch).filter(Boolean))], periodA: periodA.rows, periodB: periodB.rows };
+  },
 };

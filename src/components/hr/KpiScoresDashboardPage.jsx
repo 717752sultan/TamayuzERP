@@ -37,8 +37,8 @@ function BarList({ title, rows = [], valueKey = "final_score", max = 100 }) {
       <div className="space-y-3">
         {rows.length ? rows.map((row, index) => {
           const value = valueKey === "total_operations" ? n(row.operations?.total_operations) : n(row[valueKey]);
-          const width = Math.min(100, max ? (value / max) * 100 : value);
-          return <div key={`${row.employee_id}-${index}`}><div className="mb-1 flex justify-between text-xs font-bold text-slate-600"><span>{index + 1}. {row.employee_name}</span><span>{valueKey === "final_score" ? scoreText(row.final_score) : value}</span></div><div className="h-3 rounded-full bg-slate-100"><div className="h-3 rounded-full bg-brand-700" style={{ width: `${width}%` }} /></div><p className="mt-1 text-[11px] text-slate-400">{row.branch} • {row.job_name} • العمليات: {row.operations?.total_operations || 0}</p></div>;
+          const width = valueKey === "final_score" ? Math.min(100, n(row.final_kpi_score ?? row.final_score)) : Math.min(100, max ? (value / max) * 100 : value);
+          return <div key={`${row.employee_id}-${index}`}><div className="mb-1 flex justify-between text-xs font-bold text-slate-600"><span>{index + 1}. {row.employee_name}</span><span>{valueKey === "final_score" ? scoreText(row.final_kpi_score ?? row.final_score) : value}</span></div><div className="h-3 rounded-full bg-slate-100"><div className="h-3 rounded-full bg-brand-700" style={{ width: `${width}%` }} /></div><p className="mt-1 text-[11px] text-slate-500">درجة KPI النهائية: {scoreText(row.final_kpi_score ?? row.final_score)} • نسبة الإنجاز: {row.achievement_percentage}% {row.achievement_percentage > 100 ? "• متجاوز الهدف" : ""}</p><p className="mt-1 text-[11px] text-slate-400">العمليات: {row.total_operations ?? row.operations?.total_operations ?? 0} • الهدف: {row.target_operations || 0} • {row.branches?.length ? row.branches.join("، ") : row.branch} • {row.job || row.job_name}</p></div>;
         }) : <p className="text-sm text-slate-400">لا توجد بيانات تقييم ضمن الفترة المحددة.</p>}
       </div>
     </div>
@@ -144,7 +144,7 @@ export default function KpiScoresDashboardPage({ employees = [], currentCompany,
   const [data, setData] = useState({ ranking: [], kpiRows: [], operationsRows: [] });
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
-  const branchOptions = useMemo(() => [...new Set((employees || []).map((employee) => employee.branch).filter(Boolean))], [employees]);
+  const branchOptions = useMemo(() => [...new Set([...(data.operationsRows || []).map((row) => row.branch), ...(employees || []).map((employee) => employee.branch)].filter(Boolean))], [data.operationsRows, employees]);
   const jobOptions = useMemo(() => [...new Set((employees || []).map((employee) => employee.job || employee.job_name).filter(Boolean))], [employees]);
   const departmentOptions = useMemo(() => [...new Set((employees || []).map((employee) => employee.department).filter(Boolean))], [employees]);
 
@@ -163,9 +163,9 @@ export default function KpiScoresDashboardPage({ employees = [], currentCompany,
   useEffect(() => { load(); }, [companyId, filters.month, filters.fromDate, filters.toDate, filters.branch, filters.job, filters.employeeId, filters.department, filters.operationType]);
 
   const ranking = data.ranking || [];
-  const withScores = ranking.filter((row) => row.final_score !== null);
-  const avgScore = withScores.length ? withScores.reduce((sum, row) => sum + n(row.final_score), 0) / withScores.length : 0;
-  const topByScore = ranking.filter((row) => row.final_score !== null).slice(0, 10);
+  const withScores = ranking.filter((row) => Number.isFinite(Number(row.final_kpi_score ?? row.final_score)));
+  const avgScore = withScores.length ? Math.min(100, withScores.reduce((sum, row) => sum + n(row.final_kpi_score ?? row.final_score), 0) / withScores.length) : 0;
+  const topByScore = [...withScores].sort((a, b) => n(b.final_kpi_score ?? b.final_score) - n(a.final_kpi_score ?? a.final_score) || n(b.total_operations ?? b.operations?.total_operations) - n(a.total_operations ?? a.operations?.total_operations)).slice(0, 10);
   const topByOperations = [...ranking].sort((a, b) => n(b.operations?.total_operations) - n(a.operations?.total_operations)).slice(0, 10);
   const totalOps = data.operationsRows.reduce((sum, row) => sum + n(row.operation_count), 0);
   const opsTotals = data.operationsRows.reduce((acc, row) => {
@@ -176,11 +176,11 @@ export default function KpiScoresDashboardPage({ employees = [], currentCompany,
   const summaryCards = [
     ["عدد الموظفين المقيمين", withScores.length, BadgeCheck],
     ["متوسط درجة KPI", `${avgScore.toFixed(2)}%`, Gauge],
-    ["أعلى درجة", scoreText(topByScore[0]?.final_score), Star],
-    ["أقل درجة", scoreText(withScores.at(-1)?.final_score), TrendingUp],
-    ["عدد الموظفين الممتازين", ranking.filter((r) => r.performance_label === "ممتاز").length, Star],
-    ["عدد الموظفين الجيدين", ranking.filter((r) => ["جيد جدًا", "جيد"].includes(r.performance_label)).length, BadgeCheck],
-    ["عدد منخفضي الأداء", ranking.filter((r) => r.performance_label === "يحتاج تحسين").length, TrendingUp],
+    ["أعلى درجة", scoreText(Math.min(100, n(topByScore[0]?.final_kpi_score ?? topByScore[0]?.final_score))), Star],
+    ["أقل درجة", scoreText(withScores.length ? Math.max(0, Math.min(...withScores.map((row) => n(row.final_kpi_score ?? row.final_score)))) : null), TrendingUp],
+    ["عدد الموظفين المميزين", withScores.filter((r) => n(r.final_kpi_score ?? r.final_score) >= 90).length, Star],
+    ["عدد الجيدين", withScores.filter((r) => n(r.final_kpi_score ?? r.final_score) >= 70 && n(r.final_kpi_score ?? r.final_score) < 90).length, BadgeCheck],
+    ["عدد منخفضي الأداء", withScores.filter((r) => n(r.final_kpi_score ?? r.final_score) < 60).length, TrendingUp],
     ["إجمالي العمليات الداخلة في KPI", totalOps, Gauge],
     ["إجمالي عمليات القبض", opsTotals.receipt || 0, Gauge],
     ["إجمالي عمليات الصرف", opsTotals.payment || 0, Gauge],

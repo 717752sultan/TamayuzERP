@@ -123,6 +123,8 @@ import EmployeeSelfAttendancePage from "./components/hr/EmployeeSelfAttendancePa
 import EmployeePortalApp, { EmployeeLoginPage } from "./components/employee/EmployeePortalApp";
 import EmployeeAppAdminSettingsPage from "./components/hr/EmployeeAppAdminSettingsPage";
 import KpiScoresDashboardPage from "./components/hr/KpiScoresDashboardPage";
+import { kpiScoresService } from "./services/kpiScores";
+import { dailyOperationsReportsService } from "./services/dailyOperationsReports";
 import DailyOperationsReportsPage from "./components/hr/DailyOperationsReportsPage";
 import OvertimeImportExportPage from "./components/hr/OvertimeImportExportPage";
 import { EmployeeEffectivenessPage, EmployeesGridPage, UserActivityLogsPage } from "./components/hr/EmployeeSubPages";
@@ -2470,35 +2472,41 @@ function EmployeePortal({ employees, evaluations, settings, setSettings, onLogou
     </div>
   );
 }
-function Dashboard({ employees, evaluations, setPage, settings }) {
-  const avg = Math.round(evaluations.reduce((sum, item) => sum + Number(item.total || 0), 0) / Math.max(evaluations.length, 1));
+function Dashboard({ employees, evaluations, setPage, settings, currentCompany, currentUser }) {
+  const companyId = currentCompany?.company_id || currentUser?.company_id || "";
+  const month = new Date().toISOString().slice(0, 7);
+  const [kpiRanking, setKpiRanking] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    if (!companyId) return undefined;
+    kpiScoresService.loadKpiScores(companyId, { month }, employees).then((result) => { if (alive) setKpiRanking(result.ranking || []); }).catch((error) => { console.error("Executive KPI summary error:", error); if (alive) setKpiRanking([]); });
+    return () => { alive = false; };
+  }, [companyId, month, employees]);
+  const scored = kpiRanking.filter((row) => Number.isFinite(Number(row.final_kpi_score ?? row.final_score)));
+  const avg = scored.length ? Math.min(100, scored.reduce((sum, row) => sum + Number(row.final_kpi_score ?? row.final_score), 0) / scored.length) : 0;
   const active = employees.filter((e) => e.status === "نشط").length;
-  const weak = evaluations.filter((e) => Number(e.total || 0) < 60).length;
-  const incentivesTotal = calcIncentives(employees, evaluations).reduce((sum, row) => sum + Number(row.amount || 0), 0);
-  const top = [...evaluations].sort((a, b) => Number(b.total || 0) - Number(a.total || 0))[0];
-  const topEmployee = employees.find((e) => e.id === top?.employeeId || e.id === top?.employee_id);
-  const branchData = branches.map((branch) => {
-    const ids = employees.filter((e) => e.branch === branch).map((e) => e.id);
-    const rows = evaluations.filter((e) => ids.includes(e.employeeId || e.employee_id));
-    return { name: branch, avg: Math.round(rows.reduce((s, e) => s + Number(e.total || 0), 0) / Math.max(rows.length, 1)) };
-  });
-  const dist = ["ممتاز", "جيد جدًا", "جيد", "مقبول", "ضعيف"].map((name) => ({ name, value: evaluations.filter((e) => classify(e.total) === name).length }));
+  const weak = scored.filter((row) => Number(row.final_kpi_score ?? row.final_score) < 60).length;
+  const bonusRate = (score) => score >= 95 ? 0.20 : score >= 90 ? 0.15 : score >= 85 ? 0.10 : score >= 80 ? 0.05 : 0;
+  const incentivesTotal = scored.reduce((sum, row) => { const employee = employees.find((item) => String(item.id) === String(row.employee_id)); return sum + Number(employee?.salary || 0) * bonusRate(Number(row.final_kpi_score ?? row.final_score)); }, 0);
+  const top = [...scored].sort((a, b) => Number(b.final_kpi_score ?? b.final_score) - Number(a.final_kpi_score ?? a.final_score) || Number(b.total_operations || b.operations?.total_operations || 0) - Number(a.total_operations || a.operations?.total_operations || 0))[0];
+  const realBranches = [...new Set(scored.flatMap((row) => row.branches?.length ? row.branches : [row.branch]).filter(Boolean))];
+  const branchData = realBranches.map((branch) => { const rows = scored.filter((row) => row.branch === branch || row.branches?.includes(branch)); return { name: branch, avg: rows.length ? Math.min(100, Math.round(rows.reduce((sum, row) => sum + Number(row.final_kpi_score ?? row.final_score), 0) / rows.length)) : 0 }; });
+  const dist = ["ممتاز", "جيد جدًا", "جيد", "مقبول", "يحتاج تحسين"].map((name) => ({ name, value: scored.filter((row) => row.rating_label === name || row.performance_label === name).length }));
   const cards = [
     ["إجمالي الموظفين", employees.length, Users, "bg-blue-50 text-blue-600"],
     ["الموظفون النشطون", active, UserCheck, "bg-emerald-50 text-emerald-600"],
-    ["متوسط تقييم الشركة", `${avg}%`, Star, "bg-amber-50 text-amber-600"],
-    ["مستحقو الحافز", evaluations.filter((e) => e.total >= 70).length, Gift, "bg-violet-50 text-violet-600"],
-    ["الموظفون الضعفاء", weak, AlertTriangle, "bg-red-50 text-red-600"],
-    ["إجمالي الحوافز", money(incentivesTotal), Wallet, "bg-brand-50 text-brand-700"],
-    ["عدد المخالفات", "8", MessageSquareWarning, "bg-orange-50 text-orange-600"],
-    ["نسبة الانضباط", "94%", CalendarCheck, "bg-teal-50 text-teal-600"],
+    ["متوسط درجة KPI", avg.toFixed(2) + "%", Star, "bg-amber-50 text-amber-600"],
+    ["مستحقو الحافز", scored.filter((row) => Number(row.final_kpi_score ?? row.final_score) >= 80).length, Gift, "bg-violet-50 text-violet-600"],
+    ["الموظفون منخفضو الأداء", weak, AlertTriangle, "bg-red-50 text-red-600"],
+    ["إجمالي الحوافز المقترحة", money(incentivesTotal), Wallet, "bg-brand-50 text-brand-700"],
   ];
   return (
     <div className="space-y-6">
-      <PageHead title={`صباح الخير، ${settings.manager.name.split(" ")[0]} 👋`} desc="هذا ملخص أداء الشركة لشهر يونيو 2026" action={<button onClick={() => setPage("reports")} className="btn-primary"><FileBarChart size={17} /> التقرير الشهري</button>} />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{cards.map(([label, value, I, color]) => <div key={label} className="panel flex items-center gap-4 p-5"><div className={`grid h-12 w-12 place-items-center rounded-xl ${color}`}><I size={22} /></div><div><p className="text-xs font-bold text-slate-500">{label}</p><b className="mt-1 block text-2xl">{value}</b></div></div>)}</div>
-      <div className="grid gap-5 xl:grid-cols-[1.45fr_.8fr]"><Chart title="متوسط تقييم الموظفين حسب الفروع" sub="مقارنة النتائج المعتمدة"><ResponsiveContainer width="100%" height={280}><BarChart data={branchData}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 11 }} /><YAxis domain={[0, 100]} /><Tooltip /><Bar dataKey="avg" fill="#7f1d1d" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></Chart><Chart title="توزيع تصنيفات الأداء" sub="إجمالي الموظفين المقيمين"><ResponsiveContainer width="100%" height={220}><PieChart><Pie data={dist} innerRadius={58} outerRadius={88} paddingAngle={4} dataKey="value">{dist.map((_, i) => <Cell key={i} fill={["#16a34a", "#2563eb", "#0ea5e9", "#f59e0b", "#ef4444"][i]} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer></Chart></div>
-      <div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]"><Chart title="تطور الأداء الشهري" sub="آخر ستة أشهر"><ResponsiveContainer width="100%" height={250}><AreaChart data={[["يناير", 76], ["فبراير", 79], ["مارس", 78], ["أبريل", 82], ["مايو", 84], ["يونيو", avg]].map(([month, value]) => ({ month, value }))}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="month" axisLine={false} /><YAxis domain={[50, 100]} /><Tooltip /><Area type="monotone" dataKey="value" stroke="#7f1d1d" fill="#fee2e2" /></AreaChart></ResponsiveContainer></Chart><div className="panel overflow-hidden"><div className="bg-gradient-to-br from-brand-800 to-brand-700 p-6 text-white"><div className="flex justify-between"><span>موظف الشهر</span><Trophy className="text-amber-300" /></div><div className="mt-5 flex items-center gap-4"><div className="grid h-16 w-16 place-items-center rounded-2xl bg-white/15 text-xl font-bold">{topEmployee?.name?.[0] || "—"}</div><div><h3 className="text-xl font-extrabold">{topEmployee?.name || "لا توجد بيانات"}</h3><p className="text-sm text-red-100">{topEmployee?.branch || ""}</p></div></div></div><div className="p-5"><div className="flex justify-between"><span>التقييم النهائي</span><b className="text-2xl text-brand-700">{top?.total || 0}%</b></div><div className="mt-3 h-2 rounded-full bg-slate-100"><div className="h-full rounded-full bg-brand-700" style={{ width: `${top?.total || 0}%` }} /></div></div></div></div>
+      <PageHead title={"صباح الخير، " + settings.manager.name.split(" ")[0] + " 👋"} desc={"ملخص KPI للشهر " + month} action={<button onClick={() => setPage("performance_kpi_scores")} className="btn-primary"><FileBarChart size={17} /> تقرير KPI</button>} />
+      <div className="rounded-xl bg-blue-50 p-3 text-sm font-bold text-blue-700">يتم احتساب KPI من العمليات المعتمدة الداخلة في KPI فقط.</div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{cards.map(([label, value, I, color]) => <div key={label} className="panel flex items-center gap-4 p-5"><div className={"grid h-12 w-12 place-items-center rounded-xl " + color}><I size={22} /></div><div><p className="text-xs font-bold text-slate-500">{label}</p><b className="mt-1 block text-2xl">{value}</b></div></div>)}</div>
+      <div className="grid gap-5 xl:grid-cols-[1.45fr_.8fr]"><Chart title="متوسط درجة KPI حسب الفروع" sub="النتائج الموحدة"><ResponsiveContainer width="100%" height={280}><BarChart data={branchData}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 11 }} /><YAxis domain={[0, 100]} /><Tooltip /><Bar dataKey="avg" fill="#7f1d1d" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></Chart><Chart title="توزيع تصنيفات الأداء" sub="إجمالي الموظفين المقيمين"><ResponsiveContainer width="100%" height={220}><PieChart><Pie data={dist} innerRadius={58} outerRadius={88} paddingAngle={4} dataKey="value">{dist.map((_, i) => <Cell key={i} fill={["#16a34a", "#2563eb", "#0ea5e9", "#f59e0b", "#ef4444"][i]} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer></Chart></div>
+      <div className="panel overflow-hidden"><div className="bg-gradient-to-br from-brand-800 to-brand-700 p-6 text-white"><div className="flex justify-between"><span>موظف الشهر</span><Trophy className="text-amber-300" /></div>{top ? <div className="mt-5 flex items-center gap-4"><div className="grid h-16 w-16 place-items-center rounded-2xl bg-white/15 text-xl font-bold">{top.employee_name?.[0] || "—"}</div><div><h3 className="text-xl font-extrabold">{top.employee_name}</h3><p className="text-sm text-red-100">{top.branches?.length ? top.branches.join("، ") : top.branch} • {top.job || top.job_name}</p></div></div> : <p className="mt-5">لا توجد بيانات كافية لاختيار موظف الشهر.</p>}</div>{top && <div className="p-5"><div className="flex justify-between"><span>درجة KPI النهائية</span><b className="text-2xl text-brand-700">{Number(top.final_kpi_score ?? top.final_score).toFixed(2)}%</b></div><p className="mt-2 text-sm text-slate-500">نسبة الإنجاز: {top.achievement_percentage}%</p><p className="mt-2 text-sm font-bold text-slate-600">أعلى درجة KPI نهائية مع مراعاة الإنتاجية وجودة الأداء.</p><div className="mt-3 h-2 rounded-full bg-slate-100"><div className="h-full rounded-full bg-brand-700" style={{ width: Math.min(100, Number(top.final_kpi_score ?? top.final_score)) + "%" }} /></div></div>}</div>
     </div>
   );
 }
@@ -5205,95 +5213,35 @@ function EnhancedEvaluations({ employees, evaluations, setEvaluations, settings,
   );
 }
 
-function EnhancedTopEmployees({ employees, evaluations }) {
-  const latestByEmployee = new Map();
-  const approved = evaluations.filter((ev) => {
-    const status = String(ev.status || "");
-    return status.includes("معتمد") || status.includes("معتمد");
-  });
-  const sourceEvaluations = approved.length ? approved : evaluations;
-  [...sourceEvaluations]
-    .sort((a, b) => String(b.month).localeCompare(String(a.month)) || effectiveEvaluationTotal(b) - effectiveEvaluationTotal(a))
-    .forEach((ev) => {
-      if (!latestByEmployee.has(ev.employeeId)) latestByEmployee.set(ev.employeeId, ev);
-    });
-  const ranked = employees
-    .map((employee) => {
-      const ev = latestByEmployee.get(employee.id);
-      return { ...employee, evaluation: ev, total: ev ? effectiveEvaluationTotal(ev) : 0 };
-    })
-    .sort((a, b) => b.total - a.total || String(a.name).localeCompare(String(b.name), "ar"));
-  const winners = branches
-    .map((branch) => ranked.filter((e) => e.branch === branch)[0])
-    .filter(Boolean);
-  const best = ranked[0] || {};
-  const printCertificate = (employee) =>
-    printDocument(
-      "شهادة موظف الشهر",
-      `<div class="cert"><h1 class="brand">شهادة تقدير</h1><p class="muted">تمنح هذه الشهادة إلى</p><p class="big">${employee.name || ""}</p><p>وذلك لتميزه في الأداء وتحقيقه نتيجة ${employee.total || 0}% خلال الشهر.</p><h3>${employee.job || ""} - ${employee.branch || ""}</h3><p class="muted">${APP_OFFICIAL_NAME}</p></div>`,
-    );
+function EnhancedTopEmployees({ employees, currentCompany, currentUser }) {
+  const companyId = currentCompany?.company_id || currentUser?.company_id || "";
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [ranked, setRanked] = useState([]);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    if (!companyId) return undefined;
+    setLoading(true);
+    kpiScoresService.loadKpiScores(companyId, { month }, employees).then((result) => { if (alive) setRanked(result.ranking || []); }).catch((error) => { console.error("Employee of month KPI error:", error); if (alive) setRanked([]); }).finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [companyId, month, employees]);
+  const valid = [...ranked].filter((row) => Number.isFinite(Number(row.final_kpi_score ?? row.final_score))).sort((a, b) => Number(b.final_kpi_score ?? b.final_score) - Number(a.final_kpi_score ?? a.final_score) || Number(b.total_operations || b.operations?.total_operations || 0) - Number(a.total_operations || a.operations?.total_operations || 0));
+  const positive = valid.filter((row) => Number(row.final_kpi_score ?? row.final_score) > 0);
+  const best = positive[0] || valid[0] || null;
+  const branchNames = [...new Set(valid.flatMap((row) => row.branches?.length ? row.branches : [row.branch]).filter(Boolean))];
+  const winners = branchNames.map((branch) => valid.find((row) => row.branch === branch || row.branches?.includes(branch))).filter(Boolean);
+  const printCertificate = (employee) => employee && printDocument("شهادة موظف الشهر", '<div class="cert"><h1 class="brand">شهادة تقدير</h1><p class="muted">تمنح هذه الشهادة إلى</p><p class="big">' + (employee.employee_name || '') + '</p><p>أعلى درجة KPI نهائية مع مراعاة الإنتاجية وجودة الأداء: ' + Number(employee.final_kpi_score ?? employee.final_score).toFixed(2) + '%</p><h3>' + (employee.job || employee.job_name || '') + ' - ' + (employee.branch || '') + '</h3><p class="muted">' + APP_OFFICIAL_NAME + '</p></div>');
   return (
     <div className="space-y-5">
-      <PageHead
-        title="موظف الشهر"
-        desc="ترتيب دقيق لأفضل الموظفين حسب أعلى نتيجة تقييم"
-        action={
-          <button onClick={() => printCertificate(best)} className="btn-secondary">
-            <Printer size={17} /> طباعة شهادة الموظف الأول
-          </button>
-        }
-      />
-      <div className="rounded-3xl bg-gradient-to-l from-brand-900 to-[#26151a] p-8 text-white">
-        <div className="flex flex-col items-center gap-6 sm:flex-row">
-          <div className="grid h-28 w-28 place-items-center rounded-full border-4 border-amber-300 bg-white/10 text-3xl font-bold">
-            {best.name?.split(" ").slice(0, 2).map((x) => x[0]).join("")}
-          </div>
-          <div>
-            <span className="rounded-full bg-amber-300 px-3 py-1 text-xs font-bold text-amber-950">الأفضل على مستوى الشركة</span>
-            <h2 className="mt-4 text-3xl font-extrabold">{best.name}</h2>
-            <p className="mt-2 text-red-100/70">{best.job} • {best.branch}</p>
-            <p className="mt-4 text-sm text-red-100/80">سبب الاختيار: أعلى نتيجة تقييم مع الالتزام والانضباط وجودة الأداء.</p>
-          </div>
-          <b className="sm:mr-auto text-5xl text-amber-300">{best.total}%</b>
-        </div>
-      </div>
-      <div className="panel p-5">
-        <h3 className="mb-4 text-lg font-extrabold">أفضل موظف في كل فرع</h3>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {winners.map((x, i) => (
-            <div key={`${x.branch}-${x.id}`} className="rounded-2xl border p-4">
-              <div className="flex items-center gap-3">
-                <div className="grid h-12 w-12 place-items-center rounded-xl bg-brand-50 font-bold text-brand-700">{i + 1}</div>
-                <div>
-                  <b>{x.name}</b>
-                  <p className="text-xs text-slate-500">{x.branch} • {x.job}</p>
-                </div>
-                <b className="mr-auto text-xl text-brand-700">{x.total}%</b>
-              </div>
-              <button onClick={() => printCertificate(x)} className="btn-secondary mt-4 w-full">
-                <Printer size={15} /> طباعة شهادة لهذا الموظف فقط
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="panel p-5">
-        <h3 className="mb-4 text-lg font-extrabold">ترتيب أفضل 10 موظفين</h3>
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>الترتيب</th><th>الموظف</th><th>الفرع</th><th>الوظيفة</th><th>النتيجة</th></tr></thead>
-            <tbody>
-              {ranked.slice(0, 10).map((x, i) => (
-                <tr key={x.id}><td>{i + 1}</td><td className="font-bold">{x.name}</td><td>{x.branch}</td><td>{x.job}</td><td>{x.total}%</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <PageHead title="موظف الشهر" desc="الاختيار من قائمة KPI الموحدة للعمليات المعتمدة الداخلة في KPI فقط" action={<div className="flex gap-2"><input type="month" value={month} onChange={(event) => setMonth(event.target.value)} className="field max-w-[170px]" /><button disabled={!best} onClick={() => printCertificate(best)} className="btn-secondary"><Printer size={17} /> طباعة شهادة الموظف الأول</button></div>} />
+      {loading && <div className="panel p-6 text-center">جاري احتساب KPI...</div>}
+      {!loading && !best && <div className="rounded-xl bg-amber-50 p-5 font-bold text-amber-700">لا توجد بيانات كافية لاختيار موظف الشهر.</div>}
+      {best && <div className="rounded-3xl bg-gradient-to-l from-brand-900 to-[#26151a] p-8 text-white"><div className="flex flex-col items-center gap-6 sm:flex-row"><div className="grid h-28 w-28 place-items-center rounded-full border-4 border-amber-300 bg-white/10 text-3xl font-bold">{best.employee_name?.split(" ").slice(0, 2).map((x) => x[0]).join("")}</div><div><span className="rounded-full bg-amber-300 px-3 py-1 text-xs font-bold text-amber-950">الأفضل على مستوى الشركة</span><h2 className="mt-4 text-3xl font-extrabold">{best.employee_name}</h2><p className="mt-2 text-red-100/70">{best.job || best.job_name} • {best.branches?.length ? best.branches.join("، ") : best.branch}</p><p className="mt-3">نسبة الإنجاز: {best.achievement_percentage}% {best.achievement_percentage > 100 ? "• متجاوز الهدف" : ""}</p><p className="mt-4 text-sm text-red-100/80">سبب الاختيار: أعلى درجة KPI نهائية مع مراعاة الإنتاجية وجودة الأداء.</p></div><b className="text-5xl text-amber-300 sm:mr-auto">{Number(best.final_kpi_score ?? best.final_score).toFixed(2)}%</b></div></div>}
+      <div className="panel p-5"><h3 className="mb-4 text-lg font-extrabold">أفضل موظف في كل فرع</h3><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{winners.map((x, i) => <div key={(x.branch || "branch") + x.employee_id} className="rounded-2xl border p-4"><div className="flex items-center gap-3"><div className="grid h-12 w-12 place-items-center rounded-xl bg-brand-50 font-bold text-brand-700">{i + 1}</div><div><b>{x.employee_name}</b><p className="text-xs text-slate-500">{x.branch} • {x.job || x.job_name}</p></div><b className="mr-auto text-xl text-brand-700">{Number(x.final_kpi_score ?? x.final_score).toFixed(2)}%</b></div></div>)}</div></div>
+      <div className="panel p-5"><h3 className="mb-4 text-lg font-extrabold">أفضل 10 موظفين حسب KPI</h3><div className="table-wrap"><table><thead><tr><th>الترتيب</th><th>الموظف</th><th>الفرع / الفروع</th><th>الوظيفة</th><th>درجة KPI النهائية</th><th>نسبة الإنجاز</th><th>العمليات</th><th>الهدف</th></tr></thead><tbody>{valid.slice(0, 10).map((x, i) => <tr key={x.employee_id}><td>{i + 1}</td><td className="font-bold">{x.employee_name}</td><td>{x.branches?.length ? x.branches.join("، ") : x.branch}</td><td>{x.job || x.job_name}</td><td>{Number(x.final_kpi_score ?? x.final_score).toFixed(2)}%</td><td>{x.achievement_percentage}%</td><td>{x.total_operations ?? x.operations?.total_operations ?? 0}</td><td>{x.target_operations}</td></tr>)}</tbody></table></div></div>
     </div>
   );
 }
-
 function EnhancedPlans({ employees, evaluations, settings, setSettings }) {
   const plans = settings.improvementPlans || [];
   const setPlans = (updater) => {
@@ -9505,7 +9453,7 @@ function EnhancedProductivity({ employees = [], settings = {}, setSettings, curr
       {selectedEmployee && <div className="rounded-xl bg-brand-50 p-3 text-sm font-bold text-brand-800">{selectedEmployee.name} — {selectedEmployee.job || "بدون وظيفة"} — {selectedEmployee.branch || "بدون فرع"}</div>}
 
       <IndicatorManager title="إدارة مؤشرات الإنتاجية" indicators={indicators} setIndicators={setIndicators} />
-      <ProductivityComparison employees={activeEmployees} indicators={indicators} />
+      <ProductivityComparison currentCompany={currentCompany} currentUser={currentUser} />
       <Fields values={values} set={setValues} items={indicators.map((x) => [x.key, x.label])} />
       <Score n={score} label="نقاط الإنتاجية" />
 
@@ -9539,91 +9487,41 @@ function EnhancedDiscipline({ employees, settings, setSettings }) {
   );
 }
 
-function EnhancedIncentives({ employees, evaluations, setEvaluations }) {
+function EnhancedIncentives({ employees, evaluations, currentCompany, currentUser }) {
+  const companyId = currentCompany?.company_id || currentUser?.company_id || "";
   const [details, setDetails] = useState(null);
-  const [kpiScores, setKpiScores] = useState([]);
+  const [ranking, setRanking] = useState([]);
   const [kpiMonth, setKpiMonth] = useState(new Date().toISOString().slice(0, 7));
   const [kpiLoading, setKpiLoading] = useState(false);
   useEffect(() => {
     let alive = true;
+    if (!companyId) return undefined;
     setKpiLoading(true);
-    kpiCalculationService.loadKpiScores(kpiMonth)
-      .then((rows) => {
-        if (alive) setKpiScores(rows || []);
-      })
-      .catch((error) => {
-        console.error("Incentives KPI load error:", error);
-        if (alive) setKpiScores([]);
-      })
-      .finally(() => alive && setKpiLoading(false));
-    return () => {
-      alive = false;
-    };
-  }, [kpiMonth]);
-  const kpiByEmployee = kpiScores.reduce((acc, row) => {
-    const key = row.employee_id;
-    if (!key) return acc;
-    acc[key] = acc[key] || { total: 0, count: 0 };
-    acc[key].total += Number(row.weighted_score || row.score || 0);
-    acc[key].count += 1;
-    return acc;
-  }, {});
-  const data = evaluations.map((ev) => {
-    const employee = employees.find((x) => x.id === ev.employeeId) || {};
-    const kpi = kpiByEmployee[employee.id];
-    const total = kpi ? Number(kpi.total.toFixed(2)) : null;
-    const cat = classify(total);
-    const rate = cat === "ممتاز" ? 0.1 : cat === "جيد جدًا" ? 0.07 : cat === "جيد" ? 0.04 : 0;
-    return { ...employee, evaluation: ev, total, rate, amount: total === null ? 0 : (employee.salary || 0) * rate * (total / 100), approval: ev.status, kpiMissing: total === null };
+    kpiScoresService.loadKpiScores(companyId, { month: kpiMonth }, employees).then((result) => { if (alive) setRanking(result.ranking || []); }).catch((error) => { console.error("Incentives KPI load error:", error); if (alive) setRanking([]); }).finally(() => { if (alive) setKpiLoading(false); });
+    return () => { alive = false; };
+  }, [companyId, kpiMonth, employees]);
+  const latestEvaluation = (employeeId) => [...evaluations].filter((row) => String(row.employeeId || row.employee_id) === String(employeeId)).sort((a, b) => String(b.month || "").localeCompare(String(a.month || "")))[0];
+  const bonusPercentage = (score) => score >= 95 ? 20 : score >= 90 ? 15 : score >= 85 ? 10 : score >= 80 ? 5 : 0;
+  const data = ranking.map((row) => {
+    const employee = employees.find((item) => String(item.id) === String(row.employee_id)) || {};
+    const score = Number(row.final_kpi_score ?? row.final_score ?? 0);
+    const percentage = bonusPercentage(score);
+    const salaryAvailable = Number(employee.salary) > 0;
+    const evaluation = latestEvaluation(row.employee_id);
+    const eligibility = score < 80 ? "غير مستحق" : evaluation && evaluation.status !== "معتمد" ? "بانتظار الاعتماد" : "مستحق الحافز";
+    return { ...employee, ...row, name: row.employee_name, job: row.job || row.job_name, final_kpi_score: score, bonus_percentage: percentage, suggested_bonus: salaryAvailable ? Number(employee.salary) * percentage / 100 : 0, salaryAvailable, eligibility, evaluation };
   });
   return (
     <div className="space-y-5">
-      <PageHead title="الحوافز والمكافآت" desc="احتساب آلي مع عرض تفاصيل أهلية كل موظف" action={<div className="flex flex-wrap gap-2"><input type="month" value={kpiMonth} onChange={(event) => setKpiMonth(event.target.value)} className="field max-w-[160px]" /><button onClick={() => exportExcel(data, "الحوافز")} className="btn-primary"><Download size={17} /> تصدير الكشف</button></div>} />
-      {!kpiLoading && !kpiScores.length && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800">لم يتم احتساب درجات KPI بعد</div>}
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Mini label="إجمالي الحوافز" value={money(data.reduce((s, x) => s + x.amount, 0))} I={CircleDollarSign} />
-        <Mini label="المستحقون" value={data.filter((x) => x.rate > 0).length} I={UserCheck} />
-        <Mini label="بانتظار الاعتماد" value={evaluations.filter((x) => x.status === "قيد المراجعة").length} I={Clock3} />
-      </div>
-      <div className="panel p-4">
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>الموظف</th><th>الفرع</th><th>الوظيفة</th><th>الراتب</th><th>التقييم</th><th>النسبة</th><th>الحافز المقترح</th><th>الاعتماد</th><th>التفاصيل</th></tr></thead>
-            <tbody>
-              {data.map((x) => (
-                <tr key={`${x.id}-${x.evaluation?.id}`}>
-                  <td className="font-bold">{x.name}</td><td>{x.branch}</td><td>{x.job}</td><td>{money(x.salary)}</td>
-                  <td>{x.kpiMissing ? <Status>لم يتم احتساب KPI</Status> : <><Status>{classify(x.total)}</Status> {x.total}%</>}</td><td>{x.rate * 100}%</td><td className="font-bold text-brand-700">{money(x.amount)}</td>
-                  <td>
-                    <select value={x.approval} onChange={(e) => setEvaluations((list) => list.map((ev) => ev.id === x.evaluation.id ? { ...ev, status: e.target.value } : ev))} className="field !h-9">
-                      <option>قيد المراجعة</option><option>معتمد</option><option>مرفوض</option>
-                    </select>
-                  </td>
-                  <td><button onClick={() => setDetails(x)} className="btn-secondary !h-9"><Eye size={15} /> عرض</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      {details && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
-          <div className="panel w-full max-w-2xl p-6">
-            <div className="mb-5 flex items-center"><h3 className="text-lg font-extrabold">تفاصيل استحقاق الحافز</h3><button onClick={() => setDetails(null)} className="mr-auto"><X /></button></div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <Info t="الموظف" v={details.name} /><Info t="الفرع" v={details.branch} /><Info t="الوظيفة" v={details.job} /><Info t="الراتب" v={money(details.salary)} />
-              <Info t="نتيجة التقييم" v={`${details.total}% - ${classify(details.total)}`} /><Info t="نسبة الحافز" v={`${details.rate * 100}%`} />
-              <Info t="معادلة الحافز" v="الراتب أ— نسبة الحافز أ— نسبة التقييم" /><Info t="قيمة الحافز" v={money(details.amount)} />
-              <Info t="الشهر" v={details.evaluation?.month || ""} /><Info t="حالة الاعتماد" v={details.approval} />
-            </div>
-            <div className="mt-5 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">ملاحظات التقييم: {details.evaluation?.notes || "لا توجد ملاحظات"}</div>
-          </div>
-        </div>
-      )}
+      <PageHead title="الحوافز والمكافآت" desc="الاستحقاق والحافز المقترح حسب درجة KPI النهائية" action={<div className="flex flex-wrap gap-2"><input type="month" value={kpiMonth} onChange={(event) => setKpiMonth(event.target.value)} className="field max-w-[160px]" /><button onClick={() => exportExcel(data, "الحوافز")} className="btn-primary"><Download size={17} /> تصدير الكشف</button></div>} />
+      <div className="rounded-xl bg-blue-50 p-3 text-sm font-bold text-blue-700">يتم احتساب KPI من العمليات المعتمدة الداخلة في KPI فقط.</div>
+      {!kpiLoading && !ranking.length && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800">لم يتم احتساب درجات KPI بعد</div>}
+      <div className="grid gap-4 sm:grid-cols-3"><Mini label="إجمالي الحوافز المقترحة" value={money(data.reduce((sum, row) => sum + row.suggested_bonus, 0))} I={CircleDollarSign} /><Mini label="مستحقو الحافز" value={data.filter((row) => row.eligibility === "مستحق الحافز").length} I={UserCheck} /><Mini label="بانتظار الاعتماد" value={data.filter((row) => row.eligibility === "بانتظار الاعتماد").length} I={Clock3} /></div>
+      <div className="panel p-4"><div className="table-wrap"><table><thead><tr><th>الموظف</th><th>الفرع</th><th>الوظيفة</th><th>الراتب</th><th>درجة KPI النهائية</th><th>الاستحقاق</th><th>نسبة الحافز</th><th>الحافز المقترح</th><th>السبب</th><th>التفاصيل</th></tr></thead><tbody>{data.map((x) => <tr key={x.employee_id}><td className="font-bold">{x.name}</td><td>{x.branches?.length ? x.branches.join("، ") : x.branch}</td><td>{x.job}</td><td>{x.salaryAvailable ? money(x.salary) : "الراتب غير محدد"}</td><td>{x.final_kpi_score.toFixed(2)}%</td><td><Status>{x.eligibility}</Status></td><td>{x.bonus_percentage}%</td><td className="font-bold text-brand-700">{x.salaryAvailable ? money(x.suggested_bonus) : "0"}</td><td>{!x.salaryAvailable && x.bonus_percentage > 0 ? "لا يمكن احتساب الحافز لعدم توفر الراتب." : x.final_kpi_score < 80 ? "غير مستحق" : x.eligibility}</td><td><button onClick={() => setDetails(x)} className="btn-secondary !h-9"><Eye size={15} /> عرض</button></td></tr>)}</tbody></table></div></div>
+      {details && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><div className="panel w-full max-w-2xl p-6"><div className="mb-5 flex items-center"><h3 className="text-lg font-extrabold">تفاصيل استحقاق الحافز</h3><button onClick={() => setDetails(null)} className="mr-auto"><X /></button></div><div className="grid gap-3 md:grid-cols-2"><Info t="الموظف" v={details.name} /><Info t="الفرع" v={details.branch} /><Info t="الوظيفة" v={details.job} /><Info t="الراتب" v={details.salaryAvailable ? money(details.salary) : "الراتب غير محدد"} /><Info t="درجة KPI النهائية" v={details.final_kpi_score.toFixed(2) + "%"} /><Info t="نسبة الإنجاز" v={details.achievement_percentage + "%"} /><Info t="نسبة الحافز" v={details.bonus_percentage + "%"} /><Info t="قيمة الحافز" v={details.salaryAvailable ? money(details.suggested_bonus) : "لا يمكن احتساب الحافز لعدم توفر الراتب."} /><Info t="الشهر" v={kpiMonth} /><Info t="حالة الاستحقاق" v={details.eligibility} /></div></div></div>}
     </div>
   );
 }
-
 function PermissionsMatrix({ settings, setSettings }) {
   const roles = settings.permissions || defaultSettings.permissions;
   const roleNames = roles.map((r) => r.name);
@@ -9713,62 +9611,34 @@ function PermissionsMatrix({ settings, setSettings }) {
   );
 }
 
-function ProductivityComparison({ employees, indicators }) {
-  const [range, setRange] = useState({
-    aFrom: "2026-06-01",
-    aTo: "2026-06-15",
-    bFrom: "2026-06-16",
-    bTo: "2026-06-30",
-    scope: "employee",
-  });
-  const groups = range.scope === "branch" ? branches : employees.slice(0, 8).map((e) => e.name);
-  const rows = groups.map((name, index) => {
-    const a = Math.round(55 + ((index * 13) % 38));
-    const b = Math.round(50 + ((index * 17 + 9) % 45));
-    const change = a ? Math.round(((b - a) / a) * 100) : 0;
-    return { name, period_a: a, period_b: b, change };
-  });
+function ProductivityComparison({ currentCompany, currentUser }) {
+  const companyId = currentCompany?.company_id || currentUser?.company_id || "";
+  const now = new Date();
+  const year = now.getFullYear();
+  const monthNumber = String(now.getMonth() + 1).padStart(2, "0");
+  const lastDay = new Date(year, now.getMonth() + 1, 0).getDate();
+  const [range, setRange] = useState({ aFrom: year + "-" + monthNumber + "-01", aTo: year + "-" + monthNumber + "-15", bFrom: year + "-" + monthNumber + "-16", bTo: year + "-" + monthNumber + "-" + String(lastDay).padStart(2, "0"), scope: "employee" });
+  const [rows, setRows] = useState([]);
+  const [realBranches, setRealBranches] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let alive = true;
+    if (!companyId || !range.aFrom || !range.aTo || !range.bFrom || !range.bTo) return undefined;
+    setLoading(true); setError("");
+    dailyOperationsReportsService.compareProductivityPeriods(companyId, range).then((result) => { if (alive) { setRows(result.rows || []); setRealBranches(result.branches || []); } }).catch((loadError) => { console.error("Productivity comparison error:", loadError); if (alive) { setRows([]); setRealBranches([]); setError(loadError.message || "تعذر تحميل المقارنة"); } }).finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [companyId, range.aFrom, range.aTo, range.bFrom, range.bTo, range.scope]);
+  const scopeLabel = range.scope === "branch" ? "الفرع" : range.scope === "job" ? "الوظيفة" : range.scope === "operation_type" ? "نوع العملية" : "الموظف";
   return (
     <div className="rounded-2xl border border-slate-200 p-4">
-      <div className="mb-4 flex flex-wrap items-end gap-3">
-        <h3 className="w-full text-lg font-extrabold">مقارنة الإنتاجية بين فترتين</h3>
-        <Label t="الفترة أ من"><input type="date" value={range.aFrom} onChange={(e) => setRange({ ...range, aFrom: e.target.value })} className="field mt-2" /></Label>
-        <Label t="الفترة أ إلى"><input type="date" value={range.aTo} onChange={(e) => setRange({ ...range, aTo: e.target.value })} className="field mt-2" /></Label>
-        <Label t="الفترة ب من"><input type="date" value={range.bFrom} onChange={(e) => setRange({ ...range, bFrom: e.target.value })} className="field mt-2" /></Label>
-        <Label t="الفترة ب إلى"><input type="date" value={range.bTo} onChange={(e) => setRange({ ...range, bTo: e.target.value })} className="field mt-2" /></Label>
-        <Label t="نطاق المقارنة"><select value={range.scope} onChange={(e) => setRange({ ...range, scope: e.target.value })} className="field mt-2"><option value="employee">الموظف</option><option value="branch">الفرع</option></select></Label>
-      </div>
-      <div className="grid gap-4 xl:grid-cols-[1fr_1.1fr]">
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>{range.scope === "branch" ? "الفرع" : "الموظف"}</th><th>الفترة أ</th><th>الفترة ب</th><th>نسبة التغير</th></tr></thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.name}>
-                  <td className="font-bold">{r.name}</td>
-                  <td>{r.period_a}</td>
-                  <td>{r.period_b}</td>
-                  <td className={r.change >= 0 ? "font-bold text-emerald-600" : "font-bold text-red-600"}>{r.change}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <ResponsiveContainer width="100%" height={260}>
-          <BarChart data={rows}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-            <YAxis />
-            <Tooltip />
-            <Bar dataKey="period_a" fill="#94a3b8" radius={[6, 6, 0, 0]} />
-            <Bar dataKey="period_b" fill="#7f1d1d" radius={[6, 6, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+      <div className="mb-4 flex flex-wrap items-end gap-3"><h3 className="w-full text-lg font-extrabold">مقارنة الإنتاجية بين فترتين</h3><Label t="الفترة أ من"><input type="date" value={range.aFrom} onChange={(e) => setRange({ ...range, aFrom: e.target.value })} className="field mt-2" /></Label><Label t="الفترة أ إلى"><input type="date" value={range.aTo} onChange={(e) => setRange({ ...range, aTo: e.target.value })} className="field mt-2" /></Label><Label t="الفترة ب من"><input type="date" value={range.bFrom} onChange={(e) => setRange({ ...range, bFrom: e.target.value })} className="field mt-2" /></Label><Label t="الفترة ب إلى"><input type="date" value={range.bTo} onChange={(e) => setRange({ ...range, bTo: e.target.value })} className="field mt-2" /></Label><Label t="نطاق المقارنة"><select value={range.scope} onChange={(e) => setRange({ ...range, scope: e.target.value })} className="field mt-2"><option value="employee">الموظف</option><option value="branch">الفرع</option><option value="job">الوظيفة</option><option value="operation_type">نوع العملية</option></select></Label></div>
+      <p className="mb-3 rounded-xl bg-blue-50 p-3 text-xs font-bold text-blue-700">يتم احتساب KPI من العمليات المعتمدة الداخلة في KPI فقط. الفروع الفعلية في الفترتين: {realBranches.length ? realBranches.join("، ") : "لا توجد بيانات"}</p>
+      {error && <div className="mb-3 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</div>}
+      {loading ? <div className="py-8 text-center">جاري تحميل المقارنة...</div> : <div className="grid gap-4 xl:grid-cols-[1fr_1.1fr]"><div className="table-wrap"><table><thead><tr><th>{scopeLabel}</th><th>الفترة أ</th><th>الفترة ب</th><th>نسبة التغير</th></tr></thead><tbody>{rows.length ? rows.map((row) => <tr key={row.name}><td className="font-bold">{row.name}</td><td>{row.period_a}</td><td>{row.period_b}</td><td className={row.change === null || row.change >= 0 ? "font-bold text-emerald-600" : "font-bold text-red-600"}>{row.change_label}</td></tr>) : <tr><td colSpan={4} className="py-6 text-center text-slate-400">لا توجد بيانات معتمدة داخلة في KPI ضمن الفترتين.</td></tr>}</tbody></table></div><ResponsiveContainer width="100%" height={260}><BarChart data={rows}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="period_a" fill="#94a3b8" radius={[6, 6, 0, 0]} /><Bar dataKey="period_b" fill="#7f1d1d" radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer></div>}
     </div>
   );
 }
-
 const xmlEscape = (value = "") =>
   String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const crc32 = (input) => {
