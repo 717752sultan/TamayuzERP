@@ -232,6 +232,7 @@ const fullHrNavItems = [
   ["daily_operations_reports", "تقارير العمليات اليومية"],
   ["attendance_dashboard", "لوحة حساب الدوام"],
   ["attendance_records", "تسجيل حضور وانصراف"],
+  ["hr-attendance-records", "\u0627\u0644\u062d\u0636\u0648\u0631 \u0648\u0627\u0644\u063a\u064a\u0627\u0628"],
   ["bulk_attendance", "تحضير جماعي"],
   ["attendance_requests", "معالجة طلبات العمل"],
   ["working_hours_report", "تقرير ساعات الاشتغال"],
@@ -245,15 +246,20 @@ const fullHrNavItems = [
   ["hr_leaves", "الإجازات"],
   ["hr_requests_approvals", "الطلبات والموافقات"],
   ["hr_salary", "الرواتب"],
-  ["templates", "نماذج التقييم"],
-  ["performance_criteria", "معايير الأداء"],
-  ["evaluations", "التقييم"],
-  ["performance_kpi_scores", "درجات KPI"],
-  ["kpi_settings", "إعدادات KPI"],
-  ["productivity", "الإنتاجية"],
-  ["incentives", "الحوافز"],
-  ["top", "موظف الشهر"],
-  ["plans", "خطط التحسين"],
+  ["templates", "\u0646\u0645\u0627\u0630\u062c \u0627\u0644\u062a\u0642\u064a\u064a\u0645"],
+  ["evaluations", "\u062a\u0642\u064a\u064a\u0645 \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646"],
+  ["performance_criteria", "\u0645\u0639\u0627\u064a\u064a\u0631 \u0627\u0644\u0623\u062f\u0627\u0621"],
+  ["performance-monthly-targets", "\u0623\u0647\u062f\u0627\u0641 \u0627\u0644\u0634\u0647\u0631"],
+  ["performance-branch-targets", "\u0623\u0647\u062f\u0627\u0641 \u0627\u0644\u0641\u0631\u0648\u0639"],
+  ["performance-attendance-rules", "\u0642\u0648\u0627\u0639\u062f \u0627\u0644\u062d\u0636\u0648\u0631 \u0648\u0627\u0644\u0627\u0646\u0636\u0628\u0627\u0637"],
+  ["performance_kpi_scores", "\u062f\u0631\u062c\u0627\u062a KPI"],
+  ["kpi_settings", "\u0625\u0639\u062f\u0627\u062f\u0627\u062a KPI"],
+  ["productivity", "\u0627\u0644\u0625\u0646\u062a\u0627\u062c\u064a\u0629"],
+  ["incentives", "\u0627\u0644\u062d\u0648\u0627\u0641\u0632"],
+  ["performance-incentive-exclusions", "\u0627\u0633\u062a\u062b\u0646\u0627\u0621\u0627\u062a \u0627\u0644\u062d\u0648\u0627\u0641\u0632"],
+  ["performance-process-guide", "\u0634\u0631\u062d \u0622\u0644\u064a\u0629 \u0627\u0644\u062a\u0642\u064a\u064a\u0645 \u0648\u0627\u0644\u062d\u0648\u0627\u0641\u0632"],
+  ["top", "\u0645\u0648\u0638\u0641 \u0627\u0644\u0634\u0647\u0631"],
+  ["plans", "\u062e\u0637\u0637 \u0627\u0644\u062a\u062d\u0633\u064a\u0646"]
   ["recruitment", "التوظيف"],
   ["hr_training", "التدريب"],
   ["hr_disciplinary", "المخالفات والإنذارات"],
@@ -1168,6 +1174,7 @@ export default function App() {
         if (pageKey === "companies_admin" || pageKey === "platform_admin_settings") return platformAdmin;
         if (platformAdmin) return hasSelectedCompany;
         if (!hasSelectedCompany) return false;
+        if (isAdministrativeUser && ["performance-monthly-targets", "performance-branch-targets", "performance-attendance-rules", "performance-incentive-exclusions", "performance-process-guide", "hr-attendance-records"].includes(pageKey)) return true;
         if (["employees_grid", "employee_effectiveness", "user_activity_logs"].includes(pageKey)
           && !companyCanPageFromRows(companyPermissions, "employees", "can_view")) return false;
         if (pageKey === "employee_effectiveness"
@@ -1539,12 +1546,12 @@ export default function App() {
 	          {activePage === "performance_criteria" && <PerformanceCriteriaPageEnhanced {...p} />}{" "}
 	          {activePage === "performance_kpi_scores" && <KpiScoresDashboardPage {...p} />}{" "}
           {activePage === "kpi_settings" && <KpiSettingsPage {...p} />}{" "}
-          {activePage === "monthly_employee_targets" && <MonthlyEmployeeTargetsPage {...p} />}
-          {activePage === "branch_targets" && <BranchTargetsPage {...p} />}
-          {activePage === "attendance_kpi_rules" && <AttendanceKpiRulesPage {...p} />}
-          {activePage === "incentive_exclusions" && <IncentiveExclusionsPage {...p} />}
-          {activePage === "performance_process_guide" && <PerformanceProcessGuidePage {...p} />}
-          {activePage === "attendance_records" && <AttendanceRecordsPage {...p} />}{" "}
+          {activePage === "performance-monthly-targets" && <MonthlyEmployeeTargetsPage {...p} />}
+          {activePage === "performance-branch-targets" && <BranchTargetsPage {...p} />}
+          {activePage === "performance-attendance-rules" && <AttendanceKpiRulesPage {...p} />}
+          {activePage === "performance-incentive-exclusions" && <IncentiveExclusionsPage {...p} />}
+          {activePage === "performance-process-guide" && <PerformanceProcessGuidePage {...p} />}
+          {activePage === "hr-attendance-records" && <AttendanceRecordsPage {...p} />}{" "}
 	          {activePage === "users_permissions" && <UsersPermissionsPage {...p} />}{" "}
 	          {activePage === "recruitment" && <RecruitmentPage {...p} />}{" "}
 	          {activePage === "reports_center" && <EnterpriseReportsCenter {...p} />}{" "}
