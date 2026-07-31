@@ -123,6 +123,12 @@ import EmployeeSelfAttendancePage from "./components/hr/EmployeeSelfAttendancePa
 import EmployeePortalApp, { EmployeeLoginPage } from "./components/employee/EmployeePortalApp";
 import EmployeeAppAdminSettingsPage from "./components/hr/EmployeeAppAdminSettingsPage";
 import KpiScoresDashboardPage from "./components/hr/KpiScoresDashboardPage";
+import AttendanceRecordsPage from "./components/hr/AttendanceRecordsPage";
+import MonthlyEmployeeTargetsPage from "./components/performance/MonthlyEmployeeTargetsPage";
+import BranchTargetsPage from "./components/performance/BranchTargetsPage";
+import AttendanceKpiRulesPage from "./components/performance/AttendanceKpiRulesPage";
+import IncentiveExclusionsPage from "./components/performance/IncentiveExclusionsPage";
+import PerformanceProcessGuidePage from "./components/performance/PerformanceProcessGuidePage";
 import { kpiScoresService } from "./services/kpiScores";
 import { dailyOperationsReportsService } from "./services/dailyOperationsReports";
 import DailyOperationsReportsPage from "./components/hr/DailyOperationsReportsPage";
@@ -1529,10 +1535,16 @@ export default function App() {
 	          {activePage === "assets_import_export" && <FixedAssetsImportExportPage {...p} />}{" "}
 	          {activePage === "assets_depreciation_tools" && <AssetDepreciationPage {...p} />}{" "}
 	          {activePage?.startsWith("assets_") && !["assets_import_export", "assets_depreciation_tools"].includes(activePage) && <FixedAssetsModule {...p} activePage={activePage} />}{" "}
-	          {attendancePageKeys.has(activePage) && <AttendanceCalculationPage {...p} pageKey={activePage} />}{" "}
+	          {attendancePageKeys.has(activePage) && activePage !== "attendance_records" && <AttendanceCalculationPage {...p} pageKey={activePage} />}{" "}
 	          {activePage === "performance_criteria" && <PerformanceCriteriaPageEnhanced {...p} />}{" "}
 	          {activePage === "performance_kpi_scores" && <KpiScoresDashboardPage {...p} />}{" "}
           {activePage === "kpi_settings" && <KpiSettingsPage {...p} />}{" "}
+          {activePage === "monthly_employee_targets" && <MonthlyEmployeeTargetsPage {...p} />}
+          {activePage === "branch_targets" && <BranchTargetsPage {...p} />}
+          {activePage === "attendance_kpi_rules" && <AttendanceKpiRulesPage {...p} />}
+          {activePage === "incentive_exclusions" && <IncentiveExclusionsPage {...p} />}
+          {activePage === "performance_process_guide" && <PerformanceProcessGuidePage {...p} />}
+          {activePage === "attendance_records" && <AttendanceRecordsPage {...p} />}{" "}
 	          {activePage === "users_permissions" && <UsersPermissionsPage {...p} />}{" "}
 	          {activePage === "recruitment" && <RecruitmentPage {...p} />}{" "}
 	          {activePage === "reports_center" && <EnterpriseReportsCenter {...p} />}{" "}

@@ -63,15 +63,19 @@ export const kpiCalculationService = {
         return effectiveEmployeeId === normalizeEmployeeIdValue(employee.id) && isApprovedDailyOperation(op);
       });
       const criteria = await performanceCriteriaService.loadKpiCriteria(employee.job);
+      const [year, periodMonth] = String(month || "").split("-").map(Number);
+      const attendanceRows = year && periodMonth ? await supabase.select("performance_attendance_scores", `select=*&company_id=eq.${encodeURIComponent(cid)}&employee_id=eq.${encodeURIComponent(employee.id)}&period_year=eq.${year}&period_month=eq.${periodMonth}&limit=1`).catch(() => []) : [];
+      const attendanceResult = attendanceRows[0] || null;
       const scores = criteria.filter((c) => c.is_active).map((criterion) => {
-        const actual = employeeOps.reduce((sum, op) => {
+        const isAttendance = criterion.scoring_type === "auto_attendance" || criterion.scoring_type === "\u062a\u0644\u0642\u0627\u0626\u064a \u0645\u0646 \u0627\u0644\u062d\u0636\u0648\u0631";
+        const actual = isAttendance ? Number(attendanceResult?.attendance_score || 0) : employeeOps.reduce((sum, op) => {
           const criterionName = String(criterion.criterion_name || "");
           if (criterionName.includes("خطأ") || criterionName.includes("الأخطاء")) return sum + Number(op.error_count || 0);
           if (criterionName.includes("شكوى")) return sum + Number(op.customer_complaints || 0);
           if (criterionName.includes("منجزة") || criterionName.includes("مغلقة")) return sum + Number(op.completed_count || 0);
           return sum + Number(op.operation_count || 0);
         }, 0);
-        const score = scoreByThreshold(actual, criterion);
+        const score = isAttendance ? Math.max(0, Math.min(Number(criterion.max_score || 100), (actual / 100) * Number(criterion.max_score || 100))) : scoreByThreshold(actual, criterion);
         return {
           score_id: `KS-${employee.id}-${month}-${criterion.criterion_id}`,
           company_id: cid,
@@ -87,7 +91,7 @@ export const kpiCalculationService = {
           score,
           weighted_score: score * Number(criterion.weight || 0) / 100,
           source_module: criterion.scoring_type,
-          notes: "",
+          notes: isAttendance && !attendanceResult ? "\u0644\u0645 \u064a\u062a\u0645 \u0627\u062d\u062a\u0633\u0627\u0628 \u062f\u0631\u062c\u0629 \u0627\u0644\u062d\u0636\u0648\u0631 \u0644\u0647\u0630\u0627 \u0627\u0644\u0645\u0648\u0638\u0641 \u0641\u064a \u0647\u0630\u0627 \u0627\u0644\u0634\u0647\u0631." : "",
         };
       });
       return this.saveKpiScores(scores);

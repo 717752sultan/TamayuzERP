@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 import { isApprovedDailyOperation } from "./dailyOperations";
 import { exportWorkbook } from "./reportExport";
+import { performanceTargetsService } from "./performanceTargets";
 
 const n = (value) => Number(value || 0) || 0;
 const clampScore = (value) => Number(Math.max(0, Math.min(100, n(value))).toFixed(2));
@@ -273,8 +274,11 @@ export const kpiScoresService = {
       };
     });
     const operationsRows = await loadApprovedKpiOperations(companyId, { ...filters, aliasContext });
-    const scopedEmployees = filterEmployees(employees, companyId, filters);
-    const ranking = buildKpiEmployeeRanking(scopedEmployees, kpiRows, operationsRows, filters);
+    const monthParts = String(month || "").split("-").map(Number);
+    const targetRows = monthParts[0] && monthParts[1] ? await performanceTargetsService.loadEmployeeTargets(companyId, { period_year: monthParts[0], period_month: monthParts[1], is_active: true }).catch(() => []) : [];
+    const targetsByEmployee = new Map(targetRows.map((row) => [String(row.employee_id), row]));
+    const scopedEmployees = filterEmployees(employees, companyId, filters).map((employee) => { const target = targetsByEmployee.get(String(employee.id)); return target ? { ...employee, target_operations: Number(target.target_count || 0), monthly_target: target, missing_monthly_target: false } : { ...employee, missing_monthly_target: true }; });
+    const ranking = buildKpiEmployeeRanking(scopedEmployees, kpiRows, operationsRows, filters).map((row) => { const source = scopedEmployees.find((employee) => String(employee.id) === String(row.employee_id)); return { ...row, missing_monthly_target: source?.missing_monthly_target === true, target_warning: source?.missing_monthly_target ? "\u0644\u0645 \u064a\u062a\u0645 \u062a\u062d\u062f\u064a\u062f \u0647\u062f\u0641 \u0644\u0647\u0630\u0627 \u0627\u0644\u0645\u0648\u0638\u0641 \u0641\u064a \u0647\u0630\u0627 \u0627\u0644\u0634\u0647\u0631." : "" }; });
     return { kpiRows, operationsRows, ranking, employees: scopedEmployees, aliases: aliasContext };
   },
 
