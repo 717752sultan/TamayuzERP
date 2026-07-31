@@ -1,1 +1,1 @@
-﻿export { MonthlyEmployeeTargetsPage as default } from "./PerformanceTargetsPages";
+export { MonthlyEmployeeTargetsPage as default } from "./PerformanceTargetsPages";

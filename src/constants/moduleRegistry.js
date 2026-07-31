@@ -4,70 +4,70 @@ const ERP_MODULE_DEFINITIONS = [
   {
     key: "platform",
     label: erpModuleLabels.platform,
-    description: "إدارة الشركات وإعدادات المنصة",
+    description: "ط¥ط¯ط§ط±ط© ط§ظ„ط´ط±ظƒط§طھ ظˆط¥ط¹ط¯ط§ط¯ط§طھ ط§ظ„ظ…ظ†طµط©",
     permissionKey: "platform",
     order: 0,
   },
   {
     key: "hr",
     label: erpModuleLabels.hr,
-    description: "كل ما يخص الموظفين وشؤون الموارد البشرية والتقييم والحوافز والإعدادات والتقارير",
+    description: "ظƒظ„ ظ…ط§ ظٹط®طµ ط§ظ„ظ…ظˆط¸ظپظٹظ† ظˆط´ط¤ظˆظ† ط§ظ„ظ…ظˆط§ط±ط¯ ط§ظ„ط¨ط´ط±ظٹط© ظˆط§ظ„طھظ‚ظٹظٹظ… ظˆط§ظ„ط­ظˆط§ظپط² ظˆط§ظ„ط¥ط¹ط¯ط§ط¯ط§طھ ظˆط§ظ„طھظ‚ط§ط±ظٹط±",
     permissionKey: "module_hr",
     order: 1,
   },
   {
     key: "inventory",
     label: erpModuleLabels.inventory,
-    description: "إدارة الأصناف والمستودعات والحركات المخزنية",
+    description: "ط¥ط¯ط§ط±ط© ط§ظ„ط£طµظ†ط§ظپ ظˆط§ظ„ظ…ط³طھظˆط¯ط¹ط§طھ ظˆط§ظ„ط­ط±ظƒط§طھ ط§ظ„ظ…ط®ط²ظ†ظٹط©",
     permissionKey: "module_inventory",
     order: 2,
   },
   {
     key: "sales",
     label: erpModuleLabels.sales,
-    description: "إدارة العملاء وعروض الأسعار وأوامر وفواتير البيع",
+    description: "ط¥ط¯ط§ط±ط© ط§ظ„ط¹ظ…ظ„ط§ط، ظˆط¹ط±ظˆط¶ ط§ظ„ط£ط³ط¹ط§ط± ظˆط£ظˆط§ظ…ط± ظˆظپظˆط§طھظٹط± ط§ظ„ط¨ظٹط¹",
     permissionKey: "module_sales",
     order: 3,
   },
   {
     key: "purchasing",
     label: erpModuleLabels.purchasing,
-    description: "إدارة الموردين وطلبات وأوامر وفواتير الشراء",
+    description: "ط¥ط¯ط§ط±ط© ط§ظ„ظ…ظˆط±ط¯ظٹظ† ظˆط·ظ„ط¨ط§طھ ظˆط£ظˆط§ظ…ط± ظˆظپظˆط§طھظٹط± ط§ظ„ط´ط±ط§ط،",
     permissionKey: "module_purchasing",
     order: 4,
   },
   {
     key: "accounting",
     label: erpModuleLabels.accounting,
-    description: "إدارة الحسابات والقيود والسندات والتقارير المالية",
+    description: "ط¥ط¯ط§ط±ط© ط§ظ„ط­ط³ط§ط¨ط§طھ ظˆط§ظ„ظ‚ظٹظˆط¯ ظˆط§ظ„ط³ظ†ط¯ط§طھ ظˆط§ظ„طھظ‚ط§ط±ظٹط± ط§ظ„ظ…ط§ظ„ظٹط©",
     permissionKey: "module_accounting",
     order: 5,
   },
   {
     key: "crm",
     label: erpModuleLabels.crm,
-    description: "إدارة علاقات العملاء والفرص والمتابعات",
+    description: "ط¥ط¯ط§ط±ط© ط¹ظ„ط§ظ‚ط§طھ ط§ظ„ط¹ظ…ظ„ط§ط، ظˆط§ظ„ظپط±طµ ظˆط§ظ„ظ…طھط§ط¨ط¹ط§طھ",
     permissionKey: "module_crm",
     order: 6,
   },
   {
     key: "assets",
     label: erpModuleLabels.assets,
-    description: "إدارة سجل الأصول والعهد والإهلاك والصيانة",
+    description: "ط¥ط¯ط§ط±ط© ط³ط¬ظ„ ط§ظ„ط£طµظˆظ„ ظˆط§ظ„ط¹ظ‡ط¯ ظˆط§ظ„ط¥ظ‡ظ„ط§ظƒ ظˆط§ظ„طµظٹط§ظ†ط©",
     permissionKey: "module_assets",
     order: 7,
   },
   {
     key: "projects",
     label: erpModuleLabels.projects,
-    description: "إدارة المشاريع والمهام والفرق والمستندات",
+    description: "ط¥ط¯ط§ط±ط© ط§ظ„ظ…ط´ط§ط±ظٹط¹ ظˆط§ظ„ظ…ظ‡ط§ظ… ظˆط§ظ„ظپط±ظ‚ ظˆط§ظ„ظ…ط³طھظ†ط¯ط§طھ",
     permissionKey: "module_projects",
     order: 8,
   },
   {
     key: "system",
     label: erpModuleLabels.system,
-    description: "إدارة إعدادات النظام العامة الخاصة بالشركة",
+    description: "ط¥ط¯ط§ط±ط© ط¥ط¹ط¯ط§ط¯ط§طھ ط§ظ„ظ†ط¸ط§ظ… ط§ظ„ط¹ط§ظ…ط© ط§ظ„ط®ط§طµط© ط¨ط§ظ„ط´ط±ظƒط©",
     permissionKey: "system",
     order: 9,
   },
@@ -142,7 +142,7 @@ const dedupeByKey = (items = [], keyGetter) => {
       map.set(key, item);
       continue;
     }
-    const existingIsPlaceholder = existing.status === "placeholder" || existing.isPlaceholder === true || String(existing.description || "").includes("قيد التجهيز");
+    const existingIsPlaceholder = existing.status === "placeholder" || existing.isPlaceholder === true || String(existing.description || "").includes("ظ‚ظٹط¯ ط§ظ„طھط¬ظ‡ظٹط²");
     const itemIsActive = item.status === "active" || item.isActive === true || item.component || item.routeKey;
     if (existingIsPlaceholder && itemIsActive) map.set(key, item);
   }
@@ -162,7 +162,7 @@ const normalizeModulePage = (page = {}) => ({
   icon: page.icon || "BriefcaseBusiness",
   isOfficialPage: page.isOfficialPage !== false,
   navGroupKey: page.navGroupKey || `${page.moduleKey || "hr"}_pages`,
-  navGroupLabel: page.navGroupLabel || page.moduleLabel || erpModuleLabels[page.moduleKey] || "الصفحات",
+  navGroupLabel: page.navGroupLabel || page.moduleLabel || erpModuleLabels[page.moduleKey] || "ط§ظ„طµظپط­ط§طھ",
   navGroupOrder: Number(page.navGroupOrder || page.order || 9999),
   navItemOrder: Number(page.navItemOrder || page.order || 9999),
   navLabel: page.navLabel || page.label,
@@ -207,7 +207,7 @@ export const buildGroupedNavigation = (pages = []) => {
     if (!groups.has(groupKey)) {
       groups.set(groupKey, {
         key: groupKey,
-        label: page.navGroupLabel || page.moduleLabel || "الصفحات",
+        label: page.navGroupLabel || page.moduleLabel || "ط§ظ„طµظپط­ط§طھ",
         order: Number(page.navGroupOrder || 9999),
         pages: [],
       });
