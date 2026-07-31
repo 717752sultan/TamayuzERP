@@ -252,7 +252,7 @@ export const buildKpiEmployeeRanking = (employees = [], kpiRows = [], operations
     && (!filters.employeeId || row.employee_id === filters.employeeId)
     && (!filters.department || filters.department === "all" || row.department === filters.department));
   return rows
-    .sort((a, b) => (b.final_score ?? -1) - (a.final_score ?? -1) || n(b.operations?.total_operations) - n(a.operations?.total_operations))
+    .sort((a, b) => (b.final_kpi_score ?? b.final_score ?? -1) - (a.final_kpi_score ?? a.final_score ?? -1) || n(b.achievement_percentage) - n(a.achievement_percentage) || n(b.total_operations ?? b.operations?.total_operations) - n(a.total_operations ?? a.operations?.total_operations))
     .map((row, index) => ({ ...row, rank: index + 1 }));
 };
 
