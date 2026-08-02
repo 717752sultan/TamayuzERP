@@ -1,38 +1,17 @@
-export const pledgeDocumentTitles = {
-  contract: "عقد رهن عيني",
-  receipt: "سند استلام أصل مرهون",
-  delivery: "سند تسليم أصل للعميل",
-  due: "إشعار استحقاق",
-  overdue: "إشعار تأخير",
-  redemption: "إشعار فك رهن",
-  liquidation: "إشعار تصفية",
+export const pledgeDocumentTitles={contract:"عقد رهن عيني",receipt:"سند استلام أصل مرهون",delivery:"سند تسليم أصل للعميل",due:"إشعار استحقاق",overdue:"إشعار تأخير",redemption:"إشعار فك رهن",liquidation:"إشعار تصفية"};
+const esc=(value="")=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+const money=value=>new Intl.NumberFormat("ar-SA",{maximumFractionDigits:2}).format(Number(value||0))+" ر.س";
+const row=(label,value)=>`<div class="row"><b>${label}</b><span>${esc(value||"غير محدد")}</span></div>`;
+export const buildPledgeDocumentHtml=(type,data={},company={})=>{
+ const title=pledgeDocumentTitles[type]||"مستند رهن",asset=data.asset||{},precious=["ذهب","فضة","مجوهرات"].includes(asset.asset_type);
+ const declaration=`<section><h2>الإقرار</h2><p>أقر أنا الموقع أدناه / ______________________، حامل هوية رقم / ______________________، بأنني قمت بتسليم الأصل الموضح بياناته في هذا العقد إلى الشركة على سبيل الرهن العيني ضمانًا للمبلغ الموضح أعلاه، وأقر بأن الأصل المرهون مملوك لي ملكية صحيحة وخالٍ من أي نزاع أو مطالبة من الغير، وأتحمل كامل المسؤولية القانونية عن صحة البيانات والمستندات المقدمة.</p><p>كما أقر بأنني استلمت مبلغ الرهن الموضح في هذا العقد، وألتزم بسداده خلال مدة الرهن المحددة، وفي حال عدم السداد أو التمديد وفق الإجراءات المعتمدة، يحق للإدارة اتخاذ الإجراءات النظامية المعتمدة بشأن الأصل المرهون بعد الإشعارات اللازمة.</p></section>`;
+ return `<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>${title}</title><style>
+ @page{size:A4;margin:14mm}*{box-sizing:border-box}body{font-family:Tahoma,Arial,sans-serif;color:#172033;line-height:1.8;margin:0;background:white}header{text-align:center;border-bottom:3px solid #312e81;padding-bottom:14px;margin-bottom:18px}h1{color:#312e81;margin:0;font-size:25px}h2{font-size:17px;color:#312e81;border-right:4px solid #312e81;padding-right:9px;margin:18px 0 10px}.meta{color:#475569}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.row{display:flex;justify-content:space-between;gap:15px;border:1px solid #cbd5e1;padding:7px 10px;border-radius:7px}.row b{color:#334155}.row span{text-align:left}section{break-inside:avoid}.declaration p{text-align:justify}.sign{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:38px}.sign div{text-align:center;border-top:1px solid #64748b;padding-top:8px;min-height:60px}.no-print{display:none!important}@media print{body{padding:0}}
+ </style></head><body><header><h1>${title}</h1><div class="meta">اسم المنشأة: ${esc(company.company_name||company.name||"Tamyuz ERP / Pure Money")}</div></header>
+ <section><h2>بيانات العقد</h2><div class="grid">${row("رقم عقد الرهن",data.pledge_no)}${row("تاريخ العقد",data.pledge_date)}${row("تاريخ الاستحقاق",data.due_date)}${row("الفرع",data.branch)}</div></section>
+ <section><h2>بيانات صاحب الرهن</h2><div class="grid">${row("الاسم",data.customer_name)}${row("نوع الهوية",data.identity_type)}${row("رقم الهوية",data.identity_number)}${row("الجوال",data.phone)}${row("العنوان",data.address)}</div></section>
+ <section><h2>بيانات الأصل المرهون</h2><div class="grid">${row("نوع الأصل",asset.asset_type)}${row("اسم الأصل",asset.asset_name)}${row("الوصف",asset.asset_description)}${row("الرقم التسلسلي",asset.serial_number)}${precious?row("الوزن",asset.gold_weight)+row("العيار",asset.gold_karat):""}${row("الحالة",asset.condition_status)}${row("إثبات الملكية",asset.ownership_proof)}${row("القيمة السوقية",money(asset.estimated_market_value))}${row("القيمة المقبولة للرهن",money(asset.accepted_pledge_value))}${row("نسبة التمويل",(asset.financing_ratio||0)+"%")}${row("أقصى مبلغ مسموح",money(asset.max_allowed_amount))}${row("مكان الحفظ",[`الفرع: ${data.branch||"غير محدد"}`,`الخزنة: ${asset.vault_no||"غير محدد"}`,`الرف: ${asset.shelf_no||"غير محدد"}`,`الكيس: ${asset.bag_no||"غير محدد"}`].join(" / "))}</div></section>
+ <section><h2>بيانات الرهن</h2><div class="grid">${row("مبلغ الرهن المطلوب",money(data.requested_amount))}${row("مبلغ الرهن المعتمد",money(data.approved_amount))}${row("الرسوم إن وجدت",money(data.total_fees))}${row("المدفوع",money(data.total_paid))}${row("المتبقي",money(data.remaining_amount))}${row("حالة الرهن",data.status)}${row("حالة الاعتماد",data.approval_status)}${row("الملاحظات",data.notes)}</div></section>
+ <div class="declaration">${declaration}</div><div class="sign"><div>توقيع صاحب الرهن</div><div>توقيع الموظف المستلم</div><div>اعتماد مدير الفرع</div><div>اعتماد الإدارة</div></div></body></html>`;
 };
-
-const escapeHtml = (value = "") => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
-
-export const buildPledgeDocumentHtml = (type, data = {}, company = {}) => {
-  const title = pledgeDocumentTitles[type] || "مستند رهن";
-  const asset = data.asset || {};
-  return `<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>${title}</title>
-  <style>body{font-family:Tahoma,Arial,sans-serif;color:#172033;padding:38px;line-height:2}h1{color:#312e81;border-bottom:2px solid #312e81;padding-bottom:12px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.box{border:1px solid #cbd5e1;border-radius:10px;padding:14px}.sign{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:55px}</style></head><body>
-  <h1>${title}</h1><div class="box"><b>بيانات الشركة</b><br>${escapeHtml(company.company_name || company.name || "")}</div>
-  <div class="grid"><div class="box"><b>بيانات العميل</b><br>الاسم: ${escapeHtml(data.customer_name)}<br>الهوية: ${escapeHtml(data.identity_number)}<br>الجوال: ${escapeHtml(data.phone)}</div>
-  <div class="box"><b>بيانات الأصل</b><br>النوع: ${escapeHtml(asset.asset_type || data.asset_type)}<br>الوصف: ${escapeHtml(asset.asset_description || data.asset_description)}<br>إثبات الملكية: ${escapeHtml(asset.ownership_proof || "")}</div></div>
-  <div class="box"><b>بيانات الرهن</b><br>رقم الرهن: ${escapeHtml(data.pledge_no)}<br>مبلغ الرهن: ${escapeHtml(data.approved_amount)}<br>تاريخ الرهن: ${escapeHtml(data.pledge_date)}<br>تاريخ الاستحقاق: ${escapeHtml(data.due_date)}<br>مدة الرهن وشروطه: ${escapeHtml(data.notes || "وفق الشروط المعتمدة لدى الشركة.")}</div>
-  <p>يقر العميل بملكية الأصل وصحة بياناته، وباستلام مبلغ الرهن المبين أعلاه، وباطلاعه على شروط الرهن والاستحقاق والتصفية.</p>
-  <div class="sign"><div>توقيع العميل:<br><br>____________</div><div>توقيع الموظف:<br><br>____________</div><div>اعتماد الإدارة:<br><br>____________</div></div>
-  </body></html>`;
-};
-
-export const printPledgeDocument = (type, data = {}, company = {}) => {
-  try {
-    const popup = window.open("", "_blank");
-    if (!popup) throw new Error("تعذر فتح نافذة الطباعة");
-    popup.document.write(buildPledgeDocumentHtml(type, data, company));
-    popup.document.close();
-    popup.focus();
-    popup.print();
-  } catch (error) {
-    console.error("Pledge document print error", error);
-  }
-};
+export const printPledgeDocument=(type,data={},company={})=>{try{const popup=window.open("","_blank");if(!popup)throw new Error("تعذر فتح نافذة الطباعة");popup.document.write(buildPledgeDocumentHtml(type,data,company));popup.document.close();popup.focus();popup.print()}catch(error){console.error("Pledge document print error",error)}};

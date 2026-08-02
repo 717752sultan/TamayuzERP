@@ -181,6 +181,7 @@ export const getPledgesDashboardStats = async (companyId, filters = {}) => {
     risk_percent: pledges.length ? Math.round((overdue.length / pledges.length) * 100) : 0, pledges, assets,
   };
 };
+export const listPledgeAuditLogs = (companyId, filters = {}) => safeList("pledge_audit_logs", companyId, filters, "action_at.desc");
 export const listPledgeSettings = (companyId) => safeList("pledge_settings", companyId, {}, "asset_type.asc");
 export const upsertPledgeSetting = (companyId, payload = {}) => save("pledge_settings", "setting_id", "setting", companyId, payload);
 
@@ -195,6 +196,6 @@ export const pledgesService = {
   createAssetValuation,listAssetValuations,approveAssetValuation,listPledgePayments,createPledgePayment,calculatePledgeBalance,
   listStorageLocations,createStorageLocation,updateStorageLocation,listPledgeNotifications,createPledgeNotification,markNotificationSent,
   listDisposals,createDisposal,approveDisposal,getPledgesDashboardStats,getActivePledgesReport,getDuePledgesReport,
-  getOverduePledgesReport,getVaultAssetsReport,getCustomerPledgesReport,listPledgeSettings,upsertPledgeSetting,
+  getOverduePledgesReport,getVaultAssetsReport,getCustomerPledgesReport,listPledgeAuditLogs,listPledgeSettings,upsertPledgeSetting,
 };
 export default pledgesService;
