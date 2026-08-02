@@ -117,6 +117,7 @@ import { APP_BRAND_NAME, APP_DESCRIPTION, APP_OFFICIAL_NAME, APP_REPORT_SUBTITLE
 import { buildReportBrandingHtml } from "./services/reportBranding";
 import { ERP_MODULES, ERP_PAGE_BY_KEY, ERP_PAGE_BY_ROUTE, buildGroupedNavigation, getModuleForPage, getModulePages, isPlaceholderPage } from "./constants/moduleRegistry";
 import HRFoundationPage from "./components/hr/HRFoundationPage";
+import HrReportsPage from "./components/hr/HrReportsPage";
 import HRExecutiveDashboard from "./components/hr/HRExecutiveDashboard";
 import AttendanceCalculationPage from "./components/hr/AttendanceCalculationPage";
 import EmployeeSelfAttendancePage from "./components/hr/EmployeeSelfAttendancePage";
@@ -1612,7 +1613,8 @@ export default function App() {
           {activePage === "hr_home" && <HRExecutiveDashboard {...p} />}
           {activePage === "employee_app_settings" && <EmployeeAppAdminSettingsPage {...p} />}
           {["hr_org_chart", "hr_settings"].includes(activePage) && <HRFoundationPage {...p} pageKey={activePage} />}
-          {genericHrPageKeys.has(activePage) && <HRModulePage pageKey={activePage} currentCompany={company} can={p.can} />}
+          {activePage === "hr_reports" && <HrReportsPage {...p} />}
+          {genericHrPageKeys.has(activePage) && activePage !== "hr_reports" && <HRModulePage pageKey={activePage} currentCompany={company} can={p.can} />}
           </>
           )}
           </PageErrorBoundary>
