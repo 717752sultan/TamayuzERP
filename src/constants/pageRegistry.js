@@ -9,6 +9,7 @@ export const erpModuleLabels = {
   crm: "CRM",
   assets: "الأصول",
   pledges: "الرهونات العينية",
+  advances: "إدارة السلف",
   projects: "المشاريع",
 };
 
@@ -223,6 +224,19 @@ const erpRegistryPages = [
     ["pledges-reports", "تقارير الرهون", "pledges.reports", ["can_view", "can_export", "can_print"]],
     ["pledges-settings", "إعدادات الرهون", "pledges.settings", ["can_view", "can_create", "can_edit", "can_configure"]],
   ].map(([key, label, permissionKey, actions], index) => [key, label, "pledges", key, permissionKey, actions, "active"]),
+  ...[
+    ["advances-dashboard","لوحة السلف","advances.dashboard",["can_view","can_export","can_print"]],
+    ["advances-new","طلب سلفة جديد","advances.new",["can_view","can_create","can_approve"]],
+    ["advances-list","السلف القائمة","advances.list",["can_view","can_edit","can_cancel","can_print"]],
+    ["advances-approvals","اعتماد السلف","advances.approvals",["can_view","can_approve","can_reject"]],
+    ["advances-disbursement","صرف السلفة","advances.disbursement",["can_view","can_create","can_approve","can_print"]],
+    ["advances-installments","جدول السداد","advances.installments",["can_view","can_edit","can_print"]],
+    ["advances-collections","التحصيل والسداد","advances.collections",["can_view","can_create","can_print"]],
+    ["advances-overdue","السلف المتأخرة","advances.overdue",["can_view","can_edit","can_manage"]],
+    ["advances-notifications","إشعارات السداد","advances.notifications",["can_view","can_create","can_edit"]],
+    ["advances-reports","تقارير السلف","advances.reports",["can_view","can_export","can_print"]],
+    ["advances-settings","إعدادات السلف","advances.settings",["can_view","can_create","can_edit","can_configure"]],
+  ].map(([key,label,permissionKey,actions])=>[key,label,"advances",key,permissionKey,actions,"active"]),
   ...["لوحة المبيعات", "العملاء", "عروض الأسعار", "أوامر البيع", "فواتير البيع", "مردودات البيع", "المدفوعات", "تقارير المبيعات"].map((label, index) => [`sales_${index + 1}`, label, "sales", `sales_${index + 1}`, `sales.page_${index + 1}`, index === 7 ? reportActions : commonActions, "placeholder"]),
   ...["لوحة المشتريات", "الموردون", "طلبات الشراء", "أوامر الشراء", "فواتير الشراء", "مردودات الشراء", "مدفوعات الموردين", "تقارير المشتريات"].map((label, index) => [`purchasing_${index + 1}`, label, "purchasing", index > 0 && index < 6 ? "inventory" : `purchasing_${index + 1}`, `purchasing.page_${index + 1}`, [2, 3].includes(index) ? approvalActions : index === 7 ? reportActions : commonActions, index > 0 && index < 6 ? "active" : "placeholder"]),
   ...["لوحة الحسابات", "دليل الحسابات", "القيود اليومية", "سند قبض", "سند صرف", "مراكز التكلفة", "العملات", "التقارير المالية", "ميزان المراجعة", "قائمة الدخل", "المركز المالي", "كشف حساب"].map((label, index) => [`accounting_${index + 1}`, label, "accounting", `accounting_${index + 1}`, `accounting.page_${index + 1}`, index >= 7 ? reportActions : financialActions, "placeholder"]),

@@ -65,6 +65,13 @@ const ERP_MODULE_DEFINITIONS = [
     order: 8,
   },
   {
+    key: "advances",
+    label: erpModuleLabels.advances,
+    description: "إدارة تشغيلية لطلبات السلف والصرف والسداد والاستحقاقات",
+    permissionKey: "module_advances",
+    order: 9,
+  },
+  {
     key: "projects",
     label: erpModuleLabels.projects,
     description: "إدارة المشاريع والمهام والفرق والمستندات",

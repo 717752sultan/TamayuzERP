@@ -132,6 +132,7 @@ import PerformanceProcessGuidePage from "./components/performance/PerformancePro
 import IncentiveProposalPage from "./components/performance/IncentiveProposalPage";
 import { PledgesDashboardPage, NewPledgePage, PledgeContractsPage, PledgeValuationsPage } from "./components/pledges/PledgesCorePages";
 import { PledgeVaultPage, PledgeRedemptionPage, PledgeRenewalsPage, PledgeDefaultsPage, PledgeNotificationsPage, PledgeReportsPage, PledgeSettingsPage } from "./components/pledges/PledgesOperationsPages";
+import { AdvancesDashboardPage, NewAdvancePage, AdvancesListPage, AdvanceApprovalsPage, AdvanceDisbursementPage, AdvanceInstallmentsPage, AdvanceCollectionsPage, AdvanceOverduePage, AdvanceNotificationsPage, AdvanceReportsPage, AdvanceSettingsPage } from "./components/advances/AdvancesPages";
 import { kpiScoresService } from "./services/kpiScores";
 import { dailyOperationsReportsService } from "./services/dailyOperationsReports";
 import DailyOperationsReportsPage from "./components/hr/DailyOperationsReportsPage";
@@ -289,6 +290,9 @@ const canonicalHrPageAliases = {
   hr_recruitment_full: "recruitment",
   hr_incentives_full: "incentives",
 };
+const advancePageKeys = new Set(["advances-dashboard","advances-new","advances-list","advances-approvals","advances-disbursement","advances-installments","advances-collections","advances-overdue","advances-notifications","advances-reports","advances-settings"]);
+const advanceNavigationRoles = ["مدير النظام","مدير عام النظام","الإدارة العليا","الموارد البشرية","الحسابات","مدير الفرع","موظف مخول"];
+const advancePageComponents = {"advances-dashboard":AdvancesDashboardPage,"advances-new":NewAdvancePage,"advances-list":AdvancesListPage,"advances-approvals":AdvanceApprovalsPage,"advances-disbursement":AdvanceDisbursementPage,"advances-installments":AdvanceInstallmentsPage,"advances-collections":AdvanceCollectionsPage,"advances-overdue":AdvanceOverduePage,"advances-notifications":AdvanceNotificationsPage,"advances-reports":AdvanceReportsPage,"advances-settings":AdvanceSettingsPage};
 const pledgePageKeys = new Set(["pledges-dashboard","pledges-new","pledges-contracts","pledges-valuations","pledges-vault","pledges-redemption","pledges-renewals","pledges-defaults","pledges-notifications","pledges-reports","pledges-settings"]);
 const pledgeNavigationRoles = ["مدير النظام","مدير عام النظام","الإدارة العليا","مدير الفرع","موظف مخول"];
 const pledgePageComponents = {
@@ -316,6 +320,17 @@ const navItems = [
   ["recruitment", "طلبات التوظيف"],
   ["reports_center", "مركز التقارير"],
   ["audit_logs", "سجل العمليات"],
+  ["advances-dashboard","لوحة السلف"],
+  ["advances-new","طلب سلفة جديد"],
+  ["advances-list","السلف القائمة"],
+  ["advances-approvals","اعتماد السلف"],
+  ["advances-disbursement","صرف السلفة"],
+  ["advances-installments","جدول السداد"],
+  ["advances-collections","التحصيل والسداد"],
+  ["advances-overdue","السلف المتأخرة"],
+  ["advances-notifications","إشعارات السداد"],
+  ["advances-reports","تقارير السلف"],
+  ["advances-settings","إعدادات السلف"],
   ["pledges-dashboard", "لوحة الرهون"],
   ["pledges-new", "إنشاء رهن جديد"],
   ["pledges-contracts", "عقود الرهن"],
@@ -1202,6 +1217,7 @@ export default function App() {
 	    canNode = (nodeKey, action = "can_view") => hasTreePermission(treeRolePermissions, role, nodeKey, action),
       companyCanPage = (pageKey, action = "can_view") => {
         if (pageKey === "companies_admin" || pageKey === "platform_admin_settings") return platformAdmin;
+        if (advancePageKeys.has(pageKey) && (isAdministrativeUser || advanceNavigationRoles.some((name) => String(currentUser?.role || role || "").includes(name)))) return hasSelectedCompany;
         if (pledgePageKeys.has(pageKey) && (isAdministrativeUser || pledgeNavigationRoles.some((name) => String(currentUser?.role || role || "").includes(name)))) return hasSelectedCompany;
         if (platformAdmin) return hasSelectedCompany;
         if (!hasSelectedCompany) return false;
@@ -1525,6 +1541,7 @@ export default function App() {
           {!requestedPageBlockedByCompany && !requestedPageBlockedByRole && (
           <>
           {isPlaceholderPage(activePage) && <ErpPlaceholderPage pageKey={activePage} moduleKey={selectedModuleKey} onBack={() => switchErpModule("hr")} />}{" "}
+          {advancePageComponents[activePage] && React.createElement(advancePageComponents[activePage], p)}{" "}
           {pledgePageComponents[activePage] && React.createElement(pledgePageComponents[activePage], p)}{" "}
           {activePage === "companies_admin" && <CompaniesAdminPage {...p} />}{" "}
           {activePage === "platform_admin_settings" && <PlatformAdminSettingsPage {...p} />}{" "}
