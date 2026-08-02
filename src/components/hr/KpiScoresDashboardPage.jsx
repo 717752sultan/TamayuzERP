@@ -197,8 +197,9 @@ export default function KpiScoresDashboardPage({ employees = [], currentCompany,
     <div className="space-y-5" dir="rtl">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><h1 className="text-2xl font-black">درجات KPI</h1><p className="text-sm text-slate-500">درجة KPI تمثل تقييم الأداء حسب المعايير المعتمدة. عدد العمليات يحتسب من العمليات المعتمدة الداخلة في KPI فقط.</p></div>
-        <button onClick={() => kpiCalculationService.recalculateMonthKpis(employees, filters.month, companyId).then(() => load()).catch((error) => alert(error.message))} className="btn-primary"><RefreshCw size={17} /> إعادة حساب الشهر</button>
+        <button onClick={() => kpiCalculationService.recalculateMonthKpis(employees, filters.month, companyId).then(() => load()).catch((error) => alert(error.message))} className="btn-primary"><RefreshCw size={17} /> إعادة احتساب الأداء من العمليات المعتمدة</button>
       </div>
+      <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm font-extrabold text-blue-800">توجد عمليات معتمدة جديدة قد تحتاج إلى إعادة احتساب الأداء. تم اعتماد العمليات، ويمكن الآن تحديث نتائج الأداء والحوافز.</div>
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-extrabold text-amber-800">قيد المراجعة لا تدخل في KPI حتى يتم اعتمادها.</div>
       <div className="panel grid gap-3 p-4 md:grid-cols-4 xl:grid-cols-8">
         <input type="month" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value, fromDate: "", toDate: "" })} className="field" />

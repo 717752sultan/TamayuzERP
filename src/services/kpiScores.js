@@ -2,6 +2,7 @@ import { supabase } from "./supabase";
 import { isApprovedDailyOperation } from "./dailyOperations";
 import { exportWorkbook } from "./reportExport";
 import { performanceTargetsService } from "./performanceTargets";
+import { getActivePerformanceAutomationSetting } from "./performanceAutomationSettings";
 
 const n = (value) => Number(value || 0) || 0;
 const clampScore = (value) => Number(Math.max(0, Math.min(100, n(value))).toFixed(2));
@@ -27,18 +28,10 @@ export const classifyOperationType = (operationType = "") => {
 
 export const getProductivityTargetOperations = (employee = {}, filters = {}) => {
   const explicit = Number(filters.target_operations || employee.target_operations || employee.kpi_target_operations || 0);
-  if (Number.isFinite(explicit) && explicit > 0) return explicit;
-  const job = String(employee.job || employee.job_name || "").toLowerCase();
-  if (/خدمة عملاء|كاشير|صراف/.test(job)) return 800;
-  if (/مدير فرع/.test(job)) return 1200;
-  if (/واتس|واتساب/.test(job)) return 600;
-  return 500;
+  return Number.isFinite(explicit) && explicit > 0 ? explicit : null;
 };
 
-export const calculateProductivityScore = (totalOperations = 0, targetOperations = 500) => {
-  const target = Math.max(1, n(targetOperations));
-  return clampScore((n(totalOperations) / target) * 100);
-};
+export const calculateProductivityScore = (totalOperations = 0, targetOperations = null, maximum = 100) => targetOperations && Number(targetOperations) > 0 ? Number(Math.min(Number(maximum || 100), (n(totalOperations) / Number(targetOperations)) * 100).toFixed(2)) : null;
 
 export const normalizeEmployeeKpiResult = ({ employee = {}, employeeId = "", scoreInfo = null, operations = {}, filters = {} } = {}) => {
   const totalOperations = n(operations.total_operations);
@@ -46,7 +39,7 @@ export const normalizeEmployeeKpiResult = ({ employee = {}, employeeId = "", sco
   const achievementPercentage = targetOperations ? Number(((totalOperations / targetOperations) * 100).toFixed(2)) : 0;
   const productivityScore = clampScore(achievementPercentage);
   const manualScore = scoreInfo ? clampScore(scoreInfo.total) : null;
-  const finalKpiScore = clampScore(manualScore !== null ? (manualScore * 0.6) + (productivityScore * 0.4) : productivityScore);
+  const finalKpiScore = productivityScore === null ? (manualScore === null ? null : manualScore) : clampScore(manualScore !== null ? (manualScore * 0.6) + (productivityScore * 0.4) : productivityScore);
   const calculationSource = manualScore !== null ? "محسوب من الإنتاجية والتقييم" : "محسوب من الإنتاجية";
   const calculationReason = manualScore !== null ? "تم احتساب الدرجة النهائية من التقييم اليدوي 60% والإنتاجية 40%." : "لا يوجد تقييم يدوي، لذلك تم احتساب الدرجة من العمليات المعتمدة الداخلة في KPI فقط.";
   const performance = classifyEmployeePerformance(finalKpiScore);
@@ -275,10 +268,10 @@ export const kpiScoresService = {
     });
     const operationsRows = await loadApprovedKpiOperations(companyId, { ...filters, aliasContext });
     const monthParts = String(month || "").split("-").map(Number);
-    const targetRows = monthParts[0] && monthParts[1] ? await performanceTargetsService.loadEmployeeTargets(companyId, { period_year: monthParts[0], period_month: monthParts[1], is_active: true }).catch(() => []) : [];
-    const targetsByEmployee = new Map(targetRows.map((row) => [String(row.employee_id), row]));
-    const scopedEmployees = filterEmployees(employees, companyId, filters).map((employee) => { const target = targetsByEmployee.get(String(employee.id)); return target ? { ...employee, target_operations: Number(target.target_count || 0), monthly_target: target, missing_monthly_target: false } : { ...employee, missing_monthly_target: true }; });
-    const ranking = buildKpiEmployeeRanking(scopedEmployees, kpiRows, operationsRows, filters).map((row) => { const source = scopedEmployees.find((employee) => String(employee.id) === String(row.employee_id)); return { ...row, missing_monthly_target: source?.missing_monthly_target === true, target_warning: source?.missing_monthly_target ? "\u0644\u0645 \u064a\u062a\u0645 \u062a\u062d\u062f\u064a\u062f \u0647\u062f\u0641 \u0644\u0647\u0630\u0627 \u0627\u0644\u0645\u0648\u0638\u0641 \u0641\u064a \u0647\u0630\u0627 \u0627\u0644\u0634\u0647\u0631." : "" }; });
+    const [targetRows,branchTargets,automationSetting] = monthParts[0] && monthParts[1] ? await Promise.all([performanceTargetsService.loadEmployeeTargets(companyId,{period_year:monthParts[0],period_month:monthParts[1],is_active:true}).catch(()=>[]),performanceTargetsService.loadBranchTargets(companyId,{period_year:monthParts[0],period_month:monthParts[1],is_active:true}).catch(()=>[]),getActivePerformanceAutomationSetting(companyId,{period_year:monthParts[0],period_month:monthParts[1]}).catch(()=>null)]) : [[],[],null];
+    const targetsByEmployee=new Map(targetRows.map(row=>[String(row.employee_id),row]));
+    const scopedEmployees=filterEmployees(employees,companyId,filters).map(employee=>{const employeeTarget=targetsByEmployee.get(String(employee.id)),branchTarget=branchTargets.find(row=>row.is_active!==false&&row.branch===employee.branch),target=Number(employeeTarget?.target_count||branchTarget?.target_count||automationSetting?.target_monthly_operations||0)||null;return{...employee,target_operations:target,monthly_target:employeeTarget||branchTarget||automationSetting||null,target_source:employeeTarget?"employee":branchTarget?"branch":automationSetting?"automation":"missing",missing_monthly_target:!target};});
+    const ranking = buildKpiEmployeeRanking(scopedEmployees, kpiRows, operationsRows, { ...filters, max_productivity_score: automationSetting?.max_productivity_score || 100 }).map((row) => { const source = scopedEmployees.find((employee) => String(employee.id) === String(row.employee_id)); return { ...row, missing_monthly_target: source?.missing_monthly_target === true, target_warning: source?.missing_monthly_target ? "\u0644\u0645 \u064a\u062a\u0645 \u062a\u062d\u062f\u064a\u062f \u0647\u062f\u0641 \u0644\u0647\u0630\u0627 \u0627\u0644\u0645\u0648\u0638\u0641 \u0641\u064a \u0647\u0630\u0627 \u0627\u0644\u0634\u0647\u0631." : "" }; });
     return { kpiRows, operationsRows, ranking, employees: scopedEmployees, aliases: aliasContext };
   },
 
