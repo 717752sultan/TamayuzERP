@@ -4,12 +4,29 @@ import { performanceTargetsService as api } from "../../services/performanceTarg
 const defaultForm = {
   period_month: new Date().getMonth() + 1,
   period_year: new Date().getFullYear(),
-  target_count: 0,
-  minimum_count: 0,
-  excellent_count: 0,
-  target_weight: 100,
+  target_count: "",
+  minimum_count: "",
+  excellent_count: "",
+  target_weight: "100",
   is_active: true,
 };
+
+function Field({ fieldKey, label, type = "text", form, setForm }) {
+  return (
+    <label className="text-sm font-bold">
+      {label}
+      <input
+        className="field mt-1"
+        type={type}
+        value={form?.[fieldKey] ?? ""}
+        onChange={(event) => {
+          const value = event.target.value;
+          setForm((previous) => ({ ...previous, [fieldKey]: value }));
+        }}
+      />
+    </label>
+  );
+}
 
 function TargetsPage({ kind, employees = [], currentCompany }) {
   const isEmployee = kind === "employee";
@@ -38,7 +55,7 @@ function TargetsPage({ kind, employees = [], currentCompany }) {
       if (!isEmployee && !form.branch) throw new Error("الفرع مطلوب");
       await (isEmployee ? api.saveEmployeeTarget({ ...form, company_id: companyId }) : api.saveBranchTarget({ ...form, company_id: companyId }));
       setMessage("تم الحفظ بنجاح.");
-      setForm(defaultForm);
+      setForm({ ...defaultForm });
       load();
     } catch (error) {
       console.error("Performance target save error:", error);
@@ -56,12 +73,6 @@ function TargetsPage({ kind, employees = [], currentCompany }) {
     }
   };
 
-  const Field = ({ k, label, type = "text" }) => (
-    <label className="text-sm font-bold">
-      {label}
-      <input className="field mt-1" type={type} value={form[k] ?? ""} onChange={(event) => setForm({ ...form, [k]: type === "number" ? event.target.valueAsNumber : event.target.value })} />
-    </label>
-  );
 
   return (
     <div className="space-y-5" dir="rtl">
@@ -71,26 +82,26 @@ function TargetsPage({ kind, employees = [], currentCompany }) {
       </div>
       {message && <div className="rounded-xl bg-slate-100 p-3 font-bold">{message}</div>}
       <div className="panel grid gap-3 p-5 md:grid-cols-4">
-        <Field k="period_month" label="الشهر" type="number" />
-        <Field k="period_year" label="السنة" type="number" />
+        <Field form={form} setForm={setForm} fieldKey="period_month" label="الشهر" type="number" />
+        <Field form={form} setForm={setForm} fieldKey="period_year" label="السنة" type="number" />
         {isEmployee ? (
           <label className="text-sm font-bold">
             الموظف
             <select className="field mt-1" value={form.employee_id || ""} onChange={(event) => {
               const employee = employees.find((item) => String(item.id) === event.target.value);
-              setForm({ ...form, employee_id: event.target.value, employee_name: employee?.name || "", branch: employee?.branch || "", department: employee?.department || "", job_title: employee?.job || employee?.job_name || "" });
+              setForm((previous) => ({ ...previous, employee_id: event.target.value, employee_name: employee?.name || "", branch: employee?.branch || "", department: employee?.department || "", job_title: employee?.job || employee?.job_name || "" }));
             }}>
               <option value="">--</option>
               {employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
             </select>
           </label>
-        ) : <Field k="branch" label="الفرع" />}
-        <Field k="operation_type" label="نوع العملية" />
-        <Field k="service_channel" label="القناة" />
-        <Field k="target_count" label="المستهدف" type="number" />
-        <Field k="minimum_count" label="الحد الأدنى" type="number" />
-        <Field k="excellent_count" label="الممتاز" type="number" />
-        {isEmployee && <Field k="target_weight" label="الوزن" type="number" />}
+        ) : <Field form={form} setForm={setForm} fieldKey="branch" label="الفرع" />}
+        <Field form={form} setForm={setForm} fieldKey="operation_type" label="نوع العملية" />
+        <Field form={form} setForm={setForm} fieldKey="service_channel" label="القناة" />
+        <Field form={form} setForm={setForm} fieldKey="target_count" label="المستهدف" type="number" />
+        <Field form={form} setForm={setForm} fieldKey="minimum_count" label="الحد الأدنى" type="number" />
+        <Field form={form} setForm={setForm} fieldKey="excellent_count" label="الممتاز" type="number" />
+        {isEmployee && <Field form={form} setForm={setForm} fieldKey="target_weight" label="الوزن" type="number" />}
         <button type="button" onClick={save} className="btn-primary">حفظ</button>
       </div>
       <div className="panel overflow-x-auto p-4">
@@ -103,7 +114,7 @@ function TargetsPage({ kind, employees = [], currentCompany }) {
                 <td>{row.period_month}/{row.period_year}</td>
                 <td>{row.target_count}</td>
                 <td>{row.is_active === false ? "معطل" : "نشط"}</td>
-                <td><button type="button" onClick={() => setForm(row)} className="btn-secondary">تعديل</button> <button type="button" onClick={() => remove(row)} className="text-red-700">حذف</button></td>
+                <td><button type="button" onClick={() => setForm({ ...defaultForm, ...row, period_month: String(row.period_month ?? ""), period_year: String(row.period_year ?? ""), target_count: String(row.target_count ?? ""), minimum_count: String(row.minimum_count ?? ""), excellent_count: String(row.excellent_count ?? ""), target_weight: String(row.target_weight ?? "100") })} className="btn-secondary">تعديل</button> <button type="button" onClick={() => remove(row)} className="text-red-700">حذف</button></td>
               </tr>
             )) : <tr><td colSpan="5" className="py-8 text-center text-slate-400">لا توجد بيانات محفوظة بعد</td></tr>}
           </tbody>
