@@ -5296,7 +5296,7 @@ function EnhancedTopEmployees({ employees, currentCompany, currentUser }) {
     kpiScoresService.loadKpiScores(companyId, { month }, employees).then((result) => { if (alive) setRanked(result.ranking || []); }).catch((error) => { console.error("Employee of month KPI error:", error); if (alive) setRanked([]); }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [companyId, month, employees]);
-  const valid = [...ranked].filter((row) => Number.isFinite(Number(row.final_kpi_score ?? row.final_score))).sort((a, b) => Number(b.final_kpi_score ?? b.final_score) - Number(a.final_kpi_score ?? a.final_score) || Number(b.achievement_percentage || 0) - Number(a.achievement_percentage || 0) || Number(b.total_operations || b.operations?.total_operations || 0) - Number(a.total_operations || a.operations?.total_operations || 0));
+  const valid = [...ranked].filter((row) => row.eligibility_status === "\u0645\u0633\u062a\u062d\u0642" && Number.isFinite(Number(row.final_kpi_score ?? row.final_score))).sort((a, b) => Number(b.final_kpi_score ?? b.final_score) - Number(a.final_kpi_score ?? a.final_score) || Number(b.achievement_percentage || 0) - Number(a.achievement_percentage || 0) || Number(b.total_operations || b.operations?.total_operations || 0) - Number(a.total_operations || a.operations?.total_operations || 0));
   const positive = valid.filter((row) => Number(row.final_kpi_score ?? row.final_score) > 0);
   const best = positive[0] || valid[0] || null;
   const branchNames = [...new Set(valid.flatMap((row) => row.branches?.length ? row.branches : [row.branch]).filter(Boolean))];
@@ -5314,7 +5314,7 @@ function EnhancedTopEmployees({ employees, currentCompany, currentUser }) {
   );
 }
 function EnhancedPlans({ employees, evaluations, settings, setSettings }) {
-  const plans = settings.improvementPlans || [];
+  const plans = Array.isArray(settings?.improvementPlans) ? settings.improvementPlans : [];
   const setPlans = (updater) => {
     const nextPlans = typeof updater === "function" ? updater(plans) : updater;
     setSettings({ ...settings, improvementPlans: nextPlans });
@@ -5322,26 +5322,9 @@ function EnhancedPlans({ employees, evaluations, settings, setSettings }) {
   const [dialog, setDialog] = useState(null);
   const weak = evaluations
     .filter((e) => e.total < 70)
-    .map((ev) => ({ ...employees.find((x) => x.id === ev.employeeId), total: ev.total }))
+    .map((ev) => ({ ...(Array.isArray(employees) ? employees : []).find((x) => x.id === ev.employeeId), total: ev.total }))
     .filter((x) => x.id);
-  const visiblePlans = [
-    ...plans.map((p) => ({ ...p, employee: employees.find((e) => e.id === p.employeeId) })),
-    ...weak
-      .filter((e) => !plans.some((p) => p.employeeId === e.id))
-      .map((e) => ({
-        id: `AUTO-${e.id}`,
-        employeeId: e.id,
-        employee: e,
-        reason: "انخفاض نتيجة التقييم عن 70%",
-        weaknesses: "الدقة وسرعة الإنجاز",
-        plan: "جلسات متابعة أسبوعية وتدريب عملي على نقاط الضعف",
-        owner: "مدير الفرع",
-        start: "2026-07-01",
-        end: "2026-07-31",
-        result: "قيد المتابعة",
-        auto: true,
-      })),
-  ];
+  const visiblePlans = plans.map((plan) => ({ ...plan, employee: (Array.isArray(employees) ? employees : []).find((employee) => employee.id === plan.employeeId) })).filter((plan) => plan.employee);
   const savePlan = () => {
     if (!dialog?.employeeId) return;
     const item = { ...dialog, id: dialog.id || `PLAN-${Date.now()}`, auto: false };
@@ -5369,8 +5352,8 @@ function EnhancedPlans({ employees, evaluations, settings, setSettings }) {
       weaknesses: plan.weaknesses || "",
       plan: plan.plan || "",
       owner: plan.owner || "مدير الفرع",
-      start: plan.start || "2026-07-01",
-      end: plan.end || "2026-07-31",
+      start: plan.start || currentMonthStart,
+      end: plan.end || currentMonthEnd,
       result: plan.result || "قيد المتابعة",
       auto: false,
     });
@@ -9588,8 +9571,8 @@ function EnhancedIncentives({ employees, evaluations, currentCompany, currentUse
     const percentage = bonusPercentage(score);
     const salaryAvailable = Number(employee.salary) > 0;
     const evaluation = latestEvaluation(row.employee_id);
-    const eligibility = score < 80 ? "غير مستحق" : evaluation && evaluation.status !== "معتمد" ? "بانتظار الاعتماد" : "مستحق الحافز";
-    return { ...employee, ...row, name: row.employee_name, job: row.job || row.job_name, final_kpi_score: score, bonus_percentage: percentage, suggested_bonus: salaryAvailable ? Number(employee.salary) * percentage / 100 : 0, salaryAvailable, eligibility, evaluation };
+    const eligibility = row.eligibility_status === "\u0645\u0633\u062a\u062d\u0642" && (!evaluation || evaluation.status === "\u0645\u0639\u062a\u0645\u062f") ? "\u0645\u0633\u062a\u062d\u0642 \u0627\u0644\u062d\u0627\u0641\u0632" : evaluation && evaluation.status !== "\u0645\u0639\u062a\u0645\u062f" ? "\u0628\u0627\u0646\u062a\u0638\u0627\u0631 \u0627\u0644\u0627\u0639\u062a\u0645\u0627\u062f" : row.eligibility_status || "\u063a\u064a\u0631 \u0645\u0633\u062a\u062d\u0642";
+    return { ...employee, ...row, name: row.employee_name, job: row.job || row.job_name, final_kpi_score: score, bonus_percentage: eligibility === "\u0645\u0633\u062a\u062d\u0642 \u0627\u0644\u062d\u0627\u0641\u0632" ? percentage : 0, suggested_bonus: eligibility === "\u0645\u0633\u062a\u062d\u0642 \u0627\u0644\u062d\u0627\u0641\u0632" && salaryAvailable ? Number(employee.salary) * percentage / 100 : 0, salaryAvailable, eligibility, evaluation };
   });
   return (
     <div className="space-y-5">

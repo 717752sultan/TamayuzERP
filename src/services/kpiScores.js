@@ -3,6 +3,8 @@ import { isApprovedDailyOperation } from "./dailyOperations";
 import { exportWorkbook } from "./reportExport";
 import { performanceTargetsService } from "./performanceTargets";
 import { getActivePerformanceAutomationSetting } from "./performanceAutomationSettings";
+import { attendanceKpiService } from "./attendanceKpi";
+import { incentiveControlsService } from "./incentiveControls";
 
 const n = (value) => Number(value || 0) || 0;
 const clampScore = (value) => Number(Math.max(0, Math.min(100, n(value))).toFixed(2));
@@ -37,7 +39,7 @@ export const normalizeEmployeeKpiResult = ({ employee = {}, employeeId = "", sco
   const totalOperations = n(operations.total_operations);
   const targetOperations = getProductivityTargetOperations(employee, filters);
   const achievementPercentage = targetOperations ? Number(((totalOperations / targetOperations) * 100).toFixed(2)) : 0;
-  const productivityScore = clampScore(achievementPercentage);
+  const productivityScore = targetOperations ? clampScore(achievementPercentage) : null;
   const manualScore = scoreInfo ? clampScore(scoreInfo.total) : null;
   const finalKpiScore = productivityScore === null ? (manualScore === null ? null : manualScore) : clampScore(manualScore !== null ? (manualScore * 0.6) + (productivityScore * 0.4) : productivityScore);
   const calculationSource = manualScore !== null ? "محسوب من الإنتاجية والتقييم" : "محسوب من الإنتاجية";
@@ -246,7 +248,7 @@ export const buildKpiEmployeeRanking = (employees = [], kpiRows = [], operations
     && (!filters.employeeId || row.employee_id === filters.employeeId)
     && (!filters.department || filters.department === "all" || row.department === filters.department));
   return rows
-    .sort((a, b) => (b.final_kpi_score ?? b.final_score ?? -1) - (a.final_kpi_score ?? a.final_score ?? -1) || n(b.achievement_percentage) - n(a.achievement_percentage) || n(b.total_operations ?? b.operations?.total_operations) - n(a.total_operations ?? a.operations?.total_operations))
+    .sort((a, b) => (b.final_kpi_score ?? b.final_score ?? -1) - (a.final_kpi_score ?? a.final_score ?? -1) || n(b.achievement_percentage) - n(a.achievement_percentage) || n(b.total_operations ?? b.operations?.total_operations) - n(a.total_operations ?? a.operations?.total_operations) || n(b.attendance_score) - n(a.attendance_score))
     .map((row, index) => ({ ...row, rank: index + 1 }));
 };
 
@@ -268,10 +270,26 @@ export const kpiScoresService = {
     });
     const operationsRows = await loadApprovedKpiOperations(companyId, { ...filters, aliasContext });
     const monthParts = String(month || "").split("-").map(Number);
-    const [targetRows,branchTargets,automationSetting] = monthParts[0] && monthParts[1] ? await Promise.all([performanceTargetsService.loadEmployeeTargets(companyId,{period_year:monthParts[0],period_month:monthParts[1],is_active:true}).catch(()=>[]),performanceTargetsService.loadBranchTargets(companyId,{period_year:monthParts[0],period_month:monthParts[1],is_active:true}).catch(()=>[]),getActivePerformanceAutomationSetting(companyId,{period_year:monthParts[0],period_month:monthParts[1]}).catch(()=>null)]) : [[],[],null];
+    const [targetRows,branchTargets,automationSetting,attendanceScores,exclusions] = monthParts[0] && monthParts[1] ? await Promise.all([performanceTargetsService.loadEmployeeTargets(companyId,{period_year:monthParts[0],period_month:monthParts[1],is_active:true}).catch(()=>[]),performanceTargetsService.loadBranchTargets(companyId,{period_year:monthParts[0],period_month:monthParts[1],is_active:true}).catch(()=>[]),getActivePerformanceAutomationSetting(companyId,{period_year:monthParts[0],period_month:monthParts[1]}).catch(()=>null),attendanceKpiService.loadAttendanceScores(companyId,{period_year:monthParts[0],period_month:monthParts[1]}).catch(()=>[]),incentiveControlsService.loadIncentiveExclusions(companyId,{period_year:monthParts[0],period_month:monthParts[1]}).catch(()=>[])]) : [[],[],null,[],[]];
     const targetsByEmployee=new Map(targetRows.map(row=>[String(row.employee_id),row]));
     const scopedEmployees=filterEmployees(employees,companyId,filters).map(employee=>{const employeeTarget=targetsByEmployee.get(String(employee.id)),branchTarget=branchTargets.find(row=>row.is_active!==false&&row.branch===employee.branch),target=Number(employeeTarget?.target_count||branchTarget?.target_count||automationSetting?.target_monthly_operations||0)||null;return{...employee,target_operations:target,monthly_target:employeeTarget||branchTarget||automationSetting||null,target_source:employeeTarget?"employee":branchTarget?"branch":automationSetting?"automation":"missing",missing_monthly_target:!target};});
-    const ranking = buildKpiEmployeeRanking(scopedEmployees, kpiRows, operationsRows, { ...filters, max_productivity_score: automationSetting?.max_productivity_score || 100 }).map((row) => { const source = scopedEmployees.find((employee) => String(employee.id) === String(row.employee_id)); return { ...row, missing_monthly_target: source?.missing_monthly_target === true, target_warning: source?.missing_monthly_target ? "\u0644\u0645 \u064a\u062a\u0645 \u062a\u062d\u062f\u064a\u062f \u0647\u062f\u0641 \u0644\u0647\u0630\u0627 \u0627\u0644\u0645\u0648\u0638\u0641 \u0641\u064a \u0647\u0630\u0627 \u0627\u0644\u0634\u0647\u0631." : "" }; });
+    const attendanceByEmployee = new Map(attendanceScores.map((row) => [String(row.employee_id), row]));
+    const approvedExclusions = new Map(exclusions.filter((row) => ["approved", "\u0645\u0639\u062a\u0645\u062f"].includes(row.approval_status)).map((row) => [String(row.employee_id), row]));
+    const minimumKpi = n(automationSetting?.minimum_kpi_for_incentive || 70);
+    const minimumAttendance = n(automationSetting?.minimum_attendance_for_incentive || 0);
+    const ranking = buildKpiEmployeeRanking(scopedEmployees, kpiRows, operationsRows, { ...filters, max_productivity_score: automationSetting?.max_productivity_score || 100 }).map((row) => {
+      const source = scopedEmployees.find((employee) => String(employee.id) === String(row.employee_id));
+      const attendance = attendanceByEmployee.get(String(row.employee_id));
+      const exclusion = approvedExclusions.get(String(row.employee_id));
+      let eligibility_status = "\u0645\u0633\u062a\u062d\u0642";
+      let eligibility_reason = "\u0645\u0633\u062a\u0648\u0641\u064d \u0644\u0634\u0631\u0648\u0637 \u0627\u0644\u0627\u0633\u062a\u062d\u0642\u0627\u0642 \u0627\u0644\u0645\u0628\u062f\u0626\u064a\u0629";
+      if (source?.missing_monthly_target) { eligibility_status = "\u063a\u064a\u0631 \u0645\u0633\u062a\u062d\u0642"; eligibility_reason = "\u0627\u0644\u0647\u062f\u0641 \u063a\u064a\u0631 \u0645\u062d\u062f\u062f"; }
+      else if (!n(row.total_operations)) { eligibility_status = "\u063a\u064a\u0631 \u0645\u0633\u062a\u062d\u0642"; eligibility_reason = "\u0644\u0627 \u062a\u0648\u062c\u062f \u0639\u0645\u0644\u064a\u0627\u062a \u0645\u0639\u062a\u0645\u062f\u0629 \u062f\u0627\u062e\u0644\u0629 \u0641\u064a KPI"; }
+      else if (exclusion) { eligibility_status = "\u0645\u0633\u062a\u0628\u0639\u062f"; eligibility_reason = exclusion.reason || "\u0645\u0633\u062a\u0628\u0639\u062f \u0628\u0642\u0631\u0627\u0631 \u0625\u062f\u0627\u0631\u064a \u0645\u0639\u062a\u0645\u062f"; }
+      else if (row.final_kpi_score === null || n(row.final_kpi_score) < minimumKpi) { eligibility_status = "\u063a\u064a\u0631 \u0645\u0633\u062a\u062d\u0642"; eligibility_reason = `\u062f\u0631\u062c\u0629 KPI \u0623\u0642\u0644 \u0645\u0646 \u0627\u0644\u062d\u062f \u0627\u0644\u0623\u062f\u0646\u0649 (${minimumKpi}%)`; }
+      else if (attendance && minimumAttendance > 0 && n(attendance.attendance_score) < minimumAttendance) { eligibility_status = "\u063a\u064a\u0631 \u0645\u0633\u062a\u062d\u0642"; eligibility_reason = `\u062f\u0631\u062c\u0629 \u0627\u0644\u062d\u0636\u0648\u0631 \u0623\u0642\u0644 \u0645\u0646 \u0627\u0644\u062d\u062f \u0627\u0644\u0623\u062f\u0646\u0649 (${minimumAttendance}%)`; }
+      return { ...row, attendance_score: attendance ? n(attendance.attendance_score) : null, attendance_status: attendance ? "\u0645\u062a\u0648\u0641\u0631" : "\u063a\u064a\u0631 \u0645\u062a\u0648\u0641\u0631", incentive_exclusion: exclusion || null, eligibility_status, eligibility_reason, missing_monthly_target: source?.missing_monthly_target === true, target_warning: source?.missing_monthly_target ? "\u0644\u0645 \u064a\u062a\u0645 \u062a\u062d\u062f\u064a\u062f \u0647\u062f\u0641 \u0644\u0647\u0630\u0627 \u0627\u0644\u0645\u0648\u0638\u0641 \u0641\u064a \u0647\u0630\u0627 \u0627\u0644\u0634\u0647\u0631." : "" };
+    }).sort((a,b)=>(b.final_kpi_score??-1)-(a.final_kpi_score??-1)||n(b.achievement_percentage)-n(a.achievement_percentage)||n(b.total_operations)-n(a.total_operations)||n(b.attendance_score)-n(a.attendance_score)).map((row,index)=>({...row,rank:index+1}));
     return { kpiRows, operationsRows, ranking, employees: scopedEmployees, aliases: aliasContext };
   },
 
