@@ -131,10 +131,31 @@ export const calculatePledgeBalance = async (companyId, pledgeId) => {
   return { approved_amount: Number(pledge.approved_amount || 0), total_fees: Number(pledge.total_fees || 0), total_paid: totalPaid, remaining_amount: Math.max(0, Number(pledge.approved_amount || 0) + Number(pledge.total_fees || 0) - totalPaid) };
 };
 export const createPledgePayment = async (companyId, payload = {}) => {
-  const row = await save("pledge_payments", "payment_id", "payment", companyId, payload);
-  const balance = await calculatePledgeBalance(companyId, row.pledge_id);
-  if (balance) await updatePledge(companyId, row.pledge_id, balance);
-  await audit(companyId, "pledge_payments", row.payment_id, "payment", row); return row;
+  try {
+    const row = await save("pledge_payments", "payment_id", "payment", companyId, payload);
+    const balance = await calculatePledgeBalance(companyId, row.pledge_id);
+    if (balance) {
+      await updatePledge(companyId, row.pledge_id, balance);
+      if (balance.remaining_amount <= 0 && payload.payment_type === "سداد كامل") {
+        await changePledgeStatus(companyId, row.pledge_id, "مفكوك", "سداد كامل وفك الرهن", payload.received_by || "");
+      }
+    }
+    await audit(companyId, "pledge_payments", row.payment_id, "payment", row);
+    return { ...row, balance };
+  } catch (error) {
+    console.error("Pledge payment create error", error);
+    throw error;
+  }
+};
+export const createPledgeFee = async (companyId, payload = {}) => {
+  try {
+    const row = await save("pledge_fees", "fee_id", "fee", companyId, payload);
+    await audit(companyId, "pledge_fees", row.fee_id, "create", row);
+    return row;
+  } catch (error) {
+    console.error("Pledge fee create error", error);
+    throw error;
+  }
 };
 
 export const listStorageLocations = (companyId) => safeList("pledge_storage_locations", companyId, { is_active: true });
@@ -147,12 +168,24 @@ export const markNotificationSent = (companyId, notificationId) => update("pledg
 
 export const listDisposals = (companyId, filters = {}) => safeList("pledge_disposals", companyId, filters, "disposal_date.desc");
 export const createDisposal = async (companyId, payload = {}) => {
-  const pledge = await getPledgeById(companyId, payload.pledge_id);
-  if (!["متأخر", "تحت التصفية"].includes(pledge?.status)) throw new Error("لا يمكن تصفية الرهن إلا إذا كان متأخرًا أو تحت التصفية.");
-  const row = await save("pledge_disposals", "disposal_id", "disposal", companyId, payload);
-  await audit(companyId, "pledge_disposals", row.disposal_id, "liquidation", row); return row;
+  try {
+    const pledge = await getPledgeById(companyId, payload.pledge_id);
+    if (!["متأخر", "تحت التصفية"].includes(pledge?.status)) throw new Error("لا يمكن تصفية الرهن إلا إذا كان متأخرًا أو تحت التصفية.");
+    const row = await save("pledge_disposals", "disposal_id", "disposal", companyId, payload);
+    const completed = ["معتمد", "مكتمل", "تمت التصفية", "مصفى"].includes(String(payload.disposal_status || ""));
+    if (completed) await changePledgeStatus(companyId, payload.pledge_id, "مصفى", payload.reason || "تسجيل التصفية", payload.approved_by || "");
+    await audit(companyId, "pledge_disposals", row.disposal_id, "liquidation", row);
+    return row;
+  } catch (error) {
+    console.error("Pledge disposal create error", error);
+    throw error;
+  }
 };
-export const approveDisposal = (companyId, disposalId, approvedBy) => update("pledge_disposals", "disposal_id", companyId, disposalId, { approved_by: approvedBy, disposal_status: "معتمد" });
+export const approveDisposal = async (companyId, disposalId, approvedBy) => {
+  const row = await update("pledge_disposals", "disposal_id", companyId, disposalId, { approved_by: approvedBy, disposal_status: "معتمد" });
+  if (row?.pledge_id) await changePledgeStatus(companyId, row.pledge_id, "مصفى", "اعتماد التصفية", approvedBy);
+  return row;
+};
 
 const reportByStatuses = async (companyId, statuses = [], filters = {}) => {
   const rows = await listPledges(companyId, filters);
@@ -160,13 +193,25 @@ const reportByStatuses = async (companyId, statuses = [], filters = {}) => {
 };
 export const getActivePledgesReport = (companyId, filters = {}) => reportByStatuses(companyId, ["نشط", "مستحق قريبًا", "ممدد"], filters);
 export const getDuePledgesReport = async (companyId, filters = {}) => {
-  const rows = await listPledges(companyId, filters), limit = Date.now() + 7 * 86400000;
-  return rows.filter((row) => row.due_date && new Date(row.due_date).getTime() >= Date.now() && new Date(row.due_date).getTime() <= limit);
+  const reminderDays = Math.max(0, Number(filters.reminder_days_before_due ?? 7));
+  const cleanFilters = { ...(filters || {}) };
+  delete cleanFilters.reminder_days_before_due;
+  const rows = await listPledges(companyId, cleanFilters);
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  const limit = new Date(start); limit.setDate(limit.getDate() + reminderDays);
+  return rows.filter((row) => ["نشط", "ممدد", "مستحق قريبًا"].includes(row.status)
+    && row.due_date && new Date(row.due_date).getTime() >= start.getTime()
+    && new Date(row.due_date).getTime() <= limit.getTime());
 };
 export const getOverduePledgesReport = async (companyId, filters = {}) => {
   const rows = await listPledges(companyId, filters);
-  return rows.filter((row) => row.status === "متأخر" || (row.due_date && new Date(row.due_date).getTime() < Date.now() && !["مفكوك", "ملغي", "مصفى"].includes(row.status)));
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return rows.filter((row) => row.due_date
+    && new Date(row.due_date).getTime() < today.getTime()
+    && Number(row.remaining_amount || 0) > 0
+    && !["مفكوك", "مصفى", "ملغي", "مرفوض"].includes(row.status));
 };
+export const listPledgeStatusLogs = (companyId, filters = {}) => safeList("pledge_status_logs", companyId, filters, "action_at.desc");
 export const getVaultAssetsReport = (companyId, filters = {}) => safeList("pledge_assets", companyId, filters);
 export const getCustomerPledgesReport = (companyId, customerId) => listPledges(companyId, { customer_id: customerId });
 export const getPledgesDashboardStats = async (companyId, filters = {}) => {
@@ -193,9 +238,9 @@ export const pledgeNotificationTypes = ["تذكير قبل الاستحقاق","
 export const pledgesService = {
   listPledges,getPledgeById,createPledge,updatePledge,cancelPledge,approvePledge,changePledgeStatus,
   listPledgeCustomers,createPledgeCustomer,updatePledgeCustomer,listPledgeAssets,createPledgeAsset,updatePledgeAsset,
-  createAssetValuation,listAssetValuations,approveAssetValuation,listPledgePayments,createPledgePayment,calculatePledgeBalance,
+  createAssetValuation,listAssetValuations,approveAssetValuation,listPledgePayments,createPledgePayment,createPledgeFee,calculatePledgeBalance,
   listStorageLocations,createStorageLocation,updateStorageLocation,listPledgeNotifications,createPledgeNotification,markNotificationSent,
   listDisposals,createDisposal,approveDisposal,getPledgesDashboardStats,getActivePledgesReport,getDuePledgesReport,
-  getOverduePledgesReport,getVaultAssetsReport,getCustomerPledgesReport,listPledgeAuditLogs,listPledgeSettings,upsertPledgeSetting,
+  getOverduePledgesReport,getVaultAssetsReport,getCustomerPledgesReport,listPledgeStatusLogs,listPledgeAuditLogs,listPledgeSettings,upsertPledgeSetting,
 };
 export default pledgesService;
