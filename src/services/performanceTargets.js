@@ -170,13 +170,22 @@ async function updateEmployeeTarget(companyId, targetId, payload = {}) {
   return Array.isArray(rows) ? rows[0] || null : rows;
 }
 async function updateEmployeeTargetsBulk(companyId, targetIds = [], patch = {}) {
-  required(companyId);
-  const ids = [...new Set((Array.isArray(targetIds) ? targetIds : []).map((value) => String(value || "").trim()).filter(Boolean))];
-  if (!ids.length) return { success: true, updatedCount: 0 };
-  const normalized = { ...normalizeTargetPatch(patch), updated_at: now() };
-  const encodedIds = ids.map((value) => encodeURIComponent(value)).join(",");
-  const rows = await supabase.request(`/rest/v1/performance_employee_targets?company_id=eq.${encodeURIComponent(companyId)}&target_id=in.(${encodedIds})`, { method: "PATCH", prefer: "return=representation", body: JSON.stringify(normalized) });
-  return { success: true, updatedCount: Array.isArray(rows) ? rows.length : ids.length, rows: Array.isArray(rows) ? rows : [] };
+  try {
+    const ids = [...new Set((Array.isArray(targetIds) ? targetIds : []).map((value) => String(value || "").trim()).filter(Boolean))];
+    if (!String(companyId || "").trim() || !ids.length) return { success: false, rows: [], affectedCount: 0, message: "\u0644\u0645 \u064a\u062a\u0645 \u062a\u062d\u062f\u064a\u062f \u0633\u062c\u0644\u0627\u062a \u0644\u0644\u062a\u0639\u062f\u064a\u0644" };
+    const cleanPatch = normalizeTargetPatch(patch);
+    if (!Object.keys(cleanPatch).length) return { success: false, rows: [], affectedCount: 0, message: "\u0644\u0627 \u062a\u0648\u062c\u062f \u062d\u0642\u0648\u0644 \u0644\u0644\u062a\u0639\u062f\u064a\u0644" };
+    cleanPatch.updated_at = now();
+    const encodedIds = ids.map((value) => encodeURIComponent(JSON.stringify(value))).join(",");
+    const rows = await supabase.request(`/rest/v1/performance_employee_targets?company_id=eq.${encodeURIComponent(companyId)}&target_id=in.(${encodedIds})`, { method: "PATCH", prefer: "return=representation", body: JSON.stringify(cleanPatch) });
+    const resultRows = Array.isArray(rows) ? rows : [];
+    const affectedCount = resultRows.length;
+    if (!affectedCount) return { success: false, rows: [], affectedCount: 0, message: "\u0644\u0645 \u064a\u062a\u0645 \u062a\u0639\u062f\u064a\u0644 \u0623\u064a \u0633\u062c\u0644. \u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u0633\u062c\u0644\u0627\u062a \u0627\u0644\u0645\u062d\u062f\u062f\u0629 \u0623\u0648 \u0627\u0644\u0635\u0644\u0627\u062d\u064a\u0627\u062a." };
+    return { success: true, rows: resultRows, affectedCount, updatedCount: affectedCount, message: `\u062a\u0645 \u062a\u0639\u062f\u064a\u0644 ${affectedCount} \u0633\u062c\u0644 \u0628\u0646\u062c\u0627\u062d` };
+  } catch (error) {
+    console.error("Bulk update employee targets failed:", error);
+    return { success: false, rows: [], affectedCount: 0, updatedCount: 0, message: "\u062a\u0639\u0630\u0631 \u062a\u0637\u0628\u064a\u0642 \u0627\u0644\u062a\u0639\u062f\u064a\u0644 \u0627\u0644\u062c\u0645\u0627\u0639\u064a" };
+  }
 }
 async function deleteEmployeeTargetsBulk(companyId, targetIds = []) {
   required(companyId);
