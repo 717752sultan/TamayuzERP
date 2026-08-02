@@ -75,7 +75,127 @@ const remove = async (table, key, value, companyId) => {
   return supabase.request(`/rest/v1/${table}?${key}=eq.${encodeURIComponent(value)}&company_id=eq.${encodeURIComponent(companyId)}`, { method: "DELETE", prefer: "return=minimal" });
 };
 
+const FALLBACK_BRANCHES = [
+  "\u0641\u0631\u0639 \u0627\u0644\u0634\u0628\u0648\u0627\u0646\u064a",
+  "\u0641\u0631\u0639 \u0627\u0644\u0645\u0631\u0643\u0632",
+  "\u0641\u0631\u0639 \u0627\u0644\u0631\u0648\u0636\u0629",
+  "\u0641\u0631\u0639 \u0627\u0644\u0635\u0645\u062f\u0629",
+  "\u0641\u0631\u0639 \u0634\u0627\u0631\u0639 \u0635\u0646\u0639\u0627\u0621",
+];
+const FALLBACK_OPERATION_TYPES = ["\u0642\u0628\u0636", "\u0635\u0631\u0641", "\u0628\u064a\u0639", "\u0634\u0631\u0627\u0621", "\u062d\u0648\u0627\u0644\u0627\u062a \u0648\u0627\u0631\u062f", "\u062d\u0648\u0627\u0644\u0627\u062a \u0635\u0627\u062f\u0631", "\u0648\u0627\u062a\u0633\u0627\u0628 \u0648\u0627\u0631\u062f", "\u0648\u0627\u062a\u0633\u0627\u0628 \u0635\u0627\u062f\u0631", "\u0639\u0645\u0644\u064a\u0627\u062a \u0623\u062e\u0631\u0649"];
+const normalizeTargetEmployee = (row = {}) => ({
+  ...row,
+  id: String(row.employee_id || row.id || "").trim(),
+  employee_id: String(row.employee_id || row.id || "").trim(),
+  name: row.name || row.employee_name || "",
+  employee_name: row.employee_name || row.name || "",
+  branch: row.branch || "",
+  department: row.department || "",
+  job: row.job || row.job_title || "",
+  job_title: row.job_title || row.job || "",
+});
+const isActiveTargetEmployee = (row = {}) => { const status = String(row.status || "").trim().toLowerCase(); return row.active !== false && (!status || ["active", "\u0646\u0634\u0637", "\u0639\u0644\u0649 \u0631\u0623\u0633 \u0627\u0644\u0639\u0645\u0644"].includes(status)); };
+const uniqueSorted = (values = []) => [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ar"));
+
+async function getActiveEmployeesForTargets(companyId) {
+  try {
+    required(companyId);
+    const rows = [];
+    for (let offset = 0; offset < 10000; offset += 1000) {
+      const batch = await supabase.select("employees", `select=*&company_id=eq.${encodeURIComponent(companyId)}&limit=1000&offset=${offset}`);
+      const list = Array.isArray(batch) ? batch : [];
+      rows.push(...list);
+      if (list.length < 1000) break;
+    }
+    return rows.map(normalizeTargetEmployee).filter((employee) => employee.id && isActiveTargetEmployee(employee)).sort((a, b) => String(a.branch).localeCompare(String(b.branch), "ar") || String(a.name).localeCompare(String(b.name), "ar"));
+  } catch (error) {
+    console.error("Target employees load error:", error);
+    return [];
+  }
+}
+async function getEmployeeTargetSelectionOptions(companyId) {
+  const employees = await getActiveEmployeesForTargets(companyId);
+  const dynamicBranches = uniqueSorted(employees.map((employee) => employee.branch)).filter((branch) => !FALLBACK_BRANCHES.includes(branch));
+  const branches = [...FALLBACK_BRANCHES, ...dynamicBranches];
+  return { employees, branches, options: [{ value: "__ALL_EMPLOYEES__", label: "\u0627\u0644\u0643\u0644" }, ...branches.map((branch) => ({ value: `__BRANCH__:${branch}`, label: `\u0645\u0648\u0638\u0641\u064a \u0641\u0631\u0639 ${branch.replace(/^\u0641\u0631\u0639\s*/, "")}` })), ...employees.map((employee) => ({ value: employee.id, label: `${employee.name} - ${employee.branch || "\u0628\u062f\u0648\u0646 \u0641\u0631\u0639"}` }))] };
+}
+async function getOperationTypeOptions(companyId) {
+  try {
+    required(companyId);
+    const values = [];
+    for (let offset = 0; offset < 10000; offset += 1000) {
+      const batch = await supabase.select("daily_operations", `select=operation_type&company_id=eq.${encodeURIComponent(companyId)}&limit=1000&offset=${offset}`);
+      const list = Array.isArray(batch) ? batch : [];
+      values.push(...list.map((row) => row.operation_type));
+      if (list.length < 1000) break;
+    }
+    const actual = uniqueSorted(values);
+    return actual.length ? actual : [...FALLBACK_OPERATION_TYPES];
+  } catch (error) {
+    console.error("Operation types load error:", error);
+    return [...FALLBACK_OPERATION_TYPES];
+  }
+}
+async function saveEmployeeTargetsBulk(companyId, selection, targetDraft = {}) {
+  required(companyId);
+  const employees = await getActiveEmployeesForTargets(companyId);
+  const selected = selection === "__ALL_EMPLOYEES__" ? employees : String(selection || "").startsWith("__BRANCH__:") ? employees.filter((employee) => employee.branch === String(selection).slice(11)) : employees.filter((employee) => employee.id === String(selection || ""));
+  if (!selected.length) return { success: false, affectedCount: 0, message: "\u0644\u0645 \u064a\u062a\u0645 \u0627\u0644\u0639\u062b\u0648\u0631 \u0639\u0644\u0649 \u0645\u0648\u0638\u0641\u064a\u0646 \u0645\u0637\u0627\u0628\u0642\u064a\u0646 \u0644\u0644\u0627\u062e\u062a\u064a\u0627\u0631" };
+  const existing = await load("performance_employee_targets", companyId, { period_month: targetDraft.period_month, period_year: targetDraft.period_year });
+  const signature = (row) => [String(row.employee_id || ""), String(row.operation_type || ""), String(row.service_channel || "")].join("|");
+  const existingBySignature = new Map(existing.map((row) => [signature(row), row]));
+  const rows = selected.map((employee) => {
+    const base = { ...targetDraft, company_id: companyId, employee_id: employee.id, employee_name: employee.name, branch: employee.branch, department: employee.department, job_title: employee.job_title || employee.job };
+    const previous = existingBySignature.get(signature(base));
+    return employeePayload({ ...base, target_id: previous?.target_id });
+  });
+  await supabase.upsert("performance_employee_targets", rows, { onConflict: "target_id" });
+  return { success: true, affectedCount: rows.length, message: rows.length === 1 ? "\u062a\u0645 \u062d\u0641\u0638 \u0627\u0644\u0647\u062f\u0641 \u0644\u0645\u0648\u0638\u0641 \u0648\u0627\u062d\u062f" : `\u062a\u0645 \u062d\u0641\u0638 \u0627\u0644\u0647\u062f\u0641 \u0644\u0639\u062f\u062f ${rows.length} \u0645\u0648\u0638\u0641` };
+}
+
+const TARGET_NUMERIC_FIELDS = new Set(["target_count", "minimum_count", "excellent_count", "target_weight", "period_month", "period_year"]);
+const TARGET_STRING_FIELDS = new Set(["employee_id", "employee_name", "branch", "department", "job_title", "operation_type", "service_channel", "notes"]);
+export const normalizeTargetPatch = (patch = {}) => Object.entries(patch || {}).reduce((result, [key, value]) => {
+  if (value === undefined) return result;
+  if (TARGET_NUMERIC_FIELDS.has(key)) { if (value === "" || value === null) result[key] = null; else { const converted = Number(value); if (Number.isFinite(converted)) result[key] = converted; } }
+  else if (TARGET_STRING_FIELDS.has(key)) result[key] = value === null ? "" : String(value);
+  else if (key === "is_active") result[key] = Boolean(value);
+  return result;
+}, {});
+async function updateEmployeeTarget(companyId, targetId, payload = {}) {
+  required(companyId);
+  if (!String(targetId || "").trim()) throw new Error("target_id is required.");
+  const patch = { ...normalizeTargetPatch(payload), updated_at: now() };
+  const rows = await supabase.request(`/rest/v1/performance_employee_targets?company_id=eq.${encodeURIComponent(companyId)}&target_id=eq.${encodeURIComponent(targetId)}`, { method: "PATCH", prefer: "return=representation", body: JSON.stringify(patch) });
+  return Array.isArray(rows) ? rows[0] || null : rows;
+}
+async function updateEmployeeTargetsBulk(companyId, targetIds = [], patch = {}) {
+  required(companyId);
+  const ids = [...new Set((Array.isArray(targetIds) ? targetIds : []).map((value) => String(value || "").trim()).filter(Boolean))];
+  if (!ids.length) return { success: true, updatedCount: 0 };
+  const normalized = { ...normalizeTargetPatch(patch), updated_at: now() };
+  const encodedIds = ids.map((value) => encodeURIComponent(value)).join(",");
+  const rows = await supabase.request(`/rest/v1/performance_employee_targets?company_id=eq.${encodeURIComponent(companyId)}&target_id=in.(${encodedIds})`, { method: "PATCH", prefer: "return=representation", body: JSON.stringify(normalized) });
+  return { success: true, updatedCount: Array.isArray(rows) ? rows.length : ids.length, rows: Array.isArray(rows) ? rows : [] };
+}
+async function deleteEmployeeTargetsBulk(companyId, targetIds = []) {
+  required(companyId);
+  const ids = [...new Set((Array.isArray(targetIds) ? targetIds : []).map((value) => String(value || "").trim()).filter(Boolean))];
+  if (!ids.length) return { success: true, deletedCount: 0 };
+  const encodedIds = ids.map((value) => encodeURIComponent(value)).join(",");
+  const rows = await supabase.request(`/rest/v1/performance_employee_targets?company_id=eq.${encodeURIComponent(companyId)}&target_id=in.(${encodedIds})`, { method: "DELETE", prefer: "return=representation" });
+  return { success: true, deletedCount: Array.isArray(rows) ? rows.length : ids.length };
+}
+
 export const performanceTargetsService = {
+  updateEmployeeTarget,
+  updateEmployeeTargetsBulk,
+  deleteEmployeeTargetsBulk,
+  normalizeTargetPatch,
+  getActiveEmployeesForTargets,
+  getEmployeeTargetSelectionOptions,
+  getOperationTypeOptions,
+  saveEmployeeTargetsBulk,
   loadEmployeeTargets: (companyId, filters = {}) => load("performance_employee_targets", companyId, filters),
   saveEmployeeTarget: (payload) => save("performance_employee_targets", "target_id", payload, employeePayload),
   deleteEmployeeTarget: (value, companyId) => remove("performance_employee_targets", "target_id", value, companyId),
