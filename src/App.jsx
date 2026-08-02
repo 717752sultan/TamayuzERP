@@ -130,6 +130,8 @@ import AttendanceKpiRulesPage from "./components/performance/AttendanceKpiRulesP
 import IncentiveExclusionsPage from "./components/performance/IncentiveExclusionsPage";
 import PerformanceProcessGuidePage from "./components/performance/PerformanceProcessGuidePage";
 import IncentiveProposalPage from "./components/performance/IncentiveProposalPage";
+import { PledgesDashboardPage, NewPledgePage, PledgeContractsPage, PledgeValuationsPage } from "./components/pledges/PledgesCorePages";
+import { PledgeVaultPage, PledgeRedemptionPage, PledgeRenewalsPage, PledgeDefaultsPage, PledgeNotificationsPage, PledgeReportsPage, PledgeSettingsPage } from "./components/pledges/PledgesOperationsPages";
 import { kpiScoresService } from "./services/kpiScores";
 import { dailyOperationsReportsService } from "./services/dailyOperationsReports";
 import DailyOperationsReportsPage from "./components/hr/DailyOperationsReportsPage";
@@ -287,6 +289,16 @@ const canonicalHrPageAliases = {
   hr_recruitment_full: "recruitment",
   hr_incentives_full: "incentives",
 };
+const pledgePageKeys = new Set(["pledges-dashboard","pledges-new","pledges-contracts","pledges-valuations","pledges-vault","pledges-redemption","pledges-renewals","pledges-defaults","pledges-notifications","pledges-reports","pledges-settings"]);
+const pledgeNavigationRoles = ["مدير النظام","مدير عام النظام","الإدارة العليا","مدير الفرع","موظف مخول"];
+const pledgePageComponents = {
+  "pledges-dashboard": PledgesDashboardPage, "pledges-new": NewPledgePage,
+  "pledges-contracts": PledgeContractsPage, "pledges-valuations": PledgeValuationsPage,
+  "pledges-vault": PledgeVaultPage, "pledges-redemption": PledgeRedemptionPage,
+  "pledges-renewals": PledgeRenewalsPage, "pledges-defaults": PledgeDefaultsPage,
+  "pledges-notifications": PledgeNotificationsPage, "pledges-reports": PledgeReportsPage,
+  "pledges-settings": PledgeSettingsPage,
+};
 const navItems = [
   ["companies_admin", "إدارة الشركات"],
   ["platform_admin_settings", "إعدادات مشرف المنصة"],
@@ -304,6 +316,17 @@ const navItems = [
   ["recruitment", "طلبات التوظيف"],
   ["reports_center", "مركز التقارير"],
   ["audit_logs", "سجل العمليات"],
+  ["pledges-dashboard", "لوحة الرهون"],
+  ["pledges-new", "إنشاء رهن جديد"],
+  ["pledges-contracts", "عقود الرهن"],
+  ["pledges-valuations", "تقييم الأصول"],
+  ["pledges-vault", "خزنة الرهون"],
+  ["pledges-redemption", "السداد وفك الرهن"],
+  ["pledges-renewals", "التمديد والتجديد"],
+  ["pledges-defaults", "التعثر والتصفية"],
+  ["pledges-notifications", "إشعارات الاستحقاق"],
+  ["pledges-reports", "تقارير الرهون"],
+  ["pledges-settings", "إعدادات الرهون"],
   ...fullHrNavItems,
   ...baseNavItems.slice(-2),
 ];
@@ -1179,9 +1202,10 @@ export default function App() {
 	    canNode = (nodeKey, action = "can_view") => hasTreePermission(treeRolePermissions, role, nodeKey, action),
       companyCanPage = (pageKey, action = "can_view") => {
         if (pageKey === "companies_admin" || pageKey === "platform_admin_settings") return platformAdmin;
+        if (pledgePageKeys.has(pageKey) && (isAdministrativeUser || pledgeNavigationRoles.some((name) => String(currentUser?.role || role || "").includes(name)))) return hasSelectedCompany;
         if (platformAdmin) return hasSelectedCompany;
         if (!hasSelectedCompany) return false;
-        if (isAdministrativeUser && ["performance-monthly-targets", "performance-branch-targets", "performance-attendance-rules", "performance-incentive-exclusions", "performance-incentive-proposal", "performance-process-guide", "hr-attendance-records"].includes(pageKey)) return true;
+        if (isAdministrativeUser && ["pledges-dashboard", "pledges-new", "pledges-contracts", "pledges-valuations", "pledges-vault", "pledges-redemption", "pledges-renewals", "pledges-defaults", "pledges-notifications", "pledges-reports", "pledges-settings", "performance-monthly-targets", "performance-branch-targets", "performance-attendance-rules", "performance-incentive-exclusions", "performance-incentive-proposal", "performance-process-guide", "hr-attendance-records"].includes(pageKey)) return true;
         if (["employees_grid", "employee_effectiveness", "user_activity_logs"].includes(pageKey)
           && !companyCanPageFromRows(companyPermissions, "employees", "can_view")) return false;
         if (pageKey === "employee_effectiveness"
@@ -1194,7 +1218,7 @@ export default function App() {
           || companyCanPageFromRows(companyPermissions, pageKey, "can_manage");
       },
       companyCanModule = (moduleKey) =>
-        platformAdmin ? hasSelectedCompany || moduleKey === "platform" : hasSelectedCompany && companyCanModuleFromRows(companyPermissions, moduleKey),
+        platformAdmin ? hasSelectedCompany || moduleKey === "platform" : hasSelectedCompany && (moduleKey === "pledges" && (isAdministrativeUser || pledgeNavigationRoles.some((name) => String(currentUser?.role || role || "").includes(name))) ? true : companyCanModuleFromRows(companyPermissions, moduleKey)),
 	    canPage = (pageKey, action = "can_view") => {
         if (platformAdmin) return companyCanPage(pageKey, action);
         if (!companyCanPage(pageKey, action)) return false;
@@ -1501,6 +1525,7 @@ export default function App() {
           {!requestedPageBlockedByCompany && !requestedPageBlockedByRole && (
           <>
           {isPlaceholderPage(activePage) && <ErpPlaceholderPage pageKey={activePage} moduleKey={selectedModuleKey} onBack={() => switchErpModule("hr")} />}{" "}
+          {pledgePageComponents[activePage] && React.createElement(pledgePageComponents[activePage], p)}{" "}
           {activePage === "companies_admin" && <CompaniesAdminPage {...p} />}{" "}
           {activePage === "platform_admin_settings" && <PlatformAdminSettingsPage {...p} />}{" "}
           {activePage === "dashboard" && <Dashboard {...p} />}{" "}

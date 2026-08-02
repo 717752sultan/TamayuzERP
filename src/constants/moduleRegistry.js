@@ -58,6 +58,13 @@ const ERP_MODULE_DEFINITIONS = [
     order: 7,
   },
   {
+    key: "pledges",
+    label: erpModuleLabels.pledges,
+    description: "إدارة تشغيلية للرهونات العينية والأصول المرهونة والاستحقاقات",
+    permissionKey: "module_pledges",
+    order: 8,
+  },
+  {
     key: "projects",
     label: erpModuleLabels.projects,
     description: "إدارة المشاريع والمهام والفرق والمستندات",

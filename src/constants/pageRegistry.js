@@ -8,6 +8,7 @@ export const erpModuleLabels = {
   accounting: "الحسابات",
   crm: "CRM",
   assets: "الأصول",
+  pledges: "الرهونات العينية",
   projects: "المشاريع",
 };
 
@@ -209,6 +210,19 @@ const erpRegistryPages = [
   ["inventory_movements", "حركة المخزون", "inventory", "inventory", "inventory.movements", reportActions, "active"],
   ["inventory_reports", "تقارير المخزون", "inventory", "inventory", "inventory.reports", reportActions, "active"],
   ["inventory_settings", "إعدادات المخزون", "inventory", "inventory", "inventory.settings", settingsActions, "active"],
+  ...[
+    ["pledges-dashboard", "لوحة الرهون", "pledges.dashboard", ["can_view", "can_export", "can_print"]],
+    ["pledges-new", "إنشاء رهن جديد", "pledges.new", ["can_view", "can_create", "can_approve"]],
+    ["pledges-contracts", "عقود الرهن", "pledges.contracts", ["can_view", "can_edit", "can_approve", "can_cancel", "can_print"]],
+    ["pledges-valuations", "تقييم الأصول", "pledges.valuations", ["can_view", "can_create", "can_edit", "can_approve"]],
+    ["pledges-vault", "خزنة الرهون", "pledges.vault", ["can_view", "can_create", "can_edit", "can_manage"]],
+    ["pledges-redemption", "السداد وفك الرهن", "pledges.redemption", ["can_view", "can_create", "can_edit", "can_approve", "can_print"]],
+    ["pledges-renewals", "التمديد والتجديد", "pledges.renewals", ["can_view", "can_create", "can_approve"]],
+    ["pledges-defaults", "التعثر والتصفية", "pledges.defaults", ["can_view", "can_create", "can_approve", "can_print"]],
+    ["pledges-notifications", "إشعارات الاستحقاق", "pledges.notifications", ["can_view", "can_create", "can_edit", "can_print"]],
+    ["pledges-reports", "تقارير الرهون", "pledges.reports", ["can_view", "can_export", "can_print"]],
+    ["pledges-settings", "إعدادات الرهون", "pledges.settings", ["can_view", "can_create", "can_edit", "can_configure"]],
+  ].map(([key, label, permissionKey, actions], index) => [key, label, "pledges", key, permissionKey, actions, "active"]),
   ...["لوحة المبيعات", "العملاء", "عروض الأسعار", "أوامر البيع", "فواتير البيع", "مردودات البيع", "المدفوعات", "تقارير المبيعات"].map((label, index) => [`sales_${index + 1}`, label, "sales", `sales_${index + 1}`, `sales.page_${index + 1}`, index === 7 ? reportActions : commonActions, "placeholder"]),
   ...["لوحة المشتريات", "الموردون", "طلبات الشراء", "أوامر الشراء", "فواتير الشراء", "مردودات الشراء", "مدفوعات الموردين", "تقارير المشتريات"].map((label, index) => [`purchasing_${index + 1}`, label, "purchasing", index > 0 && index < 6 ? "inventory" : `purchasing_${index + 1}`, `purchasing.page_${index + 1}`, [2, 3].includes(index) ? approvalActions : index === 7 ? reportActions : commonActions, index > 0 && index < 6 ? "active" : "placeholder"]),
   ...["لوحة الحسابات", "دليل الحسابات", "القيود اليومية", "سند قبض", "سند صرف", "مراكز التكلفة", "العملات", "التقارير المالية", "ميزان المراجعة", "قائمة الدخل", "المركز المالي", "كشف حساب"].map((label, index) => [`accounting_${index + 1}`, label, "accounting", `accounting_${index + 1}`, `accounting.page_${index + 1}`, index >= 7 ? reportActions : financialActions, "placeholder"]),
