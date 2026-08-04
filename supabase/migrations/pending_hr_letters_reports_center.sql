@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS public.hr_documents (
   document_no text,
   document_type text NOT NULL,
   document_title text NOT NULL,
+  company_name text,
   employee_id text,
   employee_name text,
   branch text,
@@ -49,6 +50,9 @@ CREATE TABLE IF NOT EXISTS public.hr_document_archive (
   archive_title text,
   archive_status text DEFAULT 'مؤرشف',
   file_url text,
+  body_snapshot text,
+  header_snapshot text,
+  footer_snapshot text,
   notes text,
   created_at timestamptz DEFAULT now()
 );

@@ -1,0 +1,33 @@
+-- Migration for HR document print header/footer settings
+
+CREATE TABLE IF NOT EXISTS public.hr_document_print_settings (
+  setting_id text PRIMARY KEY,
+  company_id text NOT NULL,
+  company_name_ar text DEFAULT 'Pure Money',
+  company_name_en text DEFAULT 'Pure Money',
+  company_logo_url text,
+  header_title text,
+  header_subtitle text,
+  header_address text,
+  header_phone text,
+  header_email text,
+  footer_line_1 text,
+  footer_line_2 text,
+  footer_line_3 text,
+  signature_title text DEFAULT 'إدارة الموارد البشرية',
+  signature_name text,
+  stamp_label text DEFAULT 'الختم',
+  show_logo boolean DEFAULT true,
+  show_company_name_ar boolean DEFAULT true,
+  show_company_name_en boolean DEFAULT true,
+  show_document_number boolean DEFAULT true,
+  show_print_date boolean DEFAULT true,
+  paper_size text DEFAULT 'A4',
+  print_margin_top numeric DEFAULT 20,
+  print_margin_bottom numeric DEFAULT 20,
+  print_margin_right numeric DEFAULT 18,
+  print_margin_left numeric DEFAULT 18,
+  is_active boolean DEFAULT true,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);

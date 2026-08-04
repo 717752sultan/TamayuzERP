@@ -23,6 +23,7 @@ const tabs = [
   ["reports", "التقارير"],
   ["archive", "أرشيف المستندات"],
   ["templates", "قوالب الخطابات"],
+  ["settings", "إعدادات الترويسة والتذييل"],
 ];
 
 const documentTypes = [
@@ -115,6 +116,13 @@ export default function HrLettersReportsCenter({ currentCompany, currentUser, ca
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [printSettings, setPrintSettings] = useState(hrLettersReportsService.defaultPrintSettings);
+  const [settings, setSettings] = useState(hrLettersReportsService.defaultPrintSettings);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState("");
+  const [settingsError, setSettingsError] = useState("");
   const companyId = currentCompany?.company_id || currentUser?.company_id || "";
 
   const canView = can?.("hr_documents", "can_view") !== false;
@@ -129,6 +137,7 @@ export default function HrLettersReportsCenter({ currentCompany, currentUser, ca
     document_type: "طلب إجازة",
     template_id: "",
     document_title: "",
+    company_name: "",
     employee_id: "",
     employee_name: "",
     branch: "",
@@ -144,6 +153,8 @@ export default function HrLettersReportsCenter({ currentCompany, currentUser, ca
     body: "",
     status: "مسودة",
     approval_status: "غير معتمد",
+    use_company_header: true,
+    allow_edit_before_approval: true,
     file_url: "",
   };
 
@@ -153,20 +164,24 @@ export default function HrLettersReportsCenter({ currentCompany, currentUser, ca
       setLoading(true);
       setError("");
       try {
-        const [templateRows, documentRows, archiveRows, employeeRows] = await Promise.all([
+        const [templateRows, documentRows, archiveRows, employeeRows, settingsRow] = await Promise.all([
           hrLettersReportsService.getHrDocumentTemplates(companyId),
           hrLettersReportsService.getHrDocuments(companyId),
           hrLettersReportsService.getHrDocumentArchives(companyId),
           hrLettersReportsService.getEmployeesForDocuments(companyId),
+          hrLettersReportsService.getHrDocumentPrintSettings(companyId),
         ]);
         setTemplates(Array.isArray(templateRows) ? templateRows : []);
         setDocuments(Array.isArray(documentRows) ? documentRows : []);
         setArchives(Array.isArray(archiveRows) ? archiveRows : []);
         setEmployees(Array.isArray(employeeRows) ? employeeRows : []);
+        setPrintSettings(settingsRow || hrLettersReportsService.defaultPrintSettings);
+        setSettings({ ...hrLettersReportsService.defaultPrintSettings, ...(settingsRow || {}) });
       } catch (err) {
         setError(err?.message || "تعذر تحميل بيانات مركز الخطابات والتقارير");
       } finally {
         setLoading(false);
+        setSettingsLoading(false);
       }
     };
     load();
@@ -248,14 +263,21 @@ export default function HrLettersReportsCenter({ currentCompany, currentUser, ca
     if (!canCreate && !document) return;
     if (document) {
       setDialog({
+        ...defaultDialog,
         ...document,
         template_id: document.template_id || "",
         document_title: document.document_title || document.subject || document.document_type,
+        company_name: document.company_name || printSettings.company_name_ar || hrLettersReportsService.defaultPrintSettings.company_name_ar,
+        use_company_header: document.use_company_header !== false,
+        allow_edit_before_approval: document.allow_edit_before_approval !== false,
       });
       return;
     }
     setDialog({
       ...defaultDialog,
+      company_name: printSettings.company_name_ar || hrLettersReportsService.defaultPrintSettings.company_name_ar,
+      use_company_header: true,
+      allow_edit_before_approval: true,
       document_date: today(),
     });
   };
@@ -263,12 +285,59 @@ export default function HrLettersReportsCenter({ currentCompany, currentUser, ca
   const closeDialog = () => setDialog(null);
 
   const setDialogField = (field, value) => setDialog((prev) => ({ ...(prev || {}), [field]: value }));
+  const setSettingsField = (field, value) => setSettings((prev) => ({ ...(prev || {}), [field]: value }));
+
+  const savePrintSettings = async () => {
+    if (!companyId) return;
+    setSettingsSaving(true);
+    setSettingsError("");
+    setSettingsMessage("");
+    try {
+      const saved = await hrLettersReportsService.saveHrDocumentPrintSettings(companyId, settings);
+      setPrintSettings(saved);
+      setSettings({ ...saved });
+      setSettingsMessage("تم حفظ إعدادات الترويسة والتذييل بنجاح");
+    } catch (err) {
+      setSettingsError(err?.message || "تعذر حفظ إعدادات الترويسة والتذييل");
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const restoreDefaultSettings = () => {
+    setSettings({ ...hrLettersReportsService.defaultPrintSettings, company_id: companyId });
+    setSettingsMessage("تم استعادة القيم الافتراضية في النموذج");
+    setSettingsError("");
+  };
+
+  const previewSettingsTemplate = () => {
+    const sampleDocument = {
+      document_no: "12345",
+      document_date: today(),
+      document_type: "نموذج طباعة HR",
+      subject: "هذا عرض لترويسة وتذييل المستند",
+      employee_name: "محمد علي",
+      employee_id: "EMP001",
+      branch: "الفرع الرئيسي",
+      department: "الموارد البشرية",
+      job_title: "أخصائي موارد بشرية",
+      body: "السلام عليكم ورحمة الله وبركاته،\n\nهذا المستند يمثل معاينة لتخطيط الطباعة الرسمي باستخدام إعدادات الشركة الحالية.\n\nوالله الموفق،،،",
+      company_name: settings.company_name_ar || printSettings.company_name_ar || "Pure Money",
+    };
+    const html = hrLettersReportsService.renderOfficialDocumentHtml(sampleDocument, settings);
+    const w = window.open("", "_blank", "width=900,height=800");
+    if (!w) return alert("يرجى تمكين فتح النوافذ الجديدة لمعاينة الترويسة.");
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+  };
 
   const saveDocument = async (action = "draft") => {
     if (!dialog) return;
     if (!companyId) return;
     setSaving(true);
     setError("");
+    setSuccessMessage("");
     try {
       const payload = {
         ...dialog,
@@ -276,8 +345,11 @@ export default function HrLettersReportsCenter({ currentCompany, currentUser, ca
         document_title: dialog.document_title || computedSubject || documentTypeLabel(dialog.document_type),
         subject: dialog.subject || computedSubject,
         body: dialog.body || computedBody,
-        status: dialog.status || "مسودة",
+        company_name: dialog.company_name || printSettings.company_name_ar || hrLettersReportsService.defaultPrintSettings.company_name_ar,
+        status: action === "approve" ? "معتمد" : dialog.status || "مسودة",
         approval_status: action === "approve" ? "معتمد" : dialog.approval_status || "غير معتمد",
+        approved_at: action === "approve" ? new Date().toISOString() : dialog.approved_at || null,
+        approved_by: action === "approve" ? currentUser?.name || currentUser?.username || "" : dialog.approved_by || "",
       };
       const saved = dialog.document_id
         ? await hrLettersReportsService.updateHrDocument(companyId, dialog.document_id, payload)
@@ -287,6 +359,7 @@ export default function HrLettersReportsCenter({ currentCompany, currentUser, ca
         return [saved, ...rest];
       });
       setDialog(null);
+      setSuccessMessage(dialog.document_id ? "تم تحديث بيانات المستند بنجاح" : "تم حفظ المستند بنجاح");
     } catch (err) {
       setError(err?.message || "تعذر حفظ المستند");
     } finally {
@@ -341,7 +414,7 @@ export default function HrLettersReportsCenter({ currentCompany, currentUser, ca
 
   const printDocument = (document) => {
     if (!document) return;
-    const html = `<html dir="rtl"><head><meta charset="utf-8"><title>${document.document_title || document.document_no || "المستند"}</title><style>body{font-family:Tahoma,Arial,sans-serif;padding:24px;color:#111;direction:rtl}h1,h2,h3{margin:0 0 12px}table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px}th,td{border:1px solid #ddd;padding:10px;text-align:right}th{background:#f3f4f6}section{margin-bottom:20px}blockquote{margin:18px 0;padding:18px;background:#f8f8f8;border-right:4px solid #7f1d1d}</style></head><body><h1>${currentCompany?.company_name || "مركز الموارد البشرية"}</h1><h2>${document.document_title || document.document_type}</h2><p><strong>رقم المستند:</strong> ${document.document_no || "—"}</p><p><strong>التاريخ:</strong> ${document.document_date || "—"}</p><p><strong>الموظف:</strong> ${document.employee_name || "—"}</p><p><strong>الفرع:</strong> ${document.branch || "—"}</p><p><strong>القسم:</strong> ${document.department || "—"}</p><section><strong>الموضوع:</strong><p>${document.subject || "—"}</p></section><section><strong>نص الخطاب:</strong><blockquote>${(document.body || "—").replace(/\n/g, "<br />")}</blockquote></section><footer><p>والله الموفق،،،</p><p>إدارة الموارد البشرية</p></footer></body></html>`;
+    const html = hrLettersReportsService.renderOfficialDocumentHtml(document, printSettings || settings || hrLettersReportsService.defaultPrintSettings);
     const w = window.open("", "_blank", "width=900,height=800");
     if (!w) return alert("يرجى تمكين فتح النوافذ الجديدة لطباعة المستند.");
     w.document.write(html);
@@ -352,7 +425,7 @@ export default function HrLettersReportsCenter({ currentCompany, currentUser, ca
 
   const exportWord = (document) => {
     if (!document) return;
-    const html = `<html dir="rtl"><head><meta charset="utf-8"><title>${document.document_title || document.document_type}</title></head><body><h1>${document.document_title || document.document_type}</h1><p><strong>رقم المستند:</strong> ${document.document_no || "—"}</p><p><strong>التاريخ:</strong> ${document.document_date || "—"}</p><p><strong>الموظف:</strong> ${document.employee_name || "—"}</p><p>${(document.body || "").replace(/\n/g, "<br />")}</p></body></html>`;
+    const html = hrLettersReportsService.renderOfficialDocumentHtml(document, printSettings || settings || hrLettersReportsService.defaultPrintSettings);
     const blob = new Blob([html], { type: "application/msword" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -376,6 +449,243 @@ export default function HrLettersReportsCenter({ currentCompany, currentUser, ca
     { key: "document_date", label: "التاريخ" },
   ];
 
+  const renderTabContent = () => {
+    if (loading) {
+      return <div className="p-8 text-center text-sm text-slate-400">جاري تحميل البيانات...</div>;
+    }
+
+    if (activeTab === "templates") {
+      return (
+        <div className="space-y-4">
+          {templates.length ? (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>القالب</th>
+                    <th>النوع</th>
+                    <th>الوصف</th>
+                    <th>الحالة</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {templates.map((template) => (
+                    <tr key={template.template_id}>
+                      <td>{template.template_name}</td>
+                      <td>{template.template_type}</td>
+                      <td>{template.subject}</td>
+                      <td><StatusBadge>{template.is_active ? "نشط" : "غير نشط"}</StatusBadge></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="p-8 text-center text-sm text-slate-400">لا توجد قوالب مسجلة حالياً</div>
+          )}
+        </div>
+      );
+    }
+
+    if (activeTab === "settings") {
+      if (settingsLoading) {
+        return <div className="p-8 text-center text-sm text-slate-400">جاري تحميل إعدادات الترويسة والتذييل...</div>;
+      }
+      return (
+        <div className="space-y-6">
+          <div className="panel p-4">
+            <h3 className="text-lg font-bold">بيانات الشركة</h3>
+            <div className="grid gap-4 py-4 lg:grid-cols-2">
+              <label className="block">
+                <CleanLabel>اسم الشركة بالعربي</CleanLabel>
+                <input value={settings.company_name_ar || ""} onChange={(e) => setSettingsField("company_name_ar", e.target.value)} className="field w-full" />
+              </label>
+              <label className="block">
+                <CleanLabel>اسم الشركة بالإنجليزي</CleanLabel>
+                <input value={settings.company_name_en || ""} onChange={(e) => setSettingsField("company_name_en", e.target.value)} className="field w-full" />
+              </label>
+              <label className="block lg:col-span-2">
+                <CleanLabel>رابط شعار الشركة</CleanLabel>
+                <input value={settings.company_logo_url || ""} onChange={(e) => setSettingsField("company_logo_url", e.target.value)} className="field w-full" placeholder="https://..." />
+              </label>
+              {settings.company_logo_url ? (
+                <div className="lg:col-span-2">
+                  <CleanLabel>معاينة الشعار</CleanLabel>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <img src={settings.company_logo_url} alt="شعار الشركة" className="max-h-32 object-contain" onError={(e) => { e.target.style.display = "none"; }} />
+                  </div>
+                </div>
+              ) : null}
+              <label className="block">
+                <CleanLabel>عنوان الترويسة</CleanLabel>
+                <input value={settings.header_title || ""} onChange={(e) => setSettingsField("header_title", e.target.value)} className="field w-full" />
+              </label>
+              <label className="block">
+                <CleanLabel>وصف الترويسة</CleanLabel>
+                <input value={settings.header_subtitle || ""} onChange={(e) => setSettingsField("header_subtitle", e.target.value)} className="field w-full" />
+              </label>
+              <label className="block">
+                <CleanLabel>العنوان</CleanLabel>
+                <input value={settings.header_address || ""} onChange={(e) => setSettingsField("header_address", e.target.value)} className="field w-full" />
+              </label>
+              <label className="block">
+                <CleanLabel>الهاتف</CleanLabel>
+                <input value={settings.header_phone || ""} onChange={(e) => setSettingsField("header_phone", e.target.value)} className="field w-full" />
+              </label>
+              <label className="block">
+                <CleanLabel>البريد الإلكتروني</CleanLabel>
+                <input value={settings.header_email || ""} onChange={(e) => setSettingsField("header_email", e.target.value)} className="field w-full" />
+              </label>
+            </div>
+          </div>
+          <div className="panel p-4">
+            <h3 className="text-lg font-bold">التذييل والاعتماد</h3>
+            <div className="grid gap-4 py-4 lg:grid-cols-2">
+              <label className="block">
+                <CleanLabel>سطر التذييل الأول</CleanLabel>
+                <input value={settings.footer_line_1 || ""} onChange={(e) => setSettingsField("footer_line_1", e.target.value)} className="field w-full" />
+              </label>
+              <label className="block">
+                <CleanLabel>سطر التذييل الثاني</CleanLabel>
+                <input value={settings.footer_line_2 || ""} onChange={(e) => setSettingsField("footer_line_2", e.target.value)} className="field w-full" />
+              </label>
+              <label className="block">
+                <CleanLabel>سطر التذييل الثالث</CleanLabel>
+                <input value={settings.footer_line_3 || ""} onChange={(e) => setSettingsField("footer_line_3", e.target.value)} className="field w-full" />
+              </label>
+              <label className="block">
+                <CleanLabel>صفة التوقيع</CleanLabel>
+                <input value={settings.signature_title || ""} onChange={(e) => setSettingsField("signature_title", e.target.value)} className="field w-full" />
+              </label>
+              <label className="block">
+                <CleanLabel>اسم المعتمد</CleanLabel>
+                <input value={settings.signature_name || ""} onChange={(e) => setSettingsField("signature_name", e.target.value)} className="field w-full" />
+              </label>
+              <label className="block">
+                <CleanLabel>مسمى الختم</CleanLabel>
+                <input value={settings.stamp_label || ""} onChange={(e) => setSettingsField("stamp_label", e.target.value)} className="field w-full" />
+              </label>
+            </div>
+          </div>
+          <div className="panel p-4">
+            <h3 className="text-lg font-bold">خيارات الطباعة</h3>
+            <div className="grid gap-4 py-4 lg:grid-cols-2">
+              <label className="flex items-center gap-3"><input type="checkbox" checked={settings.show_logo !== false} onChange={(e) => setSettingsField("show_logo", e.target.checked)} /> إظهار الشعار</label>
+              <label className="flex items-center gap-3"><input type="checkbox" checked={settings.show_company_name_ar !== false} onChange={(e) => setSettingsField("show_company_name_ar", e.target.checked)} /> إظهار اسم الشركة بالعربي</label>
+              <label className="flex items-center gap-3"><input type="checkbox" checked={settings.show_company_name_en !== false} onChange={(e) => setSettingsField("show_company_name_en", e.target.checked)} /> إظهار اسم الشركة بالإنجليزي</label>
+              <label className="flex items-center gap-3"><input type="checkbox" checked={settings.show_document_number !== false} onChange={(e) => setSettingsField("show_document_number", e.target.checked)} /> إظهار رقم المستند</label>
+              <label className="flex items-center gap-3"><input type="checkbox" checked={settings.show_print_date !== false} onChange={(e) => setSettingsField("show_print_date", e.target.checked)} /> إظهار تاريخ الطباعة</label>
+              <label className="block">
+                <CleanLabel>حجم الورق</CleanLabel>
+                <input value={settings.paper_size || "A4"} onChange={(e) => setSettingsField("paper_size", e.target.value)} className="field w-full" />
+              </label>
+              <label className="block">
+                <CleanLabel>الهامش العلوي (مم)</CleanLabel>
+                <input type="number" value={settings.print_margin_top ?? 20} onChange={(e) => setSettingsField("print_margin_top", Number(e.target.value || 20))} className="field w-full" />
+              </label>
+              <label className="block">
+                <CleanLabel>الهامش السفلي (مم)</CleanLabel>
+                <input type="number" value={settings.print_margin_bottom ?? 20} onChange={(e) => setSettingsField("print_margin_bottom", Number(e.target.value || 20))} className="field w-full" />
+              </label>
+              <label className="block">
+                <CleanLabel>الهامش الأيمن (مم)</CleanLabel>
+                <input type="number" value={settings.print_margin_right ?? 18} onChange={(e) => setSettingsField("print_margin_right", Number(e.target.value || 18))} className="field w-full" />
+              </label>
+              <label className="block">
+                <CleanLabel>الهامش الأيسر (مم)</CleanLabel>
+                <input type="number" value={settings.print_margin_left ?? 18} onChange={(e) => setSettingsField("print_margin_left", Number(e.target.value || 18))} className="field w-full" />
+              </label>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" onClick={savePrintSettings} disabled={settingsSaving} className="btn-primary">حفظ الإعدادات</button>
+            <button type="button" onClick={previewSettingsTemplate} className="btn-secondary">معاينة نموذج الطباعة</button>
+            <button type="button" onClick={restoreDefaultSettings} className="btn-secondary">استعادة الافتراضي</button>
+          </div>
+        </div>
+      );
+    }
+
+    if (activeTab === "archive") {
+      return (
+        <div className="space-y-4">
+          {visibleArchives.length ? (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>رقم المستند</th>
+                    <th>النوع</th>
+                    <th>الموظف</th>
+                    <th>التاريخ</th>
+                    <th>الحالة</th>
+                    <th>ملاحظات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleArchives.map((item) => (
+                    <tr key={item.archive_id}>
+                      <td>{item.document_id || "—"}</td>
+                      <td>{item.document_type}</td>
+                      <td>{item.employee_name}</td>
+                      <td>{item.created_at?.slice(0, 10) || "—"}</td>
+                      <td><StatusBadge>{item.archive_status}</StatusBadge></td>
+                      <td>{item.notes || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="p-8 text-center text-sm text-slate-400">لا توجد مستندات مؤرشفة حالياً</div>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {filteredDocuments.length ? (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  {tableColumns.map((col) => <th key={col.key}>{col.label}</th>)}
+                  <th>الحالة</th>
+                  <th>الاعتماد</th>
+                  <th>إجراءات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDocuments.map((document) => (
+                  <tr key={document.document_id}>
+                    <td>{document.document_no || "—"}</td>
+                    <td>{document.document_type}</td>
+                    <td>{document.document_title || "—"}</td>
+                    <td>{document.employee_name || "—"}</td>
+                    <td>{document.branch || "—"}</td>
+                    <td>{document.document_date || "—"}</td>
+                    <td><StatusBadge>{document.status || "—"}</StatusBadge></td>
+                    <td><StatusBadge>{document.approval_status || "—"}</StatusBadge></td>
+                    <td className="space-x-1 rtl:space-x-reverse">
+                      <button onClick={() => openDialog(document)} className="rounded-xl border border-slate-200 px-3 py-1 text-slate-600">عرض</button>
+                      <button disabled={!canEdit} onClick={() => openDialog(document)} className="rounded-xl border border-slate-200 px-3 py-1 text-blue-600">تعديل بيانات المستند</button>
+                      <button disabled={!canApprove || document.approval_status === "معتمد"} onClick={() => approveDocument(document)} className="rounded-xl border border-slate-200 px-3 py-1 text-emerald-600">اعتماد</button>
+                      <button onClick={() => archiveDocument(document)} className="rounded-xl border border-slate-200 px-3 py-1 text-amber-600">أرشفة</button>
+                      <button disabled={!canDelete} onClick={() => deleteDocument(document)} className="rounded-xl border border-slate-200 px-3 py-1 text-red-600">حذف</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="p-8 text-center text-sm text-slate-400">لا توجد بيانات حالياً</div>
+        )}
+      </div>
+    );
+  };
+
   if (!canView) {
     return (
       <div className="panel p-6 text-center font-bold text-red-600">لا تملك صلاحية الوصول إلى مركز الخطابات والتقارير</div>
@@ -391,6 +701,9 @@ export default function HrLettersReportsCenter({ currentCompany, currentUser, ca
       />
 
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
+      {successMessage && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-700">{successMessage}</div>}
+      {settingsMessage && activeTab === "settings" && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-700">{settingsMessage}</div>}
+      {settingsError && activeTab === "settings" && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{settingsError}</div>}
 
       <div className="grid gap-4 md:grid-cols-3">{stats.map((item) => <Mini key={item.label} label={item.label} value={item.value} icon={item.icon} />)}</div>
 
@@ -412,33 +725,7 @@ export default function HrLettersReportsCenter({ currentCompany, currentUser, ca
       </div>
 
       <div className="panel p-4">
-        {loading ? (
-          <div className="p-8 text-center text-sm text-slate-400">جاري تحميل البيانات...</div>
-        ) : activeTab === "templates" ? (
-          <div className="space-y-4">
-            {templates.length ? (
-              <div className="table-wrap"><table><thead><tr><th>القالب</th><th>النوع</th><th>الوصف</th><th>الحالة</th></tr></thead><tbody>{templates.map((template) => <tr key={template.template_id}><td>{template.template_name}</td><td>{template.template_type}</td><td>{template.subject}</td><td><StatusBadge>{template.is_active ? "نشط" : "غير نشط"}</StatusBadge></td></tr>)}</tbody></table></div>
-            ) : (
-              <div className="p-8 text-center text-sm text-slate-400">لا توجد قوالب مسجلة حالياً</div>
-            )}
-          </div>
-        ) : activeTab === "archive" ? (
-          <div className="space-y-4">
-            {visibleArchives.length ? (
-              <div className="table-wrap"><table><thead><tr><th>رقم المستند</th><th>النوع</th><th>الموظف</th><th>التاريخ</th><th>الحالة</th><th>ملاحظات</th></tr></thead><tbody>{visibleArchives.map((item) => <tr key={item.archive_id}><td>{item.document_id || "—"}</td><td>{item.document_type}</td><td>{item.employee_name}</td><td>{item.created_at?.slice(0, 10) || "—"}</td><td><StatusBadge>{item.archive_status}</StatusBadge></td><td>{item.notes || "—"}</td></tr>)}</tbody></table></div>
-            ) : (
-              <div className="p-8 text-center text-sm text-slate-400">لا توجد مستندات مؤرشفة حالياً</div>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {filteredDocuments.length ? (
-              <div className="table-wrap"><table><thead><tr>{tableColumns.map((col) => <th key={col.key}>{col.label}</th>)}<th>الحالة</th><th>الاعتماد</th><th>إجراءات</th></tr></thead><tbody>{filteredDocuments.map((document) => <tr key={document.document_id}><td>{document.document_no || "—"}</td><td>{document.document_type}</td><td>{document.document_title || "—"}</td><td>{document.employee_name || "—"}</td><td>{document.branch || "—"}</td><td>{document.document_date || "—"}</td><td><StatusBadge>{document.status || "—"}</StatusBadge></td><td><StatusBadge>{document.approval_status || "—"}</StatusBadge></td><td className="space-x-1 rtl:space-x-reverse"><button onClick={() => openDialog(document)} className="rounded-xl border border-slate-200 px-3 py-1 text-slate-600">عرض</button><button disabled={!canEdit} onClick={() => openDialog(document)} className="rounded-xl border border-slate-200 px-3 py-1 text-blue-600">تعديل</button><button disabled={!canApprove || document.approval_status === "معتمد"} onClick={() => approveDocument(document)} className="rounded-xl border border-slate-200 px-3 py-1 text-emerald-600">اعتماد</button><button onClick={() => archiveDocument(document)} className="rounded-xl border border-slate-200 px-3 py-1 text-amber-600">أرشفة</button><button disabled={!canDelete} onClick={() => deleteDocument(document)} className="rounded-xl border border-slate-200 px-3 py-1 text-red-600">حذف</button></td></tr>)}</tbody></table></div>
-            ) : (
-              <div className="p-8 text-center text-sm text-slate-400">لا توجد بيانات حالياً</div>
-            )}
-          </div>
-        )}
+        {renderTabContent()}
       </div>
 
       {dialog && (
@@ -490,8 +777,18 @@ export default function HrLettersReportsCenter({ currentCompany, currentUser, ca
                 </select>
               </label>
               <label className="block">
+                <CleanLabel>اسم الشركة في المستند</CleanLabel>
+                <input value={dialog.company_name || ""} onChange={(e) => setDialogField("company_name", e.target.value)} className="field w-full" />
+              </label>
+              <label className="block">
                 <CleanLabel>رقم الخطاب</CleanLabel>
                 <input value={dialog.document_no || ""} onChange={(e) => setDialogField("document_no", e.target.value)} className="field w-full" />
+              </label>
+              <label className="block lg:col-span-2">
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={dialog.use_company_header !== false} onChange={(e) => setDialogField("use_company_header", e.target.checked)} /> استخدام ترويسة الشركة في الطباعة</label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={dialog.allow_edit_before_approval !== false} onChange={(e) => setDialogField("allow_edit_before_approval", e.target.checked)} /> السماح بتعديل النص قبل الاعتماد</label>
+                </div>
               </label>
               <label className="block">
                 <CleanLabel>التاريخ</CleanLabel>
@@ -525,6 +822,18 @@ export default function HrLettersReportsCenter({ currentCompany, currentUser, ca
                 <CleanLabel>نص الخطاب النهائي</CleanLabel>
                 <textarea value={dialog.body || computedBody} onChange={(e) => setDialogField("body", e.target.value)} className="field h-48 w-full" />
               </label>
+            </div>
+            <div className="panel rounded-3xl border border-slate-200 bg-slate-50 p-4">
+              <h4 className="text-base font-bold">معاينة المستند</h4>
+              <div className="mt-3 space-y-3 text-sm text-slate-700">
+                <div><strong>الموضوع:</strong> {dialog.subject || computedSubject || "—"}</div>
+                <div><strong>الموظف:</strong> {dialog.employee_name || "—"}</div>
+                <div><strong>الفرع:</strong> {dialog.branch || "—"}</div>
+                <div><strong>القسم:</strong> {dialog.department || "—"}</div>
+                <div><strong>الوظيفة:</strong> {dialog.job_title || "—"}</div>
+                <div><strong>نص الخطاب:</strong></div>
+                <div className="whitespace-pre-wrap rounded-2xl bg-white p-4 text-slate-800">{dialog.body || computedBody || "—"}</div>
+              </div>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <button type="button" disabled={!canExport} onClick={() => dialog && printDocument({ ...dialog, subject: dialog.subject || computedSubject, body: dialog.body || computedBody })} className="btn-secondary w-full"><Printer size={18} /> معاينة / طباعة</button>

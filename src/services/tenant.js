@@ -359,6 +359,7 @@ export const tenantAwareTables = new Set([
   "hr_document_templates",
   "hr_documents",
   "hr_document_archive",
+  "hr_document_print_settings",
   "fixed_asset_categories",
   "fixed_assets",
   "fixed_asset_custodies",
