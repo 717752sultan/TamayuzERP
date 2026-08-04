@@ -119,6 +119,7 @@ import { ERP_MODULES, ERP_PAGE_BY_KEY, ERP_PAGE_BY_ROUTE, buildGroupedNavigation
 import HRFoundationPage from "./components/hr/HRFoundationPage";
 import HrReportsPage from "./components/hr/HrReportsPage";
 import HRExecutiveDashboard from "./components/hr/HRExecutiveDashboard";
+import HrLettersReportsCenter from "./components/hr/HrLettersReportsCenter";
 import AttendanceCalculationPage from "./components/hr/AttendanceCalculationPage";
 import EmployeeSelfAttendancePage from "./components/hr/EmployeeSelfAttendancePage";
 import EmployeePortalApp, { EmployeeLoginPage } from "./components/employee/EmployeePortalApp";
@@ -1612,6 +1613,7 @@ export default function App() {
           {activePage === "system_settings" && <SystemSettingsPage {...p} />}
           {activePage === "hr_home" && <HRExecutiveDashboard {...p} />}
           {activePage === "employee_app_settings" && <EmployeeAppAdminSettingsPage {...p} />}
+          {activePage === "hr_documents" && <HrLettersReportsCenter {...p} />}
           {["hr_org_chart", "hr_settings"].includes(activePage) && <HRFoundationPage {...p} pageKey={activePage} />}
           {activePage === "hr_reports" && <HrReportsPage {...p} />}
           {genericHrPageKeys.has(activePage) && activePage !== "hr_reports" && <HRModulePage pageKey={activePage} currentCompany={company} can={p.can} />}

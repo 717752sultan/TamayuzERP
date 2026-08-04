@@ -140,6 +140,7 @@ const CANONICAL_HR_PAGE_KEYS = [
   "hr_circulars",
   "hr_complaints",
   "hr_termination",
+  "hr_documents",
   "hr_reports",
 ];
 

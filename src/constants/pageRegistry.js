@@ -53,7 +53,7 @@ const hrPageKeys = new Set([
   "reports_center", "audit_logs", "hr_home", "hr_employees_full", "hr_reports", "hr_reports_full", "hr_requests_approvals", "hr_requests", "hr_performance_full", "hr_incentives_full",
   "hr_attendance_payroll", "hr_salary", "hr_disciplinary", "hr_recruitment_full", "hr_leaves", "hr_complaints", "hr_circulars", "hr_termination",
   "hr_surveys", "hr_insurance", "hr_announcements", "hr_files", "hr_contracts", "hr_custodies", "hr_training", "hr_approvals", "hr_org_chart", "hr_settings_full",
-  "hr_financial_setup", "hr_templates_full", "hr_settings", "employee_app_settings", "ai_assistant", "theme_settings",
+  "hr_financial_setup", "hr_templates_full", "hr_settings", "employee_app_settings", "ai_assistant", "theme_settings", "hr_documents",
 ]);
 
 const pageActionOverrides = {
@@ -104,6 +104,7 @@ const navigationMetadata = {
   hr_org_chart: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 5 },
   hr_contracts: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 6 },
   hr_files: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 7 },
+  hr_documents: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 7.5 },
   guarantees: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 8 },
   hr_custodies: { navGroupKey: "hr_employees", navGroupLabel: "إدارة الموظفين", navGroupOrder: 2, navItemOrder: 9 },
   daily_operations: { navGroupKey: "hr_attendance", navGroupLabel: "الحضور والدوام", navGroupOrder: 3, navItemOrder: 1 },
@@ -313,7 +314,7 @@ export const pageRegistry = [
   { key: "system_settings", label: "الإعدادات العامة", aliases: ["إعدادات النظام العامة"], icon: "Settings", group: "settings", groupLabel: "إعدادات", permissionKey: "system.settings", moduleKey: "system", moduleLabel: "النظام", routeKey: "system_settings", order: 24, isOfficialPage: true, isDuplicateAllowed: false, status: "active", defaultEnabled: true },
   { key: "hr_home", label: "الرئيسية", aliases: ["رئيسية الموارد البشرية"], icon: "LayoutDashboard", group: "core", groupLabel: "أساسية", permissionKey: "hr_home", moduleKey: "hr_home", order: 101, isOfficialPage: true, isDuplicateAllowed: false },
   { key: "hr_requests_approvals", label: "الطلبات والموافقات", aliases: ["طلبات الموارد البشرية", "الموافقات"], icon: "ClipboardList", group: "hr", groupLabel: "موارد بشرية", permissionKey: "hr.requests_approvals", moduleKey: "hr_requests_approvals", order: 106, isOfficialPage: true, isDuplicateAllowed: false },
-  { key: "hr_reports", label: "تقارير الموارد البشرية", aliases: ["تقارير HR"], icon: "FileBarChart", group: "reports", groupLabel: "تقارير", permissionKey: "hr.reports", moduleKey: "hr_reports", order: 122, isOfficialPage: true, isDuplicateAllowed: false },
+  { key: "hr_reports", label: "تقارير الموارد البشرية", aliases: ["تقارير HR"], icon: "FileBarChart", group: "reports", groupLabel: "تقارير", permissionKey: "hr.reports", moduleKey: "hr", order: 122, isOfficialPage: true, isDuplicateAllowed: false },
   { key: "hr_settings", label: "إعدادات الموارد البشرية", aliases: ["إعدادات HR"], icon: "Settings", group: "settings", groupLabel: "إعدادات", permissionKey: "hr.settings", moduleKey: "hr_settings", order: 123, isOfficialPage: true, isDuplicateAllowed: false },
   { key: "employee_app_settings", label: "إعدادات تطبيق الموظف", aliases: ["بوابة الموظف", "تطبيق الموظف"], icon: "Smartphone", group: "settings", groupLabel: "إعدادات", permissionKey: "employee_app_settings", moduleKey: "employee_app_settings", order: 123.5, isOfficialPage: true, isDuplicateAllowed: false, status: "active" },
   { key: "hr_employees_full", label: "قائمة الموظفين", aliases: ["قائمة موظفين كاملة"], icon: "Users", group: "hr", groupLabel: "موارد بشرية", permissionKey: "hr_employees_full", moduleKey: "hr_employees_full", order: 102, isOfficialPage: false, isDuplicateAllowed: false, status: "alias", defaultEnabled: false },
@@ -342,6 +343,7 @@ export const pageRegistry = [
   { key: "hr_insurance", label: "التأمينات", aliases: ["التأمين"], icon: "ShieldCheck", group: "hr", groupLabel: "موارد بشرية", permissionKey: "insurance", moduleKey: "insurance", order: 116, isOfficialPage: true, isDuplicateAllowed: false },
   { key: "hr_announcements", label: "قسم الإعلانات", aliases: ["الإعلانات"], icon: "Bell", group: "hr", groupLabel: "موارد بشرية", permissionKey: "announcements", moduleKey: "announcements", order: 117, isOfficialPage: true, isDuplicateAllowed: false },
   { key: "hr_files", label: "إدارة الملفات", aliases: ["ملفات الموظفين"], icon: "FileSpreadsheet", group: "hr", groupLabel: "موارد بشرية", permissionKey: "files", moduleKey: "files", order: 118, isOfficialPage: true, isDuplicateAllowed: false },
+  { key: "hr_documents", label: "مركز خطابات وتقارير الموارد البشرية", aliases: ["مركز الخطابات والتقارير"], icon: "FileText", group: "hr", groupLabel: "موارد بشرية", permissionKey: "hr_documents", moduleKey: "hr", order: 118.5, isOfficialPage: true, isDuplicateAllowed: false, defaultEnabled: true },
   { key: "hr_contracts", label: "العقود", aliases: ["عقود الموظفين"], icon: "ClipboardList", group: "hr", groupLabel: "موارد بشرية", permissionKey: "contracts", moduleKey: "contracts", order: 119, isOfficialPage: true, isDuplicateAllowed: false },
   { key: "hr_custodies", label: "العهد", aliases: ["عهد الموظفين"], icon: "Wallet", group: "hr", groupLabel: "موارد بشرية", permissionKey: "custodies", moduleKey: "custodies", order: 120, isOfficialPage: true, isDuplicateAllowed: false },
   { key: "hr_training", label: "التدريب", aliases: ["التدريب والتطوير"], icon: "Star", group: "hr", groupLabel: "موارد بشرية", permissionKey: "training", moduleKey: "training", order: 121, isOfficialPage: true, isDuplicateAllowed: false },
